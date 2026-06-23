@@ -1,0 +1,25 @@
+# Rust
+/target/
+**/*.rs.bk
+
+# Node
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Models (large binaries — add pinned artifacts explicitly when ready)
+models/**/*.onnx
+models/**/*.onnx.data
+
+# WASM build output
+packages/wasm-minilm/dist/
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+*.log
+
+# Env
+.env
+.env.*

@@ -1,0 +1,12 @@
+[package]
+name = "anki-wasm-minilm"
+description = "sqlite-anki WASM build with all-MiniLM-L6-v2 bundled"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["staticlib"]
+
+[dependencies]
+anki-core = { path = "../anki-core" }

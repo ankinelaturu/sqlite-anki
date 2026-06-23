@@ -22,13 +22,14 @@ This document captures the full design for **sqlite-anki**: a SQLite extension t
 14. [JavaScript integration](#14-javascript-integration)
 15. [Sync, async, and workers](#15-sync-async-and-workers)
 16. [Model changes and reindexing](#16-model-changes-and-reindexing)
-17. [Package layout (proposed)](#17-package-layout-proposed)
-18. [Persistence (OPFS)](#18-persistence-opfs)
-19. [Technology stack](#19-technology-stack)
-20. [Implementation roadmap](#20-implementation-roadmap)
-21. [Tradeoffs and decisions](#21-tradeoffs-and-decisions)
-22. [Future work](#22-future-work)
-23. [References](#23-references)
+17. [Package layout and workspace](#17-package-layout-and-workspace)
+18. [Explorer test app](#18-explorer-test-app)
+19. [Persistence (OPFS)](#19-persistence-opfs)
+20. [Technology stack](#20-technology-stack)
+21. [Implementation roadmap](#21-implementation-roadmap)
+22. [Tradeoffs and decisions](#22-tradeoffs-and-decisions)
+23. [Future work](#23-future-work)
+24. [References](#24-references)
 
 ---
 
@@ -689,30 +690,106 @@ Embeddings are incompatible. Detect `build_id` mismatch in `anki_meta` and requi
 
 ---
 
-## 17. Package layout (proposed)
+## 17. Package layout and workspace
+
+Monorepo: **Rust workspace** (extension) + **pnpm workspace** (TypeScript packages and apps).
 
 ```
 sqlite-anki/
+├── Cargo.toml                    # Rust workspace root
+├── package.json                  # pnpm workspace root
+├── pnpm-workspace.yaml
 ├── crates/
-│   ├── anki-core/              # Rust: vtab module, Tract embedder, hnsw_rs, SQL functions
-│   ├── anki-wasm-minilm/       # include_bytes! for MiniLM; links into SQLite WASM
-│   └── anki-wasm-bge/          # optional second model build
+│   ├── anki-core/                # vtab module, Tract embedder, hnsw_rs
+│   └── anki-wasm-minilm/         # include_bytes! model; links into SQLite WASM
 ├── wasm/
 │   ├── sqlite3_wasm_extra_init.c
-│   └── Makefile
+│   └── README.md                 # build instructions (Makefile when wired)
 ├── models/
-│   └── all-MiniLM-L6-v2/
-│       ├── model.onnx
-│       ├── tokenizer.json
-│       └── config.json
-├── README.md
-└── docs/
-    └── DESIGN.md
+│   └── all-MiniLM-L6-v2/         # ONNX + tokenizer (not committed until pinned)
+├── packages/
+│   ├── wasm-minilm/              # @sqlite-anki/wasm-minilm — sqlite3.js + .wasm
+│   └── db-client/                # @sqlite-anki/db-client — worker + schema + CRUD
+├── apps/
+│   └── explorer/                 # @sqlite-anki/explorer — SPA test harness
+├── scripts/
+│   └── build-wasm.sh
+├── docs/
+│   └── DESIGN.md
+└── README.md
+```
+
+| Path | Role |
+|------|------|
+| `crates/` | Rust sqlite-anki extension (no UI) |
+| `packages/wasm-minilm/` | WASM bundle consumed by apps; stub uses `@sqlite.org/sqlite-wasm` until custom build |
+| `packages/db-client/` | Typed TS API: OPFS worker, schema introspection, CRUD, semantic search |
+| `apps/explorer/` | Two-panel SPA for manual testing |
+| `scripts/build-wasm.sh` | Builds custom WASM and copies into `packages/wasm-minilm/dist/` |
+
+---
+
+## 18. Explorer test app
+
+`apps/explorer` is the **integration test harness** for sqlite-anki in the browser.
+
+### Layout
+
+```
+┌────────────────────────────────────────────────────────────┐
+│  sqlite-anki Explorer                                       │
+├──────────────────┬─────────────────────────────────────────┤
+│  Schema tree     │  Data grid + toolbar                     │
+│  (tables/cols)   │  (CRUD, semantic search for VECTOR cols) │
+└──────────────────┴─────────────────────────────────────────┘
+```
+
+### Left panel — schema explorer
+
+- Tree of tables from `sqlite_master` (user tables only).
+- Children: columns from `PRAGMA table_info`, with **TEXT VECTOR** badges.
+- Selecting a table loads its data in the right panel.
+
+### Right panel — data grid
+
+| Feature | SQL |
+|---------|-----|
+| List rows | `SELECT rowid, * FROM table LIMIT …` |
+| Inline edit | `UPDATE … SET col = ? WHERE rowid = ?` |
+| Add row | `INSERT INTO …` |
+| Delete row | `DELETE FROM … WHERE rowid = ?` |
+
+When a `TEXT VECTOR` column is present, a **semantic search bar** runs:
+
+```sql
+SELECT rowid, * FROM t
+WHERE col MATCH ?
+ORDER BY similarity(col) DESC
+LIMIT 20;
+```
+
+(requires sqlite-anki extension in the WASM build)
+
+### Architecture
+
+```
+apps/explorer  →  packages/db-client  →  Web Worker  →  sqlite3.wasm (OPFS)
+```
+
+- Vite dev server sets **COOP/COEP** headers required for OPFS.
+- Worker uses `@sqlite-anki/wasm-minilm` (custom build when available).
+
+### Commands
+
+```bash
+pnpm install
+pnpm dev          # explorer at http://localhost:5173
+pnpm build:wasm   # custom sqlite-anki WASM (when toolchain ready)
 ```
 
 ---
 
-## 18. Persistence (OPFS)
+## 19. Persistence (OPFS)
 
 v1 requires **browser database persistence**. Use the official SQLite WASM **OPFS VFS** so data (virtual table rows, vector storage, serialized HNSW) survives page reloads.
 
@@ -733,7 +810,7 @@ The v0 spike may use `:memory:` only. v1 ships with OPFS as the default persiste
 
 ---
 
-## 19. Technology stack
+## 20. Technology stack
 
 Locked-in choices for implementation:
 
@@ -751,7 +828,7 @@ Locked-in choices for implementation:
 
 ---
 
-## 20. Implementation roadmap
+## 21. Implementation roadmap
 
 ### v0 spike — prove WASM stack (throwaway prototype)
 
@@ -769,6 +846,12 @@ Validate the risky parts before building the full virtual table:
 - `INSERT` + literal `MATCH`
 - No OPFS, no parameterized queries yet
 
+### Explorer app (parallel track)
+
+- Schema tree + CRUD grid on stock SQLite WASM (current)
+- Wire semantic search when custom `anki` WASM is available
+- Seed demo `CREATE VIRTUAL TABLE … USING anki(…)` from UI
+
 ### v1 — shippable release
 
 - `CREATE VIRTUAL TABLE ... USING anki(...)`
@@ -781,7 +864,7 @@ Validate the risky parts before building the full virtual table:
 
 ---
 
-## 21. Tradeoffs and decisions
+## 22. Tradeoffs and decisions
 
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
@@ -815,7 +898,7 @@ Validate the risky parts before building the full virtual table:
 
 ---
 
-## 22. Future work
+## 23. Future work
 
 - [ ] Normal `CREATE TABLE` with `TEXT VECTOR` (auto-shadow + hooks) for nicer DX
 - [ ] Dynamic model selection and OPFS model file cache
@@ -828,7 +911,7 @@ Validate the risky parts before building the full virtual table:
 
 ---
 
-## 23. References
+## 24. References
 
 | Resource | URL |
 |----------|-----|

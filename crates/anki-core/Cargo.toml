@@ -1,0 +1,12 @@
+[package]
+name = "anki-core"
+description = "sqlite-anki extension core: virtual table, embeddings, and HNSW"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["rlib", "staticlib"]
+
+[dependencies]
+thiserror.workspace = true
