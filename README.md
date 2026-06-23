@@ -13,12 +13,14 @@ Semantic text search for SQLite in the browser (WebAssembly).
 ## Quick summary
 
 - **Tables:** `CREATE VIRTUAL TABLE ... USING anki(...)` (v1)
-- **Column type:** `TEXT VECTOR` — stores text; embeddings generated on insert/update
-- **Search:** `WHERE column MATCH 'query'` — semantic matching (default similarity ≥ 0.5)
+- **Column type:** `TEXT VECTOR` — multiple per table supported; one HNSW index each
+- **Search:** `WHERE column MATCH 'query'` or `MATCH ?` — default similarity ≥ 0.5
 - **Scoring:** `similarity(column)` — computed at query time (not a stored column)
-- **Indexing:** HNSW with a fixed internal candidate cap of **256**; use SQL `LIMIT` for result count
-- **Runtime:** Rust extension statically linked into [official SQLite WASM](https://sqlite.org/wasm)
-- **v1 model strategy:** Pre-bundle one model per WASM build (e.g. `@sqlite-anki/all-MiniLM-L6-v2`)
+- **NULL / `''`:** no embedding; excluded from `MATCH`; `similarity()` returns `NULL`
+- **Indexing:** HNSW (`hnsw_rs`), internal candidate cap **256**; use SQL `LIMIT` for result count
+- **Stack:** Rust + Tract (ONNX) + tokenizers + official SQLite WASM
+- **Persistence:** OPFS (`OpfsDb`) in v1
+- **Model:** Pre-bundled per WASM package (e.g. `@sqlite-anki/all-MiniLM-L6-v2`)
 
 ## Example
 
@@ -33,7 +35,7 @@ VALUES ('Acme Corp', 'Discussed renewal — potential upsell opportunity in Q3')
 
 SELECT customer_name
 FROM customers
-WHERE notes MATCH 'potential opportunity'
+WHERE notes MATCH ?
   AND similarity(notes) > 0.6
 ORDER BY similarity(notes) DESC
 LIMIT 10;
@@ -43,8 +45,8 @@ LIMIT 10;
 import sqlite3Init from '@sqlite-anki/all-MiniLM-L6-v2';
 
 const sqlite3 = await sqlite3Init();
-const db = new sqlite3.oo1.DB();
-// SQL above works immediately — no model install step in v1
+const db = new sqlite3.oo1.OpfsDb('/customers.db');
+// bind 'potential opportunity' for MATCH ? in app code
 ```
 
 ## Key decisions (v1)
@@ -55,7 +57,9 @@ const db = new sqlite3.oo1.DB();
 | Default `MATCH` threshold | Cosine similarity ≥ **0.5** (override with `similarity(col) > X`) |
 | ANN candidate cap | Fixed **256** internally; use SQL `LIMIT` for result count |
 | Configuration | No custom PRAGMAs |
-| Model | Pre-bundled per WASM package (e.g. `all-MiniLM-L6-v2`) |
+| ONNX / HNSW | **Tract** + **hnsw_rs** |
+| Persistence | **OPFS** |
+| Model | Pre-bundled quantized `all-MiniLM-L6-v2` per WASM package |
 
 ## Status
 

@@ -23,9 +23,12 @@ This document captures the full design for **sqlite-anki**: a SQLite extension t
 15. [Sync, async, and workers](#15-sync-async-and-workers)
 16. [Model changes and reindexing](#16-model-changes-and-reindexing)
 17. [Package layout (proposed)](#17-package-layout-proposed)
-18. [Tradeoffs and decisions](#18-tradeoffs-and-decisions)
-19. [Future work](#19-future-work)
-20. [References](#20-references)
+18. [Persistence (OPFS)](#18-persistence-opfs)
+19. [Technology stack](#19-technology-stack)
+20. [Implementation roadmap](#20-implementation-roadmap)
+21. [Tradeoffs and decisions](#21-tradeoffs-and-decisions)
+22. [Future work](#22-future-work)
+23. [References](#23-references)
 
 ---
 
@@ -41,7 +44,8 @@ A SQLite extension called **sqlite-anki** that:
 4. Exposes `similarity(column)` for per-query threshold overrides, filtering, and ordering.
 5. Uses HNSW for approximate nearest-neighbor (ANN) search.
 6. Runs entirely inside WebAssembly in the browser using the **official SQLite WASM** build.
-7. Performs inference in **Rust** (ONNX via Tract or similar) — **no JavaScript callbacks during SQL execution**.
+7. Performs inference in **Rust** (ONNX via **Tract**) — **no JavaScript callbacks during SQL execution**.
+8. Persists databases in the browser via **OPFS** (official SQLite WASM OPFS VFS).
 
 ### What we are not building (initially)
 
@@ -137,6 +141,57 @@ LIMIT 10;
 ```
 
 `LIMIT` controls the **final result count**. It is separate from the internal HNSW candidate cap (256).
+
+### Parameterized `MATCH`
+
+Bound parameters must work in real applications:
+
+```sql
+SELECT customer_name
+FROM customers
+WHERE notes MATCH ?;
+```
+
+The virtual table module receives the query text from `xFilter` whether it comes from a string literal or a bound parameter.
+
+### Multiple `TEXT VECTOR` columns
+
+A single virtual table may declare multiple semantic columns. Each gets its own HNSW index.
+
+```sql
+CREATE VIRTUAL TABLE docs USING anki(
+  title  TEXT VECTOR,
+  body   TEXT VECTOR,
+  author TEXT
+);
+
+SELECT title
+FROM docs
+WHERE title MATCH 'quarterly results'
+  AND body MATCH 'revenue growth';
+```
+
+| Rule | Behavior |
+|------|----------|
+| Indexes | One HNSW index per `TEXT VECTOR` column |
+| `WHERE title MATCH 'x'` | Searches the title index only |
+| `WHERE body MATCH 'y'` | Searches the body index only |
+| Both in one query | Two independent searches; combined with `AND` |
+| `similarity(title)` | Score against the `title` column's `MATCH` query |
+| `similarity(body)` | Score against the `body` column's `MATCH` query |
+
+### `NULL` and empty text
+
+| Value | Embedding | `MATCH` | `similarity(column)` |
+|-------|-----------|---------|----------------------|
+| `NULL` | None stored | Row excluded | `NULL` |
+| `''` (empty string) | None stored | Row excluded | `NULL` |
+
+Non-empty text is embedded on insert/update. Setting a column to `NULL` or `''` removes its vector from storage and the HNSW index.
+
+### `similarity()` without `MATCH`
+
+If `similarity(column)` appears without a `MATCH` on the same column in the query, it returns `NULL`.
 
 ### Introspection (optional)
 
@@ -259,8 +314,9 @@ CREATE VIRTUAL TABLE docs USING anki(
 );
 ```
 
-- `TEXT VECTOR` → semantic column; text stored, embedding managed internally.
+- `TEXT VECTOR` → semantic column; text stored, embedding managed internally; one HNSW index per column.
 - Other types → stored and returned as normal virtual table columns.
+- Multiple `TEXT VECTOR` columns per table are **required** in v1.
 
 ---
 
@@ -328,6 +384,9 @@ xUpdate receives new column values
 For each changed TEXT VECTOR column:
         │
         ▼
+If value is NULL or '' → remove vector + HNSW entry; skip embedding
+        │
+        ▼
 Tokenize (Rust tokenizers crate)
         │
         ▼
@@ -388,13 +447,11 @@ Because the virtual table module owns `MATCH`, HNSW drives row production direct
 
 Exact brute-force similarity is O(n) per query. HNSW (Hierarchical Navigable Small World) provides fast approximate nearest-neighbor search, suitable for interactive browser use.
 
-### Rust crate options
+### Chosen crate: `hnsw_rs`
 
-| Crate | Notes |
-|-------|-------|
-| [usearch](https://crates.io/crates/usearch) | Mature HNSW; used by sqlite-vector-rs |
-| [hnsw_rs](https://crates.io/crates/hnsw_rs) | Pure Rust HNSW |
-| [vector-lite](https://crates.io/crates/vector-lite) | Compact; WASM support |
+v1 uses **[hnsw_rs](https://crates.io/crates/hnsw_rs)** — pure Rust HNSW with a straightforward `wasm32-unknown-unknown` story. [usearch](https://crates.io/crates/usearch) is excellent on native/desktop but its C++ core makes browser WASM integration harder; it is not used in v1.
+
+One `hnsw_rs` index is maintained per `TEXT VECTOR` column per virtual table. Indexes are serialized to the database backing store and rebuilt on load if needed.
 
 ### Fixed internal parameters (v1)
 
@@ -420,15 +477,30 @@ Example: HNSW may retrieve 256 candidates, 40 pass the ≥ 0.5 threshold, `LIMIT
 
 ## 10. Embedding and inference
 
-### Stack
+### Stack (chosen)
 
-| Component | Role |
-|-----------|------|
-| **Rust** | Extension implementation language |
-| **Tract** (or `ort` + Emscripten) | ONNX inference inside WASM |
-| **tokenizers** crate | HuggingFace-compatible tokenization |
-| **ONNX model** | Pre-converted sentence embedding model |
-| **tokenizer.json** | Bundled alongside ONNX |
+| Component | Crate / artifact | Role |
+|-----------|------------------|------|
+| Extension API | `sqlite3_ext` / `ext-sqlite3-rs` | Virtual table module, SQL functions |
+| ONNX inference | **[Tract](https://github.com/sonos/tract)** (`tract-onnx`) | Pure Rust; single WASM module with SQLite |
+| Tokenization | **tokenizers** | HuggingFace-compatible `tokenizer.json` |
+| HNSW | **hnsw_rs** | Per-column approximate nearest-neighbor index |
+| Model | **quantized `model.onnx`** | Pinned in `models/all-MiniLM-L6-v2/` |
+
+Tract is chosen over ONNX Runtime (`ort`) because it compiles cleanly to `wasm32-unknown-unknown` without a separate Emscripten C++ WASM module or JS bridge.
+
+### ONNX artifact
+
+Ship a **quantized** ONNX export of `sentence-transformers/all-MiniLM-L6-v2` in the repo:
+
+```
+models/all-MiniLM-L6-v2/
+  model.onnx        # INT8 or dynamic-quantized (~20–25 MB)
+  tokenizer.json
+  config.json       # pooling=mean, dim=384
+```
+
+Pin the exact ONNX file in version control. Add a golden test: fixed input string → expected embedding (hash or first N floats) to catch model drift across builds.
 
 ### Default model: `all-MiniLM-L6-v2`
 
@@ -470,9 +542,9 @@ There are three strategies. **v1 uses Strategy C.**
 
 The app fetches ONNX + tokenizer and passes bytes to the extension once at init. Not used in v1.
 
-### Strategy B — Extension reads from OPFS
+### Strategy B — Extension reads model from OPFS
 
-Extension loads model files from OPFS via the SQLite VFS. Deferred to v2.
+Extension loads model files from OPFS via a custom path. Deferred to v2 (v1 bundles the model in WASM).
 
 ### Strategy C — Pre-bundled per WASM build (v1)
 
@@ -558,7 +630,8 @@ pub extern "C" fn sqlite3_anki_init(
 import sqlite3Init from '@sqlite-anki/all-MiniLM-L6-v2';
 
 const sqlite3 = await sqlite3Init();
-const db = new sqlite3.oo1.DB(':memory:');
+// OPFS-backed persistence (official SQLite WASM OPFS VFS)
+const db = new sqlite3.oo1.OpfsDb('/customers.db');
 
 db.exec(`
   CREATE VIRTUAL TABLE customers USING anki(
@@ -621,7 +694,7 @@ Embeddings are incompatible. Detect `build_id` mismatch in `anki_meta` and requi
 ```
 sqlite-anki/
 ├── crates/
-│   ├── anki-core/              # Rust: vtab module, embedder, HNSW, SQL functions
+│   ├── anki-core/              # Rust: vtab module, Tract embedder, hnsw_rs, SQL functions
 │   ├── anki-wasm-minilm/       # include_bytes! for MiniLM; links into SQLite WASM
 │   └── anki-wasm-bge/          # optional second model build
 ├── wasm/
@@ -639,22 +712,95 @@ sqlite-anki/
 
 ---
 
-## 18. Tradeoffs and decisions
+## 18. Persistence (OPFS)
+
+v1 requires **browser database persistence**. Use the official SQLite WASM **OPFS VFS** so data (virtual table rows, vector storage, serialized HNSW) survives page reloads.
+
+```javascript
+import sqlite3Init from '@sqlite-anki/all-MiniLM-L6-v2';
+
+const sqlite3 = await sqlite3Init();
+const db = new sqlite3.oo1.OpfsDb('/my-app.db');
+```
+
+| Storage | v1 |
+|---------|-----|
+| Database file | OPFS via `OpfsDb` |
+| Embedding model | Pre-bundled in WASM (`include_bytes!`) |
+| Model files on OPFS | Deferred to v2 (dynamic model selection) |
+
+The v0 spike may use `:memory:` only. v1 ships with OPFS as the default persistence story.
+
+---
+
+## 19. Technology stack
+
+Locked-in choices for implementation:
+
+| Layer | Choice | Why |
+|-------|--------|-----|
+| Language | Rust | WASM extension + inference in one module |
+| SQLite | Official WASM (Emscripten) | OPFS, workers, long-term support |
+| Extension API | `sqlite3_ext` | Virtual table module |
+| ONNX runtime | **Tract** | Pure Rust; `wasm32-unknown-unknown` |
+| Tokenizer | **tokenizers** | `tokenizer.json` from HuggingFace |
+| ANN index | **hnsw_rs** | Pure Rust; avoids C++/WASM friction |
+| Default model | Quantized **all-MiniLM-L6-v2** ONNX | 384d; ~20–25 MB; good browser default |
+| Model delivery | Pre-bundled per WASM package | No install step |
+| DB persistence | **OPFS** | Browser durability |
+
+---
+
+## 20. Implementation roadmap
+
+### v0 spike — prove WASM stack (throwaway prototype)
+
+Validate the risky parts before building the full virtual table:
+
+1. Rust `wasm32` crate with `include_bytes!("model.onnx")` + `tokenizer.json`
+2. Tract: embed one fixed string → 384-dim vector
+3. hnsw_rs: insert a few vectors → query top-5
+4. Optional: link into minimal SQLite WASM build
+
+### v0.1 — minimal virtual table
+
+- `:memory:` database only
+- One `TEXT VECTOR` column
+- `INSERT` + literal `MATCH`
+- No OPFS, no parameterized queries yet
+
+### v1 — shippable release
+
+- `CREATE VIRTUAL TABLE ... USING anki(...)`
+- Multiple `TEXT VECTOR` columns (one HNSW index each)
+- Parameterized `MATCH` (`MATCH ?`)
+- `NULL` / `''` rules
+- OPFS persistence (`OpfsDb`)
+- Pre-bundled `@sqlite-anki/all-MiniLM-L6-v2` npm package
+- Golden embedding test (pinned ONNX)
+
+---
+
+## 21. Tradeoffs and decisions
 
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
-| Language | Rust | WASM-friendly; ONNX via Tract |
+| Language | Rust | WASM-friendly; Tract + hnsw_rs in one module |
 | SQLite distribution | Official WASM | OPFS, workers, long-term support |
 | Extension loading | Static link | Only option in browser |
 | User DDL (v1) | `CREATE VIRTUAL TABLE ... USING anki` | Planner-integrated `MATCH` + HNSW |
 | Search syntax | `MATCH` + `similarity()` | Familiar FTS-like ergonomics |
+| Parameterized `MATCH` | Required in v1 | Real apps use bound parameters |
+| Multiple vector columns | Required in v1 | One HNSW index per column |
+| `NULL` / `''` | No embedding; excluded from `MATCH` | Clear semantics |
 | Default threshold | Similarity ≥ 0.5 | Built into `MATCH`; override in `WHERE` |
 | ANN candidate cap | 256 (fixed internal) | Good recall for browser-scale data |
 | Result count | SQL `LIMIT` | Standard, user-controlled |
 | Configuration | No PRAGMAs | Extensions cannot add PRAGMAs without custom VFS |
-| ANN algorithm | HNSW | Fast enough for interactive browser queries |
+| ONNX runtime | Tract | Pure Rust WASM |
+| HNSW | hnsw_rs | Pure Rust WASM |
 | v1 model delivery | Pre-bundled per WASM | Simplest; no install step |
-| Inference runtime | Rust/Tract, not Xenova | No JS on hot path |
+| DB persistence | OPFS | Required for browser v1 |
 | Threading | Worker | Sync inference blocks; keep off main thread |
 
 ### Known limitations
@@ -669,19 +815,20 @@ sqlite-anki/
 
 ---
 
-## 19. Future work
+## 22. Future work
 
 - [ ] Normal `CREATE TABLE` with `TEXT VECTOR` (auto-shadow + hooks) for nicer DX
-- [ ] Dynamic model selection and OPFS model cache
+- [ ] Dynamic model selection and OPFS model file cache
 - [ ] Per-column model override in column definitions
 - [ ] Native (non-WASM) loadable extension for desktop SQLite
 - [ ] Quantized embedding storage (float16) to reduce disk use
 - [ ] `anki_explain(query)` — embedding time, HNSW stats, candidate count
 - [ ] Optional custom PRAGMA syntax via JS wrapper sugar (not raw extension)
+- [ ] Evaluate usearch on native desktop builds
 
 ---
 
-## 20. References
+## 23. References
 
 | Resource | URL |
 |----------|-----|
@@ -691,8 +838,8 @@ sqlite-anki/
 | sqlite-vec WASM | https://alexgarcia.xyz/sqlite-vec/wasm.html |
 | sqlite-rust-wasm | https://github.com/tantaman/sqlite-rust-wasm |
 | Tract (Rust ONNX) | https://github.com/sonos/tract |
+| hnsw_rs | https://crates.io/crates/hnsw_rs |
 | all-MiniLM-L6-v2 | https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2 |
-| usearch (HNSW) | https://github.com/unum-cloud/usearch |
 
 ---
 
