@@ -8,13 +8,13 @@ This document captures the full design for **sqlite-anki**: a SQLite extension t
 
 1. [Goals](#1-goals)
 2. [User-facing SQL API](#2-user-facing-sql-api)
-3. [Architecture overview](#3-architecture-overview)
-4. [Storage model](#4-storage-model)
-5. [Write path](#5-write-path)
-6. [Read path and query execution](#6-read-path-and-query-execution)
-7. [HNSW indexing](#7-hnsw-indexing)
-8. [MATCH on normal tables](#8-match-on-normal-tables)
-9. [Configuration (PRAGMAs)](#9-configuration-pragmas)
+3. [Defaults and query semantics](#3-defaults-and-query-semantics)
+4. [Architecture overview](#4-architecture-overview)
+5. [Virtual table module](#5-virtual-table-module)
+6. [Storage model](#6-storage-model)
+7. [Write path](#7-write-path)
+8. [Read path and query execution](#8-read-path-and-query-execution)
+9. [HNSW indexing](#9-hnsw-indexing)
 10. [Embedding and inference](#10-embedding-and-inference)
 11. [Model loading strategies](#11-model-loading-strategies)
 12. [v1 approach: pre-bundled WASM per model](#12-v1-approach-pre-bundled-wasm-per-model)
@@ -35,10 +35,10 @@ This document captures the full design for **sqlite-anki**: a SQLite extension t
 
 A SQLite extension called **sqlite-anki** that:
 
-1. Introduces a `TEXT VECTOR` column type for declarative semantic text columns.
+1. Provides an `anki` virtual table module with `TEXT VECTOR` columns.
 2. Automatically generates and stores embeddings when text is inserted or updated.
 3. Supports semantic search via `WHERE column MATCH 'query text'`.
-4. Exposes `similarity(column)` for score-based filtering and ordering.
+4. Exposes `similarity(column)` for per-query threshold overrides, filtering, and ordering.
 5. Uses HNSW for approximate nearest-neighbor (ANN) search.
 6. Runs entirely inside WebAssembly in the browser using the **official SQLite WASM** build.
 7. Performs inference in **Rust** (ONNX via Tract or similar) — **no JavaScript callbacks during SQL execution**.
@@ -46,6 +46,8 @@ A SQLite extension called **sqlite-anki** that:
 ### What we are not building (initially)
 
 - Keyword full-text search (FTS5). `MATCH` here means **semantic** matching.
+- Normal `CREATE TABLE` with automatic embedding (deferred to v2).
+- Custom PRAGMA statements (`PRAGMA anki_*`).
 - Dynamically loadable `.wasm` extensions at runtime (not supported in browser WASM).
 - Xenova / transformers.js for inference (those are JavaScript libraries).
 
@@ -53,28 +55,29 @@ A SQLite extension called **sqlite-anki** that:
 
 | Principle | Rationale |
 |-----------|-----------|
-| Normal `CREATE TABLE` for users | Avoid requiring `CREATE VIRTUAL TABLE ... USING anki` |
+| `CREATE VIRTUAL TABLE ... USING anki` for v1 | Lets the extension own `MATCH`, planner integration, and HNSW |
 | Native inference in WASM | Predictable performance; no JS bridge on hot path |
 | Static link into SQLite WASM | Only viable delivery model in browsers |
-| Sensible defaults | `anki_similarity`, `anki_top_k` work out of the box |
+| Sensible built-in defaults | Default similarity ≥ 0.5; internal ANN cap 256; no user config surface |
 
 ---
 
 ## 2. User-facing SQL API
 
-### Column type: `TEXT VECTOR`
+### Virtual table: `USING anki`
+
+v1 tables are created with the `anki` virtual table module:
 
 ```sql
-CREATE TABLE customers (
-  id INTEGER PRIMARY KEY,
+CREATE VIRTUAL TABLE customers USING anki(
   customer_name TEXT,
   notes TEXT VECTOR
 );
 ```
 
-`TEXT VECTOR` is not a native SQLite type. SQLite uses dynamic typing; this is a **type name** with TEXT affinity. The extension discovers columns declared as `TEXT VECTOR` via schema introspection (`sqlite3_table_column_metadata`) and manages embeddings for them automatically.
+`TEXT VECTOR` declares a semantic text column. The extension stores the plain text and manages embeddings internally. Users never insert or read raw embedding BLOBs.
 
-Users never manage embedding BLOBs directly.
+Regular `TEXT`, `INTEGER`, and other column types are supported alongside `TEXT VECTOR` columns in the same virtual table.
 
 ### Semantic search: `MATCH`
 
@@ -84,24 +87,56 @@ FROM customers
 WHERE notes MATCH 'potential opportunity';
 ```
 
-`MATCH` performs **semantic** matching: the query string is embedded, compared against stored vectors, and rows above the similarity threshold are returned.
+`MATCH` performs **semantic** matching:
 
-`MATCH` alone uses the default similarity threshold from `PRAGMA anki_similarity` (default `0.5`).
+1. The query string is embedded.
+2. HNSW retrieves up to **256** nearest candidates (fixed internal cap).
+3. Rows with cosine similarity **≥ 0.5** are returned (default threshold).
 
-### Similarity function
+To require a higher bar, add an explicit filter:
 
 ```sql
-SELECT customer_name, similarity(notes) AS score
+WHERE notes MATCH 'potential opportunity'
+  AND similarity(notes) > 0.7
+```
+
+### `similarity(column)` — not a stored column
+
+There is **no `score` column** on the table. `similarity(notes)` is a SQL **function** provided by the extension. It returns the cosine similarity (0.0–1.0) between that row's stored embedding and the current `MATCH` query embedding.
+
+It is only meaningful in queries that include a `MATCH` on the same column.
+
+```sql
+SELECT customer_name, similarity(notes)
 FROM customers
 WHERE notes MATCH 'potential opportunity'
-  AND similarity(notes) > 0.6
-ORDER BY score DESC;
+  AND similarity(notes) > 0.7
+ORDER BY similarity(notes) DESC
+LIMIT 10;
 ```
+
+`AS score` in a `SELECT` list is optional aliasing — not a table column.
 
 | Function | Behavior |
 |----------|----------|
-| `similarity(column)` | Cosine similarity between the column's stored embedding and the current query embedding (from the active `MATCH` context) |
-| Used with `MATCH` | Both operate on the same query embedding and HNSW candidate set |
+| `similarity(column)` | Cosine similarity for the row against the active `MATCH` query |
+| With `MATCH` | Both use the same query embedding and HNSW candidate set |
+
+`MATCH` alone does **not** guarantee result order. Use `ORDER BY similarity(column) DESC` for best-first results.
+
+### `LIMIT`
+
+Use standard SQL `LIMIT` to cap how many rows are returned:
+
+```sql
+SELECT customer_name
+FROM customers
+WHERE notes MATCH 'potential opportunity'
+ORDER BY similarity(notes) DESC
+LIMIT 10;
+```
+
+`LIMIT` controls the **final result count**. It is separate from the internal HNSW candidate cap (256).
 
 ### Introspection (optional)
 
@@ -114,11 +149,7 @@ SELECT anki_version();  -- extension version
 ### Full example
 
 ```sql
-PRAGMA anki_similarity = 0.5;
-PRAGMA anki_top_k = 20;
-
-CREATE TABLE customers (
-  id INTEGER PRIMARY KEY,
+CREATE VIRTUAL TABLE customers USING anki(
   customer_name TEXT,
   notes TEXT VECTOR
 );
@@ -130,118 +161,171 @@ INSERT INTO customers (customer_name, notes) VALUES
 SELECT customer_name
 FROM customers
 WHERE notes MATCH 'potential opportunity'
-  AND similarity(notes) > 0.6;
+  AND similarity(notes) > 0.6
+ORDER BY similarity(notes) DESC
+LIMIT 10;
 ```
 
 ---
 
-## 3. Architecture overview
+## 3. Defaults and query semantics
+
+There are **no custom PRAGMAs** in v1. SQLite extensions cannot register arbitrary `PRAGMA` statements without a custom VFS; we do not use that approach.
+
+All defaults are **built into query semantics**:
+
+| Default | Value | How to override |
+|---------|-------|-----------------|
+| `MATCH` similarity threshold | **≥ 0.5** (cosine similarity) | `AND similarity(column) > X` in `WHERE` |
+| HNSW candidate cap | **256** (fixed, internal) | Not user-configurable in v1 |
+| Result count | Unlimited | SQL `LIMIT N` |
+| Result order | Undefined | `ORDER BY similarity(column) DESC` |
+
+### Query pipeline
+
+```
+query text
+  → embed once → query vector
+  → HNSW: nearest 256 candidates
+  → filter: similarity >= 0.5 (or stricter per-query threshold)
+  → ORDER BY similarity(column) DESC  (if requested)
+  → SQL LIMIT  (if present)
+```
+
+If both the default threshold and an explicit filter apply, the **stricter** condition wins (e.g. `MATCH` at 0.5 plus `similarity(notes) > 0.7` → only rows above 0.7).
+
+---
+
+## 4. Architecture overview
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │  User SQL                                                        │
-│  CREATE TABLE ... notes TEXT VECTOR                              │
-│  INSERT / UPDATE                                                 │
+│  CREATE VIRTUAL TABLE ... USING anki(...)                        │
+│  INSERT / UPDATE / DELETE                                        │
 │  WHERE notes MATCH '...' AND similarity(notes) > 0.6             │
+│  ORDER BY similarity(notes) DESC LIMIT 10                        │
 └────────────────────────────┬────────────────────────────────────┘
                              │
 ┌────────────────────────────▼────────────────────────────────────┐
 │  sqlite-anki extension (Rust, inside sqlite3.wasm)               │
 │                                                                  │
-│  ┌──────────────┐  ┌──────────────┐  ┌────────────────────────┐ │
-│  │ Write hooks  │  │ Embedder     │  │ Query layer            │ │
-│  │ preupdate /  │→ │ tokenizer +  │  │ match() + similarity() │ │
-│  │ commit       │  │ ONNX/Tract   │  │ + query-scoped ANN     │ │
-│  └──────┬───────┘  └──────────────┘  └───────────┬────────────┘ │
-│         │                                         │              │
-│         ▼                                         ▼              │
+│  ┌──────────────────┐  ┌──────────────┐  ┌───────────────────┐  │
+│  │ anki vtab module │  │ Embedder     │  │ xBestIndex/xFilter│  │
+│  │ xCreate/xInsert  │→ │ tokenizer +  │  │ MATCH constraint  │  │
+│  │ xUpdate/xDelete  │  │ ONNX/Tract   │  │ similarity()      │  │
+│  └────────┬─────────┘  └──────────────┘  └─────────┬─────────┘  │
+│           │                                         │            │
+│           ▼                                         ▼            │
 │  ┌──────────────────────────────────────────────────────────┐   │
-│  │ Shadow storage + HNSW index (internal, not user-facing) │   │
+│  │ Per-table vector storage + HNSW index (module-internal)   │   │
 │  └──────────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-### Layers of "virtual table" machinery
-
-These are easy to conflate:
-
-| Layer | User writes? | Purpose |
-|-------|----------------|---------|
-| **A. User-facing `CREATE VIRTUAL TABLE`** | Yes | FTS5 / sqlite-vec style — **we avoid this** |
-| **B. Normal table + internal shadow storage** | No | Embeddings and HNSW hidden from the user — **we use this** |
-| **C. Internal virtual table modules** | No | Optional planner hooks — may be used internally |
-
-**Users create normal tables.** The extension maintains shadow tables and indexes internally.
+The `anki` virtual table module owns the full lifecycle: DDL, writes, vector storage, HNSW, and planner-driven `MATCH` queries.
 
 ---
 
-## 4. Storage model
+## 5. Virtual table module
+
+### Why virtual tables for v1
+
+SQLite integrates custom search semantics (including `MATCH`) through **virtual table modules**. The module receives `MATCH` constraints via `xBestIndex` / `xFilter` and can drive row production from the HNSW index directly.
+
+A normal `CREATE TABLE` with scalar `match()` functions would evaluate row-by-row and would not integrate with the query planner. That pattern is deferred to v2.
+
+This matches how FTS5, sqlite-vec, and similar extensions work.
+
+### Module responsibilities
+
+| Callback | Role |
+|----------|------|
+| `xCreate` / `xConnect` | Parse column definitions; initialize per-table state |
+| `xDisconnect` / `xDestroy` | Tear down per-table state |
+| `xOpen` / `xClose` | Cursor lifecycle |
+| `xFilter` / `xNext` / `xColumn` | Row production for `MATCH` queries |
+| `xBestIndex` | Accept `MATCH` constraints; plan HNSW-driven scans |
+| `xUpdate` | Handle `INSERT`, `UPDATE`, `DELETE`; trigger embedding on `TEXT VECTOR` changes |
+| `xFindFunction` | Resolve `similarity(column)` for the vtab |
+
+### Column types in `CREATE VIRTUAL TABLE`
+
+```sql
+CREATE VIRTUAL TABLE docs USING anki(
+  title TEXT,
+  body TEXT VECTOR,
+  published INTEGER
+);
+```
+
+- `TEXT VECTOR` → semantic column; text stored, embedding managed internally.
+- Other types → stored and returned as normal virtual table columns.
+
+---
+
+## 6. Storage model
 
 ### User-visible schema
 
 ```sql
-CREATE TABLE customers (
-  id INTEGER PRIMARY KEY,
+CREATE VIRTUAL TABLE customers USING anki(
   customer_name TEXT,
-  notes TEXT VECTOR   -- stored as TEXT; embedding managed by extension
+  notes TEXT VECTOR
 );
 ```
 
-The `notes` column holds plain text visible to standard SQL (`SELECT notes FROM customers` works as expected).
+`SELECT notes FROM customers` returns the plain text. Embeddings are not exposed as columns.
 
-### Internal shadow schema (extension-managed)
+### Internal storage (per virtual table)
 
-The extension auto-creates and maintains tables such as:
+Each `anki` virtual table maintains internal storage for vectors and the HNSW index. Exact representation is an implementation detail; conceptually:
 
 ```sql
--- Per-database configuration and metadata
+-- Conceptual per-vtab backing (not user-visible)
+anki_vtab_<name>_vectors (
+  rowid      INTEGER PRIMARY KEY,
+  col_index  INTEGER,          -- which TEXT VECTOR column
+  text       TEXT,
+  embedding  BLOB,             -- float32[dim]
+  updated_at INTEGER
+);
+
+anki_vtab_<name>_hnsw (
+  col_index  INTEGER PRIMARY KEY,
+  data       BLOB              -- serialized HNSW per vector column
+);
+```
+
+### Database metadata (`anki_meta`)
+
+```sql
 anki_meta (
   key   TEXT PRIMARY KEY,
   value TEXT
 );
-
--- Per (table, column) vector storage
-anki_vec_<table>_<column> (
-  rowid      INTEGER PRIMARY KEY,  -- maps to user table rowid
-  text       TEXT,                 -- copy of text at embed time
-  embedding  BLOB,                 -- float32 vector, fixed dim per build
-  model_id   TEXT,                 -- which model produced this embedding
-  updated_at INTEGER
-);
-
--- Serialized HNSW index per (table, column)
-anki_hnsw_<table>_<column> (
-  id    INTEGER PRIMARY KEY CHECK (id = 1),
-  data  BLOB                         -- serialized HNSW graph
-);
 ```
-
-Exact naming is an implementation detail; the key idea is **shadow storage** keyed by `(table, column, rowid)`.
-
-### Metadata keys (`anki_meta`)
 
 | Key | Example | Purpose |
 |-----|---------|---------|
-| `model_id` | `all-MiniLM-L6-v2` | Model that produced embeddings |
+| `model_id` | `all-MiniLM-L6-v2` | Model baked into this WASM build |
 | `embed_dim` | `384` | Vector dimension |
-| `build_id` | `all-MiniLM-L6-v2@0.1.0` | WASM build identifier |
-| `anki_similarity` | `0.5` | Default similarity threshold |
-| `anki_top_k` | `20` | Default HNSW candidate cap |
+| `build_id` | `all-MiniLM-L6-v2@0.1.0` | WASM package version |
 
 ---
 
-## 5. Write path
+## 7. Write path
 
 ### Flow
 
 ```
-INSERT / UPDATE on TEXT VECTOR column
+INSERT / UPDATE on anki virtual table
         │
         ▼
-preupdate_hook or commit_hook detects change
+xUpdate receives new column values
         │
         ▼
-Read new text value
+For each changed TEXT VECTOR column:
         │
         ▼
 Tokenize (Rust tokenizers crate)
@@ -250,30 +334,22 @@ Tokenize (Rust tokenizers crate)
 ONNX inference (Tract) → float32[dim]
         │
         ▼
-Upsert anki_vec_<table>_<column> (rowid, text, embedding)
+Store text + embedding in internal vector storage
         │
         ▼
 Insert / update vector in HNSW index
         │
         ▼
-Persist serialized HNSW to anki_hnsw_* (on commit or periodic)
+Persist serialized HNSW on commit
 ```
-
-### Column discovery
-
-On extension init and after DDL:
-
-1. Scan `sqlite_schema` for tables and columns.
-2. Register columns whose declared type contains `VECTOR` (e.g. `TEXT VECTOR`).
-3. Ensure shadow tables and HNSW structures exist for each.
 
 ### Deletes
 
-`DELETE` on the user table triggers removal of the corresponding shadow row and HNSW entry via `preupdate_hook` or `commit_hook`.
+`DELETE` via `xUpdate` removes the row's vector entries and HNSW nodes.
 
 ---
 
-## 6. Read path and query execution
+## 8. Read path and query execution
 
 ### Flow
 
@@ -281,44 +357,32 @@ On extension init and after DDL:
 WHERE notes MATCH 'potential opportunity'
         │
         ▼
-Parse constant query text from MATCH right-hand side
+xBestIndex: SQLITE_INDEX_CONSTRAINT_MATCH on notes column
         │
         ▼
-Embed query once (same embedder as write path)
+xFilter: receive query text; embed once
         │
         ▼
-HNSW search → top-k candidate rowids + distances
+HNSW search → up to 256 candidate rowids
         │
         ▼
-Convert distance → cosine similarity
+Filter: cosine similarity >= 0.5 (or per-query override)
         │
         ▼
-Filter by PRAGMA anki_similarity (default 0.5)
+xNext / xColumn: emit matching rows
         │
         ▼
-Store candidates + scores in per-query / per-connection cache
+similarity(notes) returns score for current row
         │
         ▼
-match(notes, '...') → true if rowid in candidate set
-similarity(notes)   → cached score for rowid
+SQLite applies ORDER BY / LIMIT
 ```
 
-### Query-scoped cache
-
-SQLite's default `match()` function is invoked per row. A naive implementation would compare every row — O(n) and defeats HNSW.
-
-**Solution:** On the first `MATCH` with a constant query string for a given statement:
-
-1. Embed the query **once**.
-2. Run HNSW **once** to get top-k candidates.
-3. Cache `{ rowid → similarity }` in connection-local or statement-local state.
-4. `match()` and `similarity()` read from that cache.
-
-This gives HNSW-first behavior while preserving the `MATCH` / `similarity()` SQL syntax on normal columns.
+Because the virtual table module owns `MATCH`, HNSW drives row production directly — no per-row table scan and no query-scoped cache workaround.
 
 ---
 
-## 7. HNSW indexing
+## 9. HNSW indexing
 
 ### Why HNSW
 
@@ -332,95 +396,25 @@ Exact brute-force similarity is O(n) per query. HNSW (Hierarchical Navigable Sma
 | [hnsw_rs](https://crates.io/crates/hnsw_rs) | Pure Rust HNSW |
 | [vector-lite](https://crates.io/crates/vector-lite) | Compact; WASM support |
 
-### Configurable parameters (PRAGMAs)
+### Fixed internal parameters (v1)
 
-```sql
-PRAGMA anki_top_k = 20;           -- HNSW candidate cap before threshold filter
-PRAGMA anki_hnsw_m = 16;          -- HNSW M parameter (graph connectivity)
-PRAGMA anki_hnsw_ef_search = 64;  -- search quality vs speed tradeoff
-```
+These are **implementation constants**, not user configuration:
 
-### Query pipeline
+| Parameter | v1 value | Notes |
+|-----------|----------|-------|
+| HNSW candidate cap | **256** | Max neighbors retrieved per `MATCH` query |
+| Default similarity threshold | **0.5** | Applied by `MATCH` unless overridden |
+| HNSW `M` | 16 | Graph connectivity (tunable in code) |
+| HNSW `ef_search` | 64 | Search quality (tunable in code) |
 
-```
-query text
-    → embed → query vector
-    → HNSW top-k (k = anki_top_k)
-    → filter: similarity >= anki_similarity
-    → return matching rowids
-```
+### `LIMIT` vs internal candidate cap
 
-If `similarity(notes) > 0.6` is stricter than `anki_similarity`, both filters apply.
+| Concept | Controlled by | Purpose |
+|---------|---------------|---------|
+| Internal candidate cap (256) | Fixed in extension | How many neighbors HNSW retrieves before threshold filtering |
+| SQL `LIMIT` | User in query | Max rows returned after filtering and ordering |
 
----
-
-## 8. MATCH on normal tables
-
-### Can we avoid `CREATE VIRTUAL TABLE`?
-
-**Yes for user DDL.** Users write `CREATE TABLE` with `TEXT VECTOR` columns.
-
-**Internally**, shadow storage and HNSW are still required for efficient search.
-
-### Does `MATCH` work on normal columns?
-
-SQLite documents that the `MATCH` operator is syntactic sugar for the `match()` application-defined function, and **extensions can override `match()`** ([SQLite expression docs](https://www.sqlite.org/lang_expr.html)).
-
-So this is valid on a normal column:
-
-```sql
-WHERE notes MATCH 'potential opportunity'
-```
-
-### Efficiency caveat
-
-Without a virtual table's `xBestIndex`, SQLite may still iterate rows. The **query-scoped ANN cache** (see §6) is the pragmatic way to get HNSW-first semantics with `MATCH` on normal columns.
-
-### Alternative (internal / advanced)
-
-A table-valued function for explicit ANN-first queries:
-
-```sql
-WHERE rowid IN (SELECT rowid FROM anki_search('customers', 'notes', 'query'));
-```
-
-This may be added later but is not the primary UX.
-
----
-
-## 9. Configuration (PRAGMAs)
-
-### v1 PRAGMAs (supported)
-
-| PRAGMA | Default | Description |
-|--------|---------|-------------|
-| `anki_similarity` | `0.5` | Minimum cosine similarity for `MATCH` results |
-| `anki_top_k` | `20` | HNSW candidate count before threshold filtering |
-| `anki_hnsw_m` | `16` | HNSW graph parameter |
-| `anki_hnsw_ef_search` | `64` | HNSW search breadth |
-
-```sql
-PRAGMA anki_similarity = 0.5;
-PRAGMA anki_top_k = 20;
-```
-
-Values are persisted per database in `anki_meta`.
-
-### Deferred PRAGMA: `anki_model` (v2+)
-
-```sql
-PRAGMA anki_model = 'all-MiniLM-L6-v2';
-```
-
-Selects which embedding model to use. **Not required in v1** when each WASM build bundles a single fixed model. In v1, `anki_model()` is read-only and reports the baked-in model.
-
-### Read-only introspection
-
-```sql
-SELECT anki_model();   -- 'all-MiniLM-L6-v2'
-SELECT anki_dim();      -- 384
-SELECT anki_version();  -- '0.1.0'
-```
+Example: HNSW may retrieve 256 candidates, 40 pass the ≥ 0.5 threshold, `LIMIT 10` returns the top 10 by `ORDER BY similarity(notes) DESC`.
 
 ---
 
@@ -455,24 +449,14 @@ A model must:
 2. Use a **HuggingFace tokenizer** (`tokenizer.json`).
 3. Produce a **fixed-size sentence embedding** (e.g. mean-pooled BERT output).
 
-Models that do **not** work without extra work:
-
-- Raw PyTorch / GGUF checkpoints
-- LLMs without a sentence-embedding head
-- Models requiring Python-only preprocessing
-
 ### Inference during SQL (no JavaScript)
 
 ```
-INSERT INTO t (notes) VALUES ('hello');
-  → extension hook fires
-  → Rust tokenize + ONNX infer
-  → store embedding
-  → no JS involved
+INSERT INTO customers (notes) VALUES ('hello');
+  → xUpdate → Rust tokenize + ONNX infer → store embedding
 
 WHERE notes MATCH 'hello';
-  → embed query in Rust
-  → HNSW search
+  → xFilter → embed query in Rust → HNSW search
   → no JS involved
 ```
 
@@ -484,54 +468,17 @@ There are three strategies. **v1 uses Strategy C.**
 
 ### Strategy A — App passes bytes once (bootstrap)
 
-```javascript
-const modelBytes = await fetch('/models/all-MiniLM-L6-v2/model.onnx')
-  .then(r => r.arrayBuffer());
-const tokenizerJson = await fetch('/models/all-MiniLM-L6-v2/tokenizer.json')
-  .then(r => r.text());
-
-sqlite3.anki.loadModel(db, 'all-MiniLM-L6-v2', modelBytes, tokenizerJson);
-```
-
-After this one-time call, all SQL runs without JS. The app is a **delivery mechanism**, not part of the inference loop.
+The app fetches ONNX + tokenizer and passes bytes to the extension once at init. Not used in v1.
 
 ### Strategy B — Extension reads from OPFS
 
-With official SQLite WASM + OPFS VFS:
+Extension loads model files from OPFS via the SQLite VFS. Deferred to v2.
 
-```
-PRAGMA anki_model = 'all-MiniLM-L6-v2'
-  → extension opens OPFS:/models/all-MiniLM-L6-v2/model.onnx
-  → reads bytes via VFS
-  → loads ONNX in Rust
-```
+### Strategy C — Pre-bundled per WASM build (v1)
 
-A one-time `installModelToOpfs()` helper may still be needed to populate OPFS on first visit. After that, the extension loads models without per-query JS.
-
-### Strategy C — Pre-bundled per WASM build (v1 recommended)
-
-Ship one WASM artifact per model:
-
-```
-sqlite-anki-all-MiniLM-L6-v2.wasm
-sqlite-anki-bge-small-en.wasm
-```
-
-Each build embeds ONNX + tokenizer at compile time via `include_bytes!`. **No model install step. No `PRAGMA anki_model`.**
+Ship one WASM artifact per model. ONNX + tokenizer are embedded at compile time via `include_bytes!`. No model install step. User picks the model by choosing the npm package.
 
 See [§12](#12-v1-approach-pre-bundled-wasm-per-model).
-
-### Browser constraint
-
-WASM cannot arbitrarily download from the network or read the local filesystem without host support. Something must make model bytes available **once**:
-
-| Mechanism | Who fetches |
-|-----------|-------------|
-| `include_bytes!` in WASM | Nobody — baked in at build time |
-| OPFS | Setup helper once; extension reads thereafter |
-| `loadModel(bytes)` | App once per session |
-
-**sqlite-anki always parses and runs ONNX itself.** The question is only how bytes enter the WASM sandbox.
 
 ---
 
@@ -539,11 +486,8 @@ WASM cannot arbitrarily download from the network or read the local filesystem w
 
 ### Rationale
 
-Pre-bundling is the simplest v1 UX:
-
 - One npm import → pure SQL immediately
-- No `PRAGMA anki_model` machinery
-- No OPFS install step
+- No model install or byte-passing
 - Deterministic embeddings per package version
 - Easier golden-vector testing
 
@@ -554,32 +498,6 @@ Pre-bundling is the simplest v1 UX:
 | `sqlite-anki-all-MiniLM-L6-v2.wasm` | SQLite + extension + MiniLM ONNX + tokenizer |
 | `sqlite-anki-all-MiniLM-L6-v2.js` | Emscripten loader / official SQLite JS API |
 
-Approximate sizes:
-
-| Model | Approx WASM size |
-|-------|------------------|
-| `all-MiniLM-L6-v2` (384d, quantized) | ~25–40 MB |
-| `all-mpnet-base-v2` (768d) | ~80–120 MB |
-
-### Rust embedding at build time
-
-```rust
-const MODEL_ONNX: &[u8] =
-    include_bytes!("models/all-MiniLM-L6-v2/model.onnx");
-const TOKENIZER_JSON: &str =
-    include_str!("models/all-MiniLM-L6-v2/tokenizer.json");
-const EMBED_DIM: usize = 384;
-const MODEL_ID: &str = "all-MiniLM-L6-v2";
-
-static EMBEDDER: OnceLock<Embedder> = OnceLock::new();
-
-fn embedder() -> &'static Embedder {
-    EMBEDDER.get_or_init(|| {
-        Embedder::from_bytes(MODEL_ONNX, TOKENIZER_JSON).expect("bundled model")
-    })
-}
-```
-
 ### npm packages
 
 ```
@@ -587,73 +505,30 @@ fn embedder() -> &'static Embedder {
 @sqlite-anki/bge-small-en-v1.5   ← optional, larger
 ```
 
-User picks model at **install/import time**, not SQL time:
-
 ```javascript
 import sqlite3Init from '@sqlite-anki/all-MiniLM-L6-v2';
 const sqlite3 = await sqlite3Init();
 const db = new sqlite3.oo1.DB();
 ```
 
-### What v1 drops
-
-| Feature | v1 |
-|---------|-----|
-| `PRAGMA anki_model` (writable) | Dropped |
-| `installModel()` / OPFS cache | Dropped |
-| `anki_load_model(bytes)` C API | Dropped |
-| Reindex on model change | N/A (one model per binary) |
-| Model registry / HuggingFace runtime | Dropped |
-
-### What v1 keeps
+### Introspection
 
 ```sql
-PRAGMA anki_similarity = 0.5;
-PRAGMA anki_top_k = 20;
-
 SELECT anki_model();   -- read-only: 'all-MiniLM-L6-v2'
 SELECT anki_dim();     -- read-only: 384
 ```
-
-### Switching models
-
-Embeddings from `@sqlite-anki/all-MiniLM-L6-v2` are **not comparable** to another package's embeddings. Switching npm packages requires re-embedding all `TEXT VECTOR` columns (re-read text from user tables, regenerate vectors, rebuild HNSW).
-
-Store `build_id` in `anki_meta`; on mismatch with the running WASM build, surface an error or offer `SELECT anki_reindex()`.
 
 ---
 
 ## 13. Rust and SQLite WASM build
 
-### Why Rust
-
-| Piece | Crate / tool |
-|-------|--------------|
-| SQLite extension API | `sqlite3_ext`, `ext-sqlite3-rs` |
-| ONNX inference | `tract-onnx` |
-| Tokenization | `tokenizers` |
-| HNSW | `usearch` or `hnsw_rs` |
-
 ### Browser WASM: no dynamic loading
 
-The official SQLite WASM build **does not support `dlopen()` / `LOAD EXTENSION`**. Extensions must be **statically linked** at compile time.
-
-From the [SQLite WASM build docs](https://sqlite.org/wasm/doc/trunk/building.md):
-
-1. Place `sqlite3_wasm_extra_init.c` in `ext/wasm/`.
-2. Define `sqlite3_wasm_extra_init()` which calls `sqlite3_auto_extension(sqlite3_anki_init)`.
-3. Build with Emscripten → `sqlite3.wasm` + `sqlite3.js`.
-
-Reference implementations:
-
-- [sqlite-vec WASM integration](https://alexgarcia.xyz/sqlite-vec/wasm.html)
-- [sqlite-rust-wasm](https://github.com/tantaman/sqlite-rust-wasm)
-- [wasm_sqlite_with_stats](https://github.com/llimllib/wasm_sqlite_with_stats)
+Extensions must be **statically linked** at compile time via `sqlite3_wasm_extra_init.c` + `sqlite3_auto_extension()`.
 
 ### Extension init
 
 ```c
-// sqlite3_wasm_extra_init.c
 int sqlite3_wasm_extra_init(const char *z) {
     return sqlite3_auto_extension((void(*)(void))sqlite3_anki_init);
 }
@@ -666,31 +541,12 @@ pub extern "C" fn sqlite3_anki_init(
     pz_err_msg: *mut *mut c_char,
     p_api: *const sqlite3_api_routines,
 ) -> c_int {
-    // 1. Register match(), similarity(), anki_* SQL functions
-    // 2. Register preupdate/commit hooks
-    // 3. Register PRAGMA handlers
-    // 4. Initialize bundled embedder (lazy)
+    // 1. Register anki virtual table module
+    // 2. Register similarity(), anki_model(), anki_dim(), anki_version()
+    // 3. Initialize bundled embedder (lazy)
     SQLITE_OK
 }
 ```
-
-### Per-model build matrix
-
-```makefile
-# Conceptual
-make MODEL=all-MiniLM-L6-v2  → jswasm/sqlite-anki-all-MiniLM-L6-v2.wasm
-make MODEL=bge-small-en      → jswasm/sqlite-anki-bge-small-en.wasm
-```
-
-Each target passes a different `ANKI_MODEL` feature flag or `include_bytes!` path.
-
-### WASM heap memory
-
-Large ONNX models require a custom SQLite WASM build with sufficient initial heap size. The default heap may be too small; tune via Emscripten `INITIAL_MEMORY` / `ALLOW_MEMORY_GROWTH` in the build.
-
-### SIMD
-
-Enable WASM SIMD128 where supported for faster inference and distance calculations.
 
 ---
 
@@ -705,8 +561,7 @@ const sqlite3 = await sqlite3Init();
 const db = new sqlite3.oo1.DB(':memory:');
 
 db.exec(`
-  CREATE TABLE customers (
-    id INTEGER PRIMARY KEY,
+  CREATE VIRTUAL TABLE customers USING anki(
     customer_name TEXT,
     notes TEXT VECTOR
   );
@@ -716,9 +571,11 @@ db.exec(`INSERT INTO customers (customer_name, notes) VALUES
   ('Acme', 'potential upsell opportunity in Q3')`);
 
 const rows = db.selectObjects(`
-  SELECT customer_name, similarity(notes) AS score
+  SELECT customer_name, similarity(notes)
   FROM customers
   WHERE notes MATCH 'potential opportunity'
+  ORDER BY similarity(notes) DESC
+  LIMIT 10
 `);
 
 console.log(rows);
@@ -727,50 +584,19 @@ db.close();
 
 ### Worker recommendation
 
-Run SQLite in a **Web Worker** (official WASM supports this). Embedding inference blocks the thread; running in a worker avoids freezing the UI.
-
-```javascript
-import { sqlite3Worker1Promiser } from '@sqlite-anki/all-MiniLM-L6-v2/worker';
-
-const promiser = await new Promise(resolve => {
-  const p = sqlite3Worker1Promiser({ onready: () => resolve(p) });
-});
-```
-
-### v2 usage (dynamic models, future)
-
-```javascript
-import { initSqliteAnki } from '@sqlite-anki/browser';
-
-const { db } = await initSqliteAnki({
-  model: 'all-MiniLM-L6-v2',  // installs to OPFS if needed
-});
-```
+Run SQLite in a **Web Worker**. Embedding inference blocks the thread.
 
 ---
 
 ## 15. Sync, async, and workers
 
-### The async problem
-
-| Layer | Sync / async |
-|-------|--------------|
-| SQLite extension APIs | **Synchronous** |
-| ONNX inference | **Synchronous** (blocks calling thread) |
-| Browser model download | **Asynchronous** |
-
-### Implications
-
 | Phase | Blocking? | Where |
 |-------|-----------|-------|
-| WASM + model load (v1 bundled) | One-time parse of embedded ONNX | Worker recommended |
+| WASM + model load (v1 bundled) | One-time ONNX parse | Worker recommended |
 | `INSERT` with new text | Yes — tokenize + infer | Worker |
 | `MATCH` query | Yes — embed query + HNSW | Worker |
-| First-time model download (v2) | Async — before DB use | Main or setup |
 
-### v1 mitigates async concerns
-
-Pre-bundled models eliminate network fetch. The only "slow" operations are ONNX parse (first use) and per-row embed on write — both run synchronously inside WASM in a worker.
+Pre-bundled models eliminate network fetch. All inference is synchronous inside WASM.
 
 ---
 
@@ -778,39 +604,15 @@ Pre-bundled models eliminate network fetch. The only "slow" operations are ONNX 
 
 ### Within one v1 WASM build
 
-Model is fixed. No runtime model change. Reindexing is only needed after:
-
-- Extension upgrade that changes embedding logic
-- Corrupted shadow / HNSW data
-- Manual `SELECT anki_reindex()`
-
-### `anki_reindex()` (planned)
+Model is fixed. Reindexing is only needed after extension upgrade or corrupted index data:
 
 ```sql
-SELECT anki_reindex();                    -- all TEXT VECTOR columns
-SELECT anki_reindex('customers', 'notes'); -- one column
+SELECT anki_reindex('customers');
 ```
-
-Re-reads text from user tables, re-embeds, rebuilds HNSW.
 
 ### Switching npm packages (different model)
 
-1. Embeddings are incompatible (different dimensions and semantic space).
-2. Detect `build_id` mismatch in `anki_meta`.
-3. Require `anki_reindex()` or reject `MATCH` until reindex completes.
-
-### v2: `PRAGMA anki_model` change
-
-When dynamic model selection is added:
-
-```
-PRAGMA anki_model = 'new-model';
-  → validate ONNX loads, dim = N
-  → if dim or weights changed: mark all vectors stale
-  → drop HNSW indexes
-  → set anki_meta.reindex_required = 1
-  → user runs SELECT anki_reindex();
-```
+Embeddings are incompatible. Detect `build_id` mismatch in `anki_meta` and require reindex or reject `MATCH`.
 
 ---
 
@@ -819,15 +621,12 @@ PRAGMA anki_model = 'new-model';
 ```
 sqlite-anki/
 ├── crates/
-│   ├── anki-core/              # Rust: embedder, HNSW, hooks, SQL functions
+│   ├── anki-core/              # Rust: vtab module, embedder, HNSW, SQL functions
 │   ├── anki-wasm-minilm/       # include_bytes! for MiniLM; links into SQLite WASM
 │   └── anki-wasm-bge/          # optional second model build
 ├── wasm/
 │   ├── sqlite3_wasm_extra_init.c
-│   └── Makefile                # official SQLite ext/wasm integration
-├── packages/
-│   ├── all-MiniLM-L6-v2/       # npm: prebuilt .js + .wasm
-│   └── browser/                # v2: installModel, OPFS helpers
+│   └── Makefile
 ├── models/
 │   └── all-MiniLM-L6-v2/
 │       ├── model.onnx
@@ -835,16 +634,8 @@ sqlite-anki/
 │       └── config.json
 └── docs/
     ├── README.md
-    └── DESIGN.md               # this file
+    └── DESIGN.md
 ```
-
-### Crate responsibilities
-
-| Crate | Responsibility |
-|-------|----------------|
-| `anki-core` | Extension logic: schema scan, hooks, shadow tables, HNSW, `match()`, `similarity()`, PRAGMAs |
-| `anki-wasm-minilm` | Thin wrapper: `include_bytes!`, `MODEL_ID`, `EMBED_DIM`, WASM export |
-| npm `@sqlite-anki/all-MiniLM-L6-v2` | Ships `sqlite3.js` + `sqlite3.wasm` with anki baked in |
 
 ---
 
@@ -852,14 +643,17 @@ sqlite-anki/
 
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
-| Language | Rust | WASM-friendly; ONNX via Tract; shared with native extension later |
+| Language | Rust | WASM-friendly; ONNX via Tract |
 | SQLite distribution | Official WASM | OPFS, workers, long-term support |
 | Extension loading | Static link | Only option in browser |
-| User DDL | Normal `CREATE TABLE` | Better DX than `CREATE VIRTUAL TABLE` |
+| User DDL (v1) | `CREATE VIRTUAL TABLE ... USING anki` | Planner-integrated `MATCH` + HNSW |
 | Search syntax | `MATCH` + `similarity()` | Familiar FTS-like ergonomics |
+| Default threshold | Similarity ≥ 0.5 | Built into `MATCH`; override in `WHERE` |
+| ANN candidate cap | 256 (fixed internal) | Good recall for browser-scale data |
+| Result count | SQL `LIMIT` | Standard, user-controlled |
+| Configuration | No PRAGMAs | Extensions cannot add PRAGMAs without custom VFS |
 | ANN algorithm | HNSW | Fast enough for interactive browser queries |
 | v1 model delivery | Pre-bundled per WASM | Simplest; no install step |
-| `PRAGMA anki_model` | Deferred to v2 | Not needed when model is compile-time fixed |
 | Inference runtime | Rust/Tract, not Xenova | No JS on hot path |
 | Threading | Worker | Sync inference blocks; keep off main thread |
 
@@ -867,24 +661,23 @@ sqlite-anki/
 
 | Limitation | Notes |
 |------------|-------|
+| Requires `CREATE VIRTUAL TABLE` in v1 | Normal `CREATE TABLE` deferred to v2 |
 | Large WASM downloads | ~25–40 MB for MiniLM variant |
 | No cross-model embedding comparison | Switching packages requires reindex |
-| `MATCH` planner integration | Query-scoped cache, not true index-driven planning |
+| Fixed internal ANN cap | 256 candidates; not tunable by users in v1 |
 | Model support | Sentence-transformer ONNX models only (initially) |
-| WASM heap | Must be tuned for model size |
 
 ---
 
 ## 19. Future work
 
-- [ ] Dynamic model selection via `PRAGMA anki_model`
-- [ ] OPFS model cache and `installModel()` helper
-- [ ] Per-column model override: `notes TEXT VECTOR MODEL '...'`
-- [ ] Table-valued function `anki_search(table, column, query)` for explicit ANN-first queries
+- [ ] Normal `CREATE TABLE` with `TEXT VECTOR` (auto-shadow + hooks) for nicer DX
+- [ ] Dynamic model selection and OPFS model cache
+- [ ] Per-column model override in column definitions
 - [ ] Native (non-WASM) loadable extension for desktop SQLite
 - [ ] Quantized embedding storage (float16) to reduce disk use
-- [ ] Batch reindex with progress callback
-- [ ] `anki_explain(query)` — show embedding time, HNSW stats, candidate count
+- [ ] `anki_explain(query)` — embedding time, HNSW stats, candidate count
+- [ ] Optional custom PRAGMA syntax via JS wrapper sugar (not raw extension)
 
 ---
 
@@ -894,7 +687,7 @@ sqlite-anki/
 |----------|-----|
 | Official SQLite WASM | https://sqlite.org/wasm |
 | SQLite WASM build guide | https://sqlite.org/wasm/doc/trunk/building.md |
-| SQLite MATCH operator | https://www.sqlite.org/lang_expr.html |
+| SQLite virtual table module | https://www.sqlite.org/vtab.html |
 | sqlite-vec WASM | https://alexgarcia.xyz/sqlite-vec/wasm.html |
 | sqlite-rust-wasm | https://github.com/tantaman/sqlite-rust-wasm |
 | Tract (Rust ONNX) | https://github.com/sonos/tract |
