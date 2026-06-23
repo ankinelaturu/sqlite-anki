@@ -1,0 +1,5 @@
+{
+  "model_id": "all-MiniLM-L6-v2",
+  "embed_dim": 384,
+  "pooling": "mean"
+}

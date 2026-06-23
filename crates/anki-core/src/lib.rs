@@ -1,12 +1,11 @@
 //! Core library for the **sqlite-anki** SQLite extension.
 //!
-//! Provides the `anki` virtual table module, ONNX embedding via Tract, and
-//! HNSW-backed semantic search for `TEXT VECTOR` columns. This crate is
-//! compiled into the custom `sqlite3.wasm` build linked through
-//! `sqlite3_wasm_extra_init`.
+//! Provides embedding via Tract, HNSW indexing, and SQLite extension registration
+//! for browser WASM builds linked through `sqlite3_wasm_extra_init`.
 
 pub mod embedder;
 pub mod error;
+pub mod extension;
 pub mod hnsw;
 pub mod vtab;
 

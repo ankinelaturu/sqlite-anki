@@ -4,9 +4,13 @@ description = "sqlite-anki WASM build with all-MiniLM-L6-v2 bundled"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+build = "build.rs"
 
 [lib]
 crate-type = ["staticlib"]
 
 [dependencies]
 anki-core = { path = "../anki-core" }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { version = "0.2", features = ["js"] }

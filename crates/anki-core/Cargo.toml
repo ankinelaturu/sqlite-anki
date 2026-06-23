@@ -4,9 +4,17 @@ description = "sqlite-anki extension core: virtual table, embeddings, and HNSW"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+build = "build.rs"
 
 [lib]
 crate-type = ["rlib", "staticlib"]
 
 [dependencies]
 thiserror.workspace = true
+libc.workspace = true
+tract-core.workspace = true
+tract-onnx.workspace = true
+ndarray.workspace = true
+tokenizers.workspace = true
+parking_lot.workspace = true
+once_cell.workspace = true

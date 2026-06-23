@@ -1,0 +1,1 @@
+# wasm32-unknown-unknown: extension uses libsqlite3-sys (loadable_extension), not sqlite3_ext.

@@ -9,8 +9,7 @@
 
 #include "sqlite3.h"
 
-/* Provided by anki-wasm-minilm (Rust staticlib). */
-extern int sqlite3_anki_init(sqlite3 *db, char **pzErrMsg, const sqlite3_api_routines *pApi);
+#include "anki_extension.c"
 
 int sqlite3_wasm_extra_init(const char *zArg) {
   (void)zArg;
