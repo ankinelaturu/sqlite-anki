@@ -632,8 +632,8 @@ sqlite-anki/
 │       ├── model.onnx
 │       ├── tokenizer.json
 │       └── config.json
+├── README.md
 └── docs/
-    ├── README.md
     └── DESIGN.md
 ```
 
