@@ -1,0 +1,86 @@
+---
+description: Rust documentation standards — doc comments for all public API and non-obvious code
+globs: **/*.rs
+alwaysApply: false
+---
+
+# Rust Documentation Standards
+
+All Rust code in sqlite-anki must be documented following [rustdoc conventions](https://doc.rust-lang.org/rustdoc/how-to-write-documentation.html).
+
+## Required documentation
+
+| Item | Style | Required |
+|------|-------|----------|
+| Crate root | `//!` or `#![doc = "..."]` | Yes — purpose, main types, WASM/SQLite context |
+| `pub mod` | `//!` module doc | Yes — responsibility and how it fits the crate |
+| `pub` fn, struct, enum, trait, type, const | `///` doc comment | Yes — every public item |
+| `pub(crate)` helpers | `///` | Yes if logic is non-obvious |
+| Private fns / impl blocks | `///` or `//` | Yes when behavior, invariants, or SQLite/WASM details are not obvious from the name |
+| `unsafe` blocks | `///` + `# Safety` section | Always — justify every safety precondition |
+| `no_mangle` / FFI exports | `///` + `# Safety` | Always — SQLite C API contract |
+
+Do not merge undocumented public API. Add docs in the same change as new code.
+
+## How to write `///` comments
+
+1. **First paragraph** — one clear sentence: what it does (summary line for rustdoc).
+2. **Following paragraphs** — when needed: inputs, return value, side effects, errors.
+3. **Standard sections** (use only when relevant):
+   - `# Examples` — runnable ` ```rust` doctests for public API where practical
+   - `# Errors` — variants or codes returned
+   - `# Panics` — when and why
+   - `# Safety` — required for `unsafe` and FFI
+
+Use Markdown links and intra-doc links: `` [`Embedder`] ``, `` [sqlite3_vtab] ``.
+
+Do **not** use JavaDoc-style `@param` / `@return`. Rustdoc uses prose and `#` sections only.
+
+## Examples
+
+```rust
+// ❌ BAD — public, no docs
+pub fn embed(text: &str) -> Result<Vec<f32>, AnkiError> { ... }
+
+// ✅ GOOD
+/// Embeds `text` into a fixed-size sentence vector using the bundled ONNX model.
+///
+/// Returns a vector of length [`EMBED_DIM`]. Empty strings and whitespace-only
+/// input are treated as absent text and return [`AnkiError::EmptyInput`].
+///
+/// # Errors
+///
+/// Returns [`AnkiError::Inference`] if Tract fails to run the session.
+pub fn embed(text: &str) -> Result<Vec<f32>, AnkiError> { ... }
+```
+
+```rust
+// ❌ BAD — module with no overview
+pub mod hnsw;
+
+// ✅ GOOD
+//! HNSW approximate nearest-neighbor index for one `TEXT VECTOR` column.
+//!
+//! Each virtual table column owns a [`ColumnIndex`]. Indexes are serialized to
+//! the backing store on commit and loaded in [`ColumnIndex::open`].
+pub mod hnsw;
+```
+
+## Non-obvious blocks
+
+Short `//` comments are required for tricky control flow (virtual table callbacks, query planning, transaction rollback) when a reader cannot infer intent from names alone. Prefer *why* over *what*.
+
+```rust
+// Rebuild the candidate set once per statement: xFilter may run before
+// xBestIndex hands us the MATCH constraint for parameterized queries.
+```
+
+## WASM / FFI
+
+Document ownership, pointer lifetimes, and thread assumptions for anything crossing the Rust/C or Rust/JS boundary. SQLite extension entrypoints must state when they are called and what they register.
+
+## When editing
+
+- New `pub` items without `///` → add docs before finishing the task.
+- Changed behavior → update the doc comment in the same edit.
+- Prefer extending existing module `//!` docs over duplicating context in every function.
