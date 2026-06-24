@@ -13,7 +13,8 @@
 #![allow(non_camel_case_types, non_snake_case, private_interfaces)]
 
 use crate::embedder::Embedder;
-use crate::DEFAULT_SIMILARITY_THRESHOLD;
+use crate::hnsw::Hnsw;
+use crate::{DEFAULT_SIMILARITY_THRESHOLD, HNSW_CANDIDATE_CAP};
 use core::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::ffi::{CStr, CString};
@@ -292,6 +293,10 @@ struct TableState {
     /// Set on `xRollback`: the cache may diverge from the rolled-back shadow
     /// table, so reload it lazily at the next `xFilter`.
     dirty: bool,
+    /// One HNSW index per column (`Some` only for `TEXT VECTOR` columns).
+    indexes: Vec<Option<Hnsw>>,
+    /// Set on any write/reload: indexes are stale and rebuilt at the next `MATCH`.
+    index_dirty: bool,
 }
 
 #[repr(C)]
@@ -621,6 +626,7 @@ unsafe fn load_all(st: &mut TableState) {
     st.rows.clear();
     st.next_rowid = 1;
     st.dirty = false;
+    st.index_dirty = true;
     let cols = data_columns(st.ncol, &st.vector_cols);
     let sql = format!("SELECT {} FROM {} ORDER BY id", cols.join(", "), st.data_table);
     let csql = match CString::new(sql) {
@@ -702,7 +708,29 @@ unsafe fn new_state(
         db,
         data_table,
         dirty: false,
+        indexes: (0..ncol).map(|_| None).collect(),
+        index_dirty: true,
     })))
+}
+
+/// Rebuilds one HNSW index per `TEXT VECTOR` column from the in-memory cache.
+unsafe fn rebuild_indexes(st: &mut TableState) {
+    let mut indexes: Vec<Option<Hnsw>> = (0..st.ncol).map(|_| None).collect();
+    for &ci in &st.vector_cols {
+        let points: Vec<(i64, Vec<f32>)> = st
+            .rows
+            .iter()
+            .filter_map(|(rid, row)| {
+                row.embeddings
+                    .get(ci)
+                    .and_then(|e| e.clone())
+                    .map(|e| (*rid, e))
+            })
+            .collect();
+        indexes[ci] = Hnsw::build(&points);
+    }
+    st.indexes = indexes;
+    st.index_dirty = false;
 }
 
 // --- module callbacks --------------------------------------------------------
@@ -894,14 +922,34 @@ unsafe extern "C" fn x_filter(
         c.match_col = col as i32;
         let query = value_to_string(*argv.offset(0));
         if let Some(q) = query.as_deref().and_then(embed_text) {
-            for (rowid, row) in st.rows.iter() {
-                if let Some(Some(emb)) = row.embeddings.get(col) {
-                    let sim = cosine(&q, emb);
-                    if sim >= DEFAULT_SIMILARITY_THRESHOLD {
-                        c.results.push(MatchRow {
-                            rowid: *rowid,
-                            sim: Some(sim),
-                        });
+            if st.index_dirty {
+                rebuild_indexes(st);
+            }
+            match st.indexes.get(col).and_then(|o| o.as_ref()) {
+                // HNSW: retrieve up to the candidate cap, then threshold.
+                Some(idx) => {
+                    let k = HNSW_CANDIDATE_CAP.min(st.rows.len());
+                    for (rowid, sim) in idx.search(&q, k, HNSW_CANDIDATE_CAP) {
+                        if sim >= DEFAULT_SIMILARITY_THRESHOLD {
+                            c.results.push(MatchRow {
+                                rowid,
+                                sim: Some(sim),
+                            });
+                        }
+                    }
+                }
+                // No index yet (column has no embeddings): exact scan.
+                None => {
+                    for (rowid, row) in st.rows.iter() {
+                        if let Some(Some(emb)) = row.embeddings.get(col) {
+                            let sim = cosine(&q, emb);
+                            if sim >= DEFAULT_SIMILARITY_THRESHOLD {
+                                c.results.push(MatchRow {
+                                    rowid: *rowid,
+                                    sim: Some(sim),
+                                });
+                            }
+                        }
                     }
                 }
             }
@@ -982,6 +1030,7 @@ unsafe extern "C" fn x_update(
                 return rc;
             }
             st.rows.remove(&id);
+            st.index_dirty = true;
         }
         return SQLITE_OK;
     }
@@ -1034,6 +1083,7 @@ unsafe extern "C" fn x_update(
     if rowid >= st.next_rowid {
         st.next_rowid = rowid + 1;
     }
+    st.index_dirty = true;
     if !p_rowid.is_null() {
         *p_rowid = rowid;
     }
