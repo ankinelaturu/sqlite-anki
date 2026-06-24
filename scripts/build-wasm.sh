@@ -110,10 +110,15 @@ for pair in "$EXTRA_INIT_SRC:$EXTRA_INIT_DST" "$ANKI_EXT_SRC:$ANKI_EXT_DST"; do
   fi
 done
 
-# Inject the Rust archive via emcc.flags.sqlite3 (unused by the makefile, present
-# on every link line) rather than sqlite3-wasm.cfiles, whose makefile value a
-# command-line += would clobber, dropping sqlite3-wasm.c itself.
-ANKI_LINK="$ANKI_LIB"
+# Inject through emcc.flags.sqlite3 (unused by the makefile, present on every
+# link line) rather than sqlite3-wasm.cfiles, whose makefile value a command-line
+# += would clobber, dropping sqlite3-wasm.c itself. It also lands after
+# emcc.jsflags, so the -sEXPORTED_RUNTIME_METHODS here overrides the makefile's.
+#
+# HEAPU64/HEAP64 are required: SQLite 3.49's JS glue accesses them, but this
+# Emscripten no longer auto-exports the int64 heap views, which otherwise aborts
+# in sqlite3ApiBootstrap with "HEAPU64 was not exported".
+ANKI_LINK="$ANKI_LIB -sEXPORTED_RUNTIME_METHODS=wasmMemory,HEAPU64,HEAP64"
 
 # Larger initial memory for bundled ONNX (~86MB model + runtime).
 EMCC_INITIAL_MEMORY="${EMCC_INITIAL_MEMORY:-128}"
