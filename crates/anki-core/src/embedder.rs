@@ -132,25 +132,41 @@ impl Embedder {
             .to_array_view::<f32>()
             .map_err(|e| AnkiError::Inference(format!("output view: {e}")))?;
 
-        let view = tensor.view();
-        let slice = view.as_slice().ok_or_else(|| {
-            AnkiError::Inference("unexpected non-contiguous ONNX output".into())
-        })?;
+        let shape: Vec<usize> = tensor.shape().to_vec();
+        let slice = tensor
+            .as_slice()
+            .ok_or_else(|| AnkiError::Inference("non-contiguous ONNX output".into()))?;
 
-        // MiniLM ONNX exports a 2-D sentence embedding [1, 384] or token matrix — take last row.
-        let vec = if slice.len() == EMBED_DIM {
-            slice.to_vec()
-        } else if slice.len() > EMBED_DIM && slice.len() % EMBED_DIM == 0 {
-            let start = slice.len() - EMBED_DIM;
-            slice[start..].to_vec()
-        } else {
-            return Err(AnkiError::Inference(format!(
-                "unexpected embedding size {}",
-                slice.len()
-            )));
+        // all-MiniLM ONNX outputs token embeddings [1, seq, 384]; the sentence
+        // embedding is the mean over tokens (no padding for a single input, so a
+        // plain mean equals masked mean pooling). Some exports already pool to
+        // [1, 384].
+        let pooled: Vec<f32> = match shape.as_slice() {
+            [_, seq, hid] if *hid == EMBED_DIM => {
+                let (seq, hid) = (*seq, *hid);
+                let mut v = vec![0f32; hid];
+                for t in 0..seq {
+                    let base = t * hid;
+                    for h in 0..hid {
+                        v[h] += slice[base + h];
+                    }
+                }
+                let denom = seq.max(1) as f32;
+                for x in &mut v {
+                    *x /= denom;
+                }
+                v
+            }
+            [_, hid] if *hid == EMBED_DIM => slice[..EMBED_DIM].to_vec(),
+            _ if slice.len() == EMBED_DIM => slice.to_vec(),
+            _ => {
+                return Err(AnkiError::Inference(format!(
+                    "unexpected ONNX output shape {shape:?}"
+                )))
+            }
         };
 
-        Ok(normalize_l2(&vec))
+        Ok(normalize_l2(&pooled))
     }
 }
 

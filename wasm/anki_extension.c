@@ -10,6 +10,9 @@ SQLITE_EXTENSION_INIT1
 /* Rust embedder warm-up (ONNX + tokenizer); returns 0 on success. */
 extern int anki_embedder_init(void);
 
+/* Rust: registers the `anki` virtual table module and similarity(). */
+extern int anki_register_vtab(sqlite3 *db);
+
 static const char ANKI_VERSION[] = "0.1.0";
 static const char ANKI_MODEL[] = "all-MiniLM-L6-v2";
 static const int ANKI_DIM = 384;
@@ -58,6 +61,8 @@ int sqlite3_anki_init(sqlite3 *db, char **pzErrMsg, const sqlite3_api_routines *
   (void)pzErrMsg;
   SQLITE_EXTENSION_INIT2(pApi);
   rc = register_anki_functions(db);
+  if (rc != SQLITE_OK) return rc;
+  rc = anki_register_vtab(db);
   if (rc != SQLITE_OK) return rc;
   if (anki_embedder_init() != 0) return SQLITE_ERROR;
   return SQLITE_OK;

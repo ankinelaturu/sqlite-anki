@@ -5,6 +5,12 @@ members = [
     "crates/anki-wasm-minilm",
 ]
 
+# panic=abort for the WASM build: on wasm32-unknown-emscripten, panic=unwind
+# lowers to Emscripten C++ exceptions (undefined __cpp_exception at link), and
+# unwinding across the FFI boundary into SQLite would be UB regardless.
+[profile.release]
+panic = "abort"
+
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
