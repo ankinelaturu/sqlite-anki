@@ -29,6 +29,7 @@ pub const MODULE_NAME: &str = "anki";
 enum sqlite3 {}
 enum sqlite3_context {}
 enum sqlite3_value {}
+enum sqlite3_stmt {}
 
 type sqlite3_int64 = i64;
 type SqliteDestructor = Option<unsafe extern "C" fn(*mut c_void)>;
@@ -41,7 +42,11 @@ const SQLITE_UTF8: c_int = 1;
 const SQLITE_INTEGER: c_int = 1;
 const SQLITE_FLOAT: c_int = 2;
 const SQLITE_TEXT: c_int = 3;
+const SQLITE_BLOB: c_int = 4;
 const SQLITE_NULL: c_int = 5;
+
+const SQLITE_ROW: c_int = 100;
+const SQLITE_DONE: c_int = 101;
 
 const SQLITE_INDEX_CONSTRAINT_MATCH: u8 = 64;
 
@@ -206,6 +211,49 @@ extern "C" {
         n: c_int,
         d: SqliteDestructor,
     );
+
+    // Persistence: SQL against the shadow data table on the same connection.
+    fn sqlite3_exec(
+        db: *mut sqlite3,
+        sql: *const c_char,
+        cb: Option<unsafe extern "C" fn(*mut c_void, c_int, *mut *mut c_char, *mut *mut c_char) -> c_int>,
+        arg: *mut c_void,
+        errmsg: *mut *mut c_char,
+    ) -> c_int;
+    fn sqlite3_prepare_v2(
+        db: *mut sqlite3,
+        sql: *const c_char,
+        n_byte: c_int,
+        pp_stmt: *mut *mut sqlite3_stmt,
+        pz_tail: *mut *const c_char,
+    ) -> c_int;
+    fn sqlite3_step(stmt: *mut sqlite3_stmt) -> c_int;
+    fn sqlite3_finalize(stmt: *mut sqlite3_stmt) -> c_int;
+
+    fn sqlite3_bind_null(stmt: *mut sqlite3_stmt, i: c_int) -> c_int;
+    fn sqlite3_bind_int64(stmt: *mut sqlite3_stmt, i: c_int, v: sqlite3_int64) -> c_int;
+    fn sqlite3_bind_double(stmt: *mut sqlite3_stmt, i: c_int, v: f64) -> c_int;
+    fn sqlite3_bind_text(
+        stmt: *mut sqlite3_stmt,
+        i: c_int,
+        z: *const c_char,
+        n: c_int,
+        d: SqliteDestructor,
+    ) -> c_int;
+    fn sqlite3_bind_blob(
+        stmt: *mut sqlite3_stmt,
+        i: c_int,
+        p: *const c_void,
+        n: c_int,
+        d: SqliteDestructor,
+    ) -> c_int;
+
+    fn sqlite3_column_type(stmt: *mut sqlite3_stmt, i: c_int) -> c_int;
+    fn sqlite3_column_int64(stmt: *mut sqlite3_stmt, i: c_int) -> sqlite3_int64;
+    fn sqlite3_column_double(stmt: *mut sqlite3_stmt, i: c_int) -> f64;
+    fn sqlite3_column_text(stmt: *mut sqlite3_stmt, i: c_int) -> *const u8;
+    fn sqlite3_column_blob(stmt: *mut sqlite3_stmt, i: c_int) -> *const c_void;
+    fn sqlite3_column_bytes(stmt: *mut sqlite3_stmt, i: c_int) -> c_int;
 }
 
 // --- table state -------------------------------------------------------------
@@ -233,8 +281,14 @@ struct Row {
 struct TableState {
     columns: Vec<ColumnDef>,
     ncol: usize,
+    /// Indices of `TEXT VECTOR` columns (subset of `0..ncol`).
+    vector_cols: Vec<usize>,
     rows: BTreeMap<i64, Row>,
     next_rowid: i64,
+    /// Connection used to read/write the persistent shadow table.
+    db: *mut sqlite3,
+    /// Quoted, db-qualified shadow table name, e.g. `"main"."customers_data"`.
+    data_table: String,
 }
 
 #[repr(C)]
@@ -356,15 +410,291 @@ unsafe fn value_to_cell(v: *mut sqlite3_value) -> Cell {
     }
 }
 
+/// `SQLITE_TRANSIENT`: tells SQLite to copy the bound/returned bytes.
+fn transient() -> SqliteDestructor {
+    unsafe { transmute(-1isize) }
+}
+
 unsafe fn result_text(ctx: *mut sqlite3_context, s: &str) {
     let bytes = s.as_bytes();
-    let transient: SqliteDestructor = transmute(-1isize);
     sqlite3_result_text(
         ctx,
         bytes.as_ptr() as *const c_char,
         bytes.len() as c_int,
-        transient,
+        transient(),
     );
+}
+
+// --- persistence (shadow table) ----------------------------------------------
+
+fn quote_ident(s: &str) -> String {
+    format!("\"{}\"", s.replace('"', "\"\""))
+}
+
+unsafe fn arg_str(argv: *const *const c_char, i: isize) -> String {
+    let p = *argv.offset(i);
+    if p.is_null() {
+        String::new()
+    } else {
+        CStr::from_ptr(p).to_string_lossy().into_owned()
+    }
+}
+
+/// Quoted, db-qualified shadow table name, e.g. `"main"."customers_data"`.
+fn data_table_ident(db_name: &str, table: &str) -> String {
+    format!(
+        "{}.{}",
+        quote_ident(db_name),
+        quote_ident(&format!("{table}_data"))
+    )
+}
+
+fn build_ddl(data_table: &str, ncol: usize, vector_cols: &[usize]) -> String {
+    let mut defs = vec!["id INTEGER PRIMARY KEY".to_string()];
+    for i in 0..ncol {
+        defs.push(format!("c{i}"));
+    }
+    for vi in vector_cols {
+        defs.push(format!("e{vi} BLOB"));
+    }
+    format!("CREATE TABLE IF NOT EXISTS {data_table}({})", defs.join(", "))
+}
+
+/// Column list shared by the INSERT and SELECT: `id, c0..c{ncol-1}, e{vi}…`.
+fn data_columns(ncol: usize, vector_cols: &[usize]) -> Vec<String> {
+    let mut cols = vec!["id".to_string()];
+    for i in 0..ncol {
+        cols.push(format!("c{i}"));
+    }
+    for vi in vector_cols {
+        cols.push(format!("e{vi}"));
+    }
+    cols
+}
+
+fn emb_to_blob(v: &[f32]) -> Vec<u8> {
+    let mut b = Vec::with_capacity(v.len() * 4);
+    for x in v {
+        b.extend_from_slice(&x.to_le_bytes());
+    }
+    b
+}
+
+fn blob_to_emb(b: &[u8]) -> Vec<f32> {
+    b.chunks_exact(4)
+        .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+        .collect()
+}
+
+unsafe fn exec(db: *mut sqlite3, sql: &str) -> c_int {
+    let csql = match CString::new(sql) {
+        Ok(c) => c,
+        Err(_) => return SQLITE_ERROR,
+    };
+    sqlite3_exec(db, csql.as_ptr(), None, ptr::null_mut(), ptr::null_mut())
+}
+
+unsafe fn bind_cell(stmt: *mut sqlite3_stmt, idx: c_int, cell: &Cell) {
+    match cell {
+        Cell::Null => {
+            sqlite3_bind_null(stmt, idx);
+        }
+        Cell::Int(v) => {
+            sqlite3_bind_int64(stmt, idx, *v);
+        }
+        Cell::Real(v) => {
+            sqlite3_bind_double(stmt, idx, *v);
+        }
+        Cell::Text(s) => {
+            sqlite3_bind_text(
+                stmt,
+                idx,
+                s.as_ptr() as *const c_char,
+                s.len() as c_int,
+                transient(),
+            );
+        }
+    }
+}
+
+unsafe fn column_to_cell(stmt: *mut sqlite3_stmt, idx: c_int) -> Cell {
+    match sqlite3_column_type(stmt, idx) {
+        SQLITE_INTEGER => Cell::Int(sqlite3_column_int64(stmt, idx)),
+        SQLITE_FLOAT => Cell::Real(sqlite3_column_double(stmt, idx)),
+        SQLITE_TEXT => {
+            let n = sqlite3_column_bytes(stmt, idx);
+            let p = sqlite3_column_text(stmt, idx);
+            if p.is_null() || n <= 0 {
+                Cell::Text(String::new())
+            } else {
+                let bytes = slice::from_raw_parts(p, n as usize);
+                Cell::Text(String::from_utf8_lossy(bytes).into_owned())
+            }
+        }
+        _ => Cell::Null,
+    }
+}
+
+/// Upserts one row into the shadow table. Embeddings are stored as little-endian
+/// `f32` BLOBs in the `e{col}` columns.
+unsafe fn persist_row(
+    st: &TableState,
+    rowid: i64,
+    cells: &[Cell],
+    embeddings: &[Option<Vec<f32>>],
+) -> c_int {
+    let cols = data_columns(st.ncol, &st.vector_cols);
+    let placeholders = vec!["?"; cols.len()].join(", ");
+    let sql = format!(
+        "INSERT OR REPLACE INTO {}({}) VALUES({})",
+        st.data_table,
+        cols.join(", "),
+        placeholders
+    );
+    let csql = match CString::new(sql) {
+        Ok(c) => c,
+        Err(_) => return SQLITE_ERROR,
+    };
+    let mut stmt: *mut sqlite3_stmt = ptr::null_mut();
+    if sqlite3_prepare_v2(st.db, csql.as_ptr(), -1, &mut stmt, ptr::null_mut()) != SQLITE_OK {
+        return SQLITE_ERROR;
+    }
+
+    sqlite3_bind_int64(stmt, 1, rowid);
+    for i in 0..st.ncol {
+        bind_cell(stmt, (2 + i) as c_int, &cells[i]);
+    }
+    for (k, &vi) in st.vector_cols.iter().enumerate() {
+        let idx = (2 + st.ncol + k) as c_int;
+        match embeddings.get(vi).and_then(|e| e.as_ref()) {
+            Some(e) => {
+                let blob = emb_to_blob(e);
+                sqlite3_bind_blob(
+                    stmt,
+                    idx,
+                    blob.as_ptr() as *const c_void,
+                    blob.len() as c_int,
+                    transient(),
+                );
+            }
+            None => {
+                sqlite3_bind_null(stmt, idx);
+            }
+        }
+    }
+
+    let rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    if rc == SQLITE_DONE {
+        SQLITE_OK
+    } else {
+        SQLITE_ERROR
+    }
+}
+
+unsafe fn delete_row(st: &TableState, rowid: i64) -> c_int {
+    let sql = format!("DELETE FROM {} WHERE id = ?", st.data_table);
+    let csql = match CString::new(sql) {
+        Ok(c) => c,
+        Err(_) => return SQLITE_ERROR,
+    };
+    let mut stmt: *mut sqlite3_stmt = ptr::null_mut();
+    if sqlite3_prepare_v2(st.db, csql.as_ptr(), -1, &mut stmt, ptr::null_mut()) != SQLITE_OK {
+        return SQLITE_ERROR;
+    }
+    sqlite3_bind_int64(stmt, 1, rowid);
+    let rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    if rc == SQLITE_DONE {
+        SQLITE_OK
+    } else {
+        SQLITE_ERROR
+    }
+}
+
+/// Loads all rows from the shadow table into `st.rows` and sets `next_rowid`.
+unsafe fn load_all(st: &mut TableState) {
+    let cols = data_columns(st.ncol, &st.vector_cols);
+    let sql = format!("SELECT {} FROM {} ORDER BY id", cols.join(", "), st.data_table);
+    let csql = match CString::new(sql) {
+        Ok(c) => c,
+        Err(_) => return,
+    };
+    let mut stmt: *mut sqlite3_stmt = ptr::null_mut();
+    if sqlite3_prepare_v2(st.db, csql.as_ptr(), -1, &mut stmt, ptr::null_mut()) != SQLITE_OK {
+        return;
+    }
+
+    while sqlite3_step(stmt) == SQLITE_ROW {
+        let rowid = sqlite3_column_int64(stmt, 0);
+        let mut cells = Vec::with_capacity(st.ncol);
+        for i in 0..st.ncol {
+            cells.push(column_to_cell(stmt, (1 + i) as c_int));
+        }
+        let mut embeddings: Vec<Option<Vec<f32>>> = vec![None; st.ncol];
+        for (k, &vi) in st.vector_cols.iter().enumerate() {
+            let idx = (1 + st.ncol + k) as c_int;
+            if sqlite3_column_type(stmt, idx) == SQLITE_BLOB {
+                let n = sqlite3_column_bytes(stmt, idx);
+                let p = sqlite3_column_blob(stmt, idx) as *const u8;
+                if !p.is_null() && n > 0 {
+                    let bytes = slice::from_raw_parts(p, n as usize);
+                    embeddings[vi] = Some(blob_to_emb(bytes));
+                }
+            }
+        }
+        if rowid >= st.next_rowid {
+            st.next_rowid = rowid + 1;
+        }
+        st.rows.insert(rowid, Row { cells, embeddings });
+    }
+    sqlite3_finalize(stmt);
+}
+
+/// Parses columns, declares the user-facing schema, and builds an empty state.
+/// Shared by `xCreate` and `xConnect`; returns a raw `TableState` on success.
+unsafe fn new_state(
+    db: *mut sqlite3,
+    argc: c_int,
+    argv: *const *const c_char,
+) -> Option<*mut TableState> {
+    let mut columns: Vec<ColumnDef> = Vec::new();
+    for i in 3..argc as isize {
+        let p = *argv.offset(i);
+        if p.is_null() {
+            continue;
+        }
+        let s = CStr::from_ptr(p).to_string_lossy();
+        if let Some(cd) = parse_column(&s) {
+            columns.push(cd);
+        }
+    }
+    if columns.is_empty() {
+        return None;
+    }
+
+    let cdecl = CString::new(build_declare(&columns)).ok()?;
+    if sqlite3_declare_vtab(db, cdecl.as_ptr()) != SQLITE_OK {
+        return None;
+    }
+
+    let vector_cols: Vec<usize> = columns
+        .iter()
+        .enumerate()
+        .filter_map(|(i, c)| if c.is_vector { Some(i) } else { None })
+        .collect();
+    let ncol = columns.len();
+    let data_table = data_table_ident(&arg_str(argv, 1), &arg_str(argv, 2));
+
+    Some(Box::into_raw(Box::new(TableState {
+        columns,
+        ncol,
+        vector_cols,
+        rows: BTreeMap::new(),
+        next_rowid: 1,
+        db,
+        data_table,
+    })))
 }
 
 // --- module callbacks --------------------------------------------------------
@@ -378,38 +708,19 @@ unsafe extern "C" fn x_create(
     _err: *mut *mut c_char,
 ) -> c_int {
     // argv[0]=module, [1]=db, [2]=table, [3..]=column definitions.
-    let mut columns: Vec<ColumnDef> = Vec::new();
-    for i in 3..argc as isize {
-        let p = *argv.offset(i);
-        if p.is_null() {
-            continue;
-        }
-        let s = CStr::from_ptr(p).to_string_lossy();
-        if let Some(cd) = parse_column(&s) {
-            columns.push(cd);
-        }
-    }
-    if columns.is_empty() {
-        return SQLITE_ERROR;
-    }
-
-    let decl = build_declare(&columns);
-    let cdecl = match CString::new(decl) {
-        Ok(c) => c,
-        Err(_) => return SQLITE_ERROR,
+    let state = match new_state(db, argc, argv) {
+        Some(s) => s,
+        None => return SQLITE_ERROR,
     };
-    let rc = sqlite3_declare_vtab(db, cdecl.as_ptr());
+
+    // Create the persistent shadow table on first CREATE.
+    let ddl = build_ddl(&(*state).data_table, (*state).ncol, &(*state).vector_cols);
+    let rc = exec(db, &ddl);
     if rc != SQLITE_OK {
+        drop(Box::from_raw(state));
         return rc;
     }
 
-    let ncol = columns.len();
-    let state = Box::into_raw(Box::new(TableState {
-        columns,
-        ncol,
-        rows: BTreeMap::new(),
-        next_rowid: 1,
-    }));
     let vt = Box::into_raw(Box::new(AnkiVtab {
         base: zeroed_vtab(),
         state,
@@ -418,9 +729,43 @@ unsafe extern "C" fn x_create(
     SQLITE_OK
 }
 
+unsafe extern "C" fn x_connect(
+    db: *mut sqlite3,
+    _aux: *mut c_void,
+    argc: c_int,
+    argv: *const *const c_char,
+    pp_vtab: *mut *mut sqlite3_vtab,
+    _err: *mut *mut c_char,
+) -> c_int {
+    // Reopen: the shadow table already exists; reload its rows into memory.
+    let state = match new_state(db, argc, argv) {
+        Some(s) => s,
+        None => return SQLITE_ERROR,
+    };
+    load_all(&mut *state);
+
+    let vt = Box::into_raw(Box::new(AnkiVtab {
+        base: zeroed_vtab(),
+        state,
+    }));
+    *pp_vtab = vt as *mut sqlite3_vtab;
+    SQLITE_OK
+}
+
+/// Frees in-memory state but keeps the shadow table (data persists).
 unsafe extern "C" fn x_disconnect(vtab: *mut sqlite3_vtab) -> c_int {
     let vt = Box::from_raw(vtab as *mut AnkiVtab);
     drop(Box::from_raw(vt.state));
+    drop(vt);
+    SQLITE_OK
+}
+
+/// `DROP TABLE`: removes the shadow table, then frees state.
+unsafe extern "C" fn x_destroy(vtab: *mut sqlite3_vtab) -> c_int {
+    let vt = Box::from_raw(vtab as *mut AnkiVtab);
+    let st = Box::from_raw(vt.state);
+    exec(st.db, &format!("DROP TABLE IF EXISTS {}", st.data_table));
+    drop(st);
     drop(vt);
     SQLITE_OK
 }
@@ -577,7 +922,12 @@ unsafe extern "C" fn x_update(
     if argc == 1 {
         let v = *argv.offset(0);
         if sqlite3_value_type(v) != SQLITE_NULL {
-            st.rows.remove(&sqlite3_value_int64(v));
+            let id = sqlite3_value_int64(v);
+            let rc = delete_row(st, id);
+            if rc != SQLITE_OK {
+                return rc;
+            }
+            st.rows.remove(&id);
         }
         return SQLITE_OK;
     }
@@ -611,9 +961,17 @@ unsafe extern "C" fn x_update(
         st.next_rowid
     };
 
+    // Persist to the shadow table first; only mutate the cache on success so a
+    // failed write leaves cache and store consistent.
+    let rc = persist_row(st, rowid, &cells, &embeddings);
+    if rc != SQLITE_OK {
+        return rc;
+    }
+
     if !is_insert {
         let oldid = sqlite3_value_int64(old);
         if oldid != rowid {
+            let _ = delete_row(st, oldid);
             st.rows.remove(&oldid);
         }
     }
@@ -681,10 +1039,10 @@ unsafe extern "C" fn similarity_stub(
 static ANKI_MODULE: sqlite3_module = sqlite3_module {
     iVersion: 1,
     xCreate: Some(x_create),
-    xConnect: Some(x_create),
+    xConnect: Some(x_connect),
     xBestIndex: Some(x_best_index),
     xDisconnect: Some(x_disconnect),
-    xDestroy: Some(x_disconnect),
+    xDestroy: Some(x_destroy),
     xOpen: Some(x_open),
     xClose: Some(x_close),
     xFilter: Some(x_filter),
