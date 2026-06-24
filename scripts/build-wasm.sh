@@ -6,7 +6,9 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 VENDOR="${SQLITE_SRC:-$ROOT/vendor/sqlite}"
 SQLITE_TAG="${SQLITE_TAG:-version-3.49.1}"
 DIST="$ROOT/packages/wasm-minilm/dist"
-WASM_TARGET="wasm32-unknown-unknown"
+# Emscripten target so Rust's ABI + getrandom backend match the emcc link
+# (vs. wasm32-unknown-unknown, which mismatches the triple and needs JS RNG shims).
+WASM_TARGET="wasm32-unknown-emscripten"
 export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$ROOT/target}"
 CARGO_TARGET="$CARGO_TARGET_DIR/$WASM_TARGET/release"
 EXTRA_INIT_SRC="$ROOT/wasm/sqlite3_wasm_extra_init.c"
@@ -55,37 +57,21 @@ if [[ ! -f "$MODEL" ]]; then
   bash "$ROOT/scripts/download-model.sh"
 fi
 
-# --- Rust extension (LLVM bitcode for emcc link) ------------------------------
+# --- Rust extension (static archive for emcc link) ----------------------------
+#
+# We link the single staticlib archive, not scraped per-crate .bc files. The
+# archive bundles the crate + all deps + the Rust sysroot (core/alloc/std), so
+# wasm-ld can resolve everything (e.g. core::panicking, core::fmt) and pull only
+# the members it needs. Loose .bc files omit the sysroot and break the link the
+# moment the embedder is actually reachable.
 
-echo "==> Building anki-wasm-minilm ($WASM_TARGET, llvm-bc)"
-export RUSTFLAGS="${RUSTFLAGS:---emit=llvm-bc}"
+echo "==> Building anki-wasm-minilm ($WASM_TARGET, staticlib)"
 cargo build -p anki-wasm-minilm --target "$WASM_TARGET" --release
 
-# One .bc per crate (deps/ may retain older hashes from prior builds).
-ANKI_BC=()
-while IFS= read -r line; do
-  ANKI_BC+=("$line")
-done < <(
-  python3 - "$CARGO_TARGET/deps" <<'PY'
-import re
-import sys
-from pathlib import Path
+ANKI_LIB="$CARGO_TARGET/libanki_wasm_minilm.a"
+[[ -f "$ANKI_LIB" ]] || die "missing staticlib $ANKI_LIB (cargo build failed?)"
 
-deps = Path(sys.argv[1])
-pat = re.compile(r"^(?:lib)?(.+)-[0-9a-f]{16}\.bc$")
-latest: dict[str, Path] = {}
-for bc in deps.glob("*.bc"):
-    m = pat.match(bc.name)
-    if not m:
-        continue
-    latest[m.group(1)] = bc
-for path in sorted(latest.values()):
-    print(path)
-PY
-)
-[[ ${#ANKI_BC[@]} -gt 0 ]] || die "no LLVM bitcode files in $CARGO_TARGET/deps (RUSTFLAGS=--emit=llvm-bc?)"
-
-echo "    linking ${#ANKI_BC[@]} Rust bitcode object(s)"
+echo "    linking $ANKI_LIB"
 
 # --- SQLite source tree --------------------------------------------------------
 
@@ -124,11 +110,10 @@ for pair in "$EXTRA_INIT_SRC:$EXTRA_INIT_DST" "$ANKI_EXT_SRC:$ANKI_EXT_DST"; do
   fi
 done
 
-# Append Rust bitcode to the emcc link line (see tantaman/sqlite-rust-wasm).
-ANKI_BC_MAKE=""
-for bc in "${ANKI_BC[@]}"; do
-  ANKI_BC_MAKE+=" $bc"
-done
+# Inject the Rust archive via emcc.flags.sqlite3 (unused by the makefile, present
+# on every link line) rather than sqlite3-wasm.cfiles, whose makefile value a
+# command-line += would clobber, dropping sqlite3-wasm.c itself.
+ANKI_LINK="$ANKI_LIB"
 
 # Larger initial memory for bundled ONNX (~86MB model + runtime).
 EMCC_INITIAL_MEMORY="${EMCC_INITIAL_MEMORY:-128}"
@@ -137,10 +122,10 @@ echo "==> Building official SQLite WASM (ext/wasm)"
 make -C "$WASM_DIR" clean >/dev/null 2>&1 || true
 make -C "$WASM_DIR" -j"$(sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 4)" \
   emcc.INITIAL_MEMORY="$EMCC_INITIAL_MEMORY" \
-  "sqlite3-wasm.cfiles+=${ANKI_BC_MAKE}" \
+  "emcc.flags.sqlite3=${ANKI_LINK}" \
   jswasm/sqlite3.mjs \
   jswasm/sqlite3-bundler-friendly.mjs \
-  jswasm/sqlite3-worker1.mjs \
+  jswasm/sqlite3-worker1.js \
   jswasm/sqlite3-worker1-bundler-friendly.mjs \
   jswasm/sqlite3-opfs-async-proxy.js
 
@@ -153,7 +138,7 @@ for f in \
   "$WASM_DIR/jswasm/sqlite3.mjs" \
   "$WASM_DIR/jswasm/sqlite3.wasm" \
   "$WASM_DIR/jswasm/sqlite3-bundler-friendly.mjs" \
-  "$WASM_DIR/jswasm/sqlite3-worker1.mjs" \
+  "$WASM_DIR/jswasm/sqlite3-worker1.js" \
   "$WASM_DIR/jswasm/sqlite3-worker1-bundler-friendly.mjs" \
   "$WASM_DIR/jswasm/sqlite3-opfs-async-proxy.js" \
   "$WASM_DIR/jswasm/sqlite3-api.mjs" \

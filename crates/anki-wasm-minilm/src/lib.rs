@@ -10,19 +10,18 @@ use anki_core::embedder::Embedder;
 /// Must only be called from the SQLite extension init path (single-threaded).
 #[no_mangle]
 pub extern "C" fn anki_embedder_init() -> i32 {
+    // No eprintln!/stderr here: the std stdio backing isn't linked into the
+    // Emscripten SQLite module, and a WASM extension has nowhere to print. The
+    // C caller maps any nonzero return to SQLITE_ERROR.
     #[cfg(embedded_model)]
     {
         match Embedder::global() {
             Ok(_) => 0,
-            Err(e) => {
-                eprintln!("anki embedder init failed: {e}");
-                1
-            }
+            Err(_) => 1,
         }
     }
     #[cfg(not(embedded_model))]
     {
-        eprintln!("anki embedder init failed: embedded model missing");
         1
     }
 }
