@@ -289,6 +289,9 @@ struct TableState {
     db: *mut sqlite3,
     /// Quoted, db-qualified shadow table name, e.g. `"main"."customers_data"`.
     data_table: String,
+    /// Set on `xRollback`: the cache may diverge from the rolled-back shadow
+    /// table, so reload it lazily at the next `xFilter`.
+    dirty: bool,
 }
 
 #[repr(C)]
@@ -612,8 +615,12 @@ unsafe fn delete_row(st: &TableState, rowid: i64) -> c_int {
     }
 }
 
-/// Loads all rows from the shadow table into `st.rows` and sets `next_rowid`.
+/// Replaces `st.rows` with the shadow table's contents and resets `next_rowid`.
+/// Used both for the initial `xConnect` and to resync after a rollback.
 unsafe fn load_all(st: &mut TableState) {
+    st.rows.clear();
+    st.next_rowid = 1;
+    st.dirty = false;
     let cols = data_columns(st.ncol, &st.vector_cols);
     let sql = format!("SELECT {} FROM {} ORDER BY id", cols.join(", "), st.data_table);
     let csql = match CString::new(sql) {
@@ -694,6 +701,7 @@ unsafe fn new_state(
         next_rowid: 1,
         db,
         data_table,
+        dirty: false,
     })))
 }
 
@@ -770,6 +778,48 @@ unsafe extern "C" fn x_destroy(vtab: *mut sqlite3_vtab) -> c_int {
     SQLITE_OK
 }
 
+// Transaction hooks. Providing xBegin enrolls the vtab so xCommit/xRollback are
+// delivered. Writes go straight to the shadow table (rolled back with the
+// connection), so commit needs nothing; rollback only has to invalidate the
+// in-memory cache, which is reloaded lazily on the next xFilter.
+
+unsafe extern "C" fn x_begin(_vtab: *mut sqlite3_vtab) -> c_int {
+    SQLITE_OK
+}
+
+unsafe extern "C" fn x_sync(_vtab: *mut sqlite3_vtab) -> c_int {
+    SQLITE_OK
+}
+
+unsafe extern "C" fn x_commit(_vtab: *mut sqlite3_vtab) -> c_int {
+    SQLITE_OK
+}
+
+unsafe extern "C" fn x_rollback(vtab: *mut sqlite3_vtab) -> c_int {
+    // The shadow table is reverted by SQLite's pager. Defer the cache reload to
+    // the next xFilter, when the rollback is fully settled and a SELECT is safe.
+    let vt = &*(vtab as *mut AnkiVtab);
+    (*vt.state).dirty = true;
+    SQLITE_OK
+}
+
+// Savepoint hooks (module v2): SAVEPOINT/RELEASE need no action since writes go
+// to the shadow table, but ROLLBACK TO must invalidate the cache like xRollback.
+
+unsafe extern "C" fn x_savepoint(_vtab: *mut sqlite3_vtab, _n: c_int) -> c_int {
+    SQLITE_OK
+}
+
+unsafe extern "C" fn x_release(_vtab: *mut sqlite3_vtab, _n: c_int) -> c_int {
+    SQLITE_OK
+}
+
+unsafe extern "C" fn x_rollback_to(vtab: *mut sqlite3_vtab, _n: c_int) -> c_int {
+    let vt = &*(vtab as *mut AnkiVtab);
+    (*vt.state).dirty = true;
+    SQLITE_OK
+}
+
 unsafe extern "C" fn x_best_index(vtab: *mut sqlite3_vtab, info: *mut sqlite3_index_info) -> c_int {
     let vt = &*(vtab as *mut AnkiVtab);
     let st = &*vt.state;
@@ -828,8 +878,12 @@ unsafe extern "C" fn x_filter(
     argv: *mut *mut sqlite3_value,
 ) -> c_int {
     let c = &mut *(cur as *mut AnkiCursor);
-    let vt = &*c.vtab;
-    let st = &*vt.state;
+    let st = &mut *(*c.vtab).state;
+
+    // Resync the cache if a prior transaction rolled back the shadow table.
+    if st.dirty {
+        load_all(st);
+    }
 
     c.results.clear();
     c.pos = 0;
@@ -1037,7 +1091,7 @@ unsafe extern "C" fn similarity_stub(
 }
 
 static ANKI_MODULE: sqlite3_module = sqlite3_module {
-    iVersion: 1,
+    iVersion: 2,
     xCreate: Some(x_create),
     xConnect: Some(x_connect),
     xBestIndex: Some(x_best_index),
@@ -1051,15 +1105,15 @@ static ANKI_MODULE: sqlite3_module = sqlite3_module {
     xColumn: Some(x_column),
     xRowid: Some(x_rowid),
     xUpdate: Some(x_update),
-    xBegin: None,
-    xSync: None,
-    xCommit: None,
-    xRollback: None,
+    xBegin: Some(x_begin),
+    xSync: Some(x_sync),
+    xCommit: Some(x_commit),
+    xRollback: Some(x_rollback),
     xFindFunction: Some(x_find_function),
     xRename: None,
-    xSavepoint: None,
-    xRelease: None,
-    xRollbackTo: None,
+    xSavepoint: Some(x_savepoint),
+    xRelease: Some(x_release),
+    xRollbackTo: Some(x_rollback_to),
     xShadowName: None,
     xIntegrity: None,
 };
