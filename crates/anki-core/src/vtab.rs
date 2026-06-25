@@ -15,6 +15,7 @@
 use crate::embedder::Embedder;
 use crate::hnsw::Hnsw;
 use crate::match_query::{parse_match, Mode};
+use crate::metrics;
 use crate::{DEFAULT_SIMILARITY_THRESHOLD, HNSW_CANDIDATE_CAP};
 use core::cmp::Ordering;
 use std::collections::BTreeMap;
@@ -354,7 +355,13 @@ fn embed_text(text: &str) -> Option<Vec<f32>> {
         return None;
     }
     match Embedder::global() {
-        Ok(e) => e.lock().embed(t).ok(),
+        Ok(e) => {
+            // Time the actual inference (the headline browser-ML metric).
+            let t0 = metrics::now_ms();
+            let r = e.lock().embed(t).ok();
+            metrics::record_embed(metrics::now_ms() - t0);
+            r
+        }
         Err(_) => None,
     }
 }
@@ -928,6 +935,7 @@ unsafe fn new_state(
 
 /// Rebuilds one HNSW index per `TEXT VECTOR` column from the in-memory cache.
 unsafe fn rebuild_indexes(st: &mut TableState) {
+    let t0 = metrics::now_ms();
     let mut indexes: Vec<Option<Hnsw>> = (0..st.ncol).map(|_| None).collect();
     for &ci in &st.vector_cols {
         let points: Vec<(i64, Vec<f32>)> = st
@@ -944,18 +952,21 @@ unsafe fn rebuild_indexes(st: &mut TableState) {
     }
     st.indexes = indexes;
     st.index_dirty = false;
+    metrics::record_index_rebuild(metrics::now_ms() - t0);
 }
 
 /// Brute-force cosine over `rows` for column `col`, pushing rows above the
 /// similarity threshold into `results`. With `filter`, only rows passing it are
 /// considered (the relational pre-filter). No candidate cap — exact + complete.
+/// Returns the number of cosine computations performed (for metrics).
 fn exact_scan(
     results: &mut Vec<MatchRow>,
     rows: &BTreeMap<i64, Row>,
     col: usize,
     q: &[f32],
     filter: Option<&dyn Fn(&Row) -> bool>,
-) {
+) -> usize {
+    let mut computed = 0usize;
     for (rowid, row) in rows.iter() {
         if let Some(f) = filter {
             if !f(row) {
@@ -963,6 +974,7 @@ fn exact_scan(
             }
         }
         if let Some(Some(emb)) = row.embeddings.get(col) {
+            computed += 1;
             let sim = cosine(q, emb);
             if sim >= DEFAULT_SIMILARITY_THRESHOLD {
                 results.push(MatchRow {
@@ -972,6 +984,7 @@ fn exact_scan(
             }
         }
     }
+    computed
 }
 
 // --- module callbacks --------------------------------------------------------
@@ -1313,6 +1326,8 @@ unsafe extern "C" fn x_filter(
             // Embed the query text once; empty/None query => no results.
             if let Some(q) = mq.as_ref().and_then(|m| embed_text(&m.query)) {
                 let mq = mq.unwrap();
+                let t_search = metrics::now_ms();
+                let mut candidates = 0usize;
                 if preds.is_empty() {
                     // No relational filter. `mode` chooses the strategy here.
                     match mq.mode {
@@ -1325,22 +1340,27 @@ unsafe extern "C" fn x_filter(
                                 Some(idx) => {
                                     let k = cap.min(st.rows.len());
                                     for (rowid, sim) in idx.search(&q, k, cap) {
+                                        candidates += 1;
                                         if sim >= DEFAULT_SIMILARITY_THRESHOLD {
                                             c.results.push(MatchRow { rowid, sim: Some(sim) });
                                         }
                                     }
                                 }
-                                None => exact_scan(&mut c.results, &st.rows, col, &q, None),
+                                None => {
+                                    candidates = exact_scan(&mut c.results, &st.rows, col, &q, None)
+                                }
                             }
                         }
                         // exact: brute-force over all rows, no candidate cap.
-                        Mode::Exact => exact_scan(&mut c.results, &st.rows, col, &q, None),
+                        Mode::Exact => {
+                            candidates = exact_scan(&mut c.results, &st.rows, col, &q, None)
+                        }
                     }
                 } else {
                     // Relational filter present: rank only the rows passing it.
                     // Brute-force over that subset (no cap → no recall cliff);
                     // this path is already exact regardless of `mode`.
-                    exact_scan(
+                    candidates = exact_scan(
                         &mut c.results,
                         &st.rows,
                         col,
@@ -1348,6 +1368,7 @@ unsafe extern "C" fn x_filter(
                         Some(&row_passes as &dyn Fn(&Row) -> bool),
                     );
                 }
+                metrics::record_search(metrics::now_ms() - t_search, candidates, c.results.len());
                 c.results
                     .sort_by(|a, b| b.sim.partial_cmp(&a.sim).unwrap_or(Ordering::Equal));
             }
@@ -1484,7 +1505,9 @@ unsafe extern "C" fn x_update(
 
     // Persist to the shadow table first; only mutate the cache on success so a
     // failed write leaves cache and store consistent.
+    let t_persist = metrics::now_ms();
     let rc = persist_row(st, rowid, &cells, &embeddings);
+    metrics::record_persist(metrics::now_ms() - t_persist);
     if rc != SQLITE_OK {
         return rc;
     }

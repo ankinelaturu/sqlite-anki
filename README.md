@@ -13,6 +13,7 @@ Semantic text search for SQLite in the browser (WebAssembly).
 | [docs/match-dsl.md](./docs/match-dsl.md) | The `MATCH` semantic-query DSL |
 | [docs/hybrid-filtering.md](./docs/hybrid-filtering.md) | Relational `WHERE` + `MATCH` pushdown |
 | [docs/query-planning.md](./docs/query-planning.md) | How SQLite plans queries against the vtab |
+| [docs/metrics.md](./docs/metrics.md) | Per-operation metrics via `anki_metrics()` |
 
 ## Quick start
 

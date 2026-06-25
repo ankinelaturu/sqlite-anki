@@ -36,6 +36,7 @@ missing.
 | `transactions.test.mjs` | `ROLLBACK`, `COMMIT`, `SAVEPOINT`/`ROLLBACK TO` |
 | `hybrid-filtering.test.mjs` | relational `WHERE` + `MATCH` pushdown, incl. the recall-cliff case |
 | `match-dsl.test.mjs` | `MATCH` DSL: `query/mode[:candidates]`, slashy literals, quoting, errors |
+| `metrics.test.mjs` | `anki_metrics()` JSON shape + counters advancing (embed/search/persist/rebuild) |
 | `guards.test.mjs` | no-model graceful behavior, model-mismatch guard |
 | `hnsw-scale.test.mjs` | exact-match retrieval across row counts (HNSW regression guard) |
 

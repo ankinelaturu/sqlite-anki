@@ -9,6 +9,7 @@ pub mod extension;
 pub mod hnsw;
 pub mod loader;
 pub mod match_query;
+pub mod metrics;
 pub mod vtab;
 
 /// Extension version string surfaced by `anki_version()` SQL function.

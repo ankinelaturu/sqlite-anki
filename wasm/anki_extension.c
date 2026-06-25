@@ -37,6 +37,13 @@ int anki_load_model(const unsigned char *model, size_t model_len,
                             model_id, model_id_len);
 }
 
+/* Rust: JSON snapshot of cumulative operation metrics (see docs/metrics.md). */
+extern const char *anki_metrics_json(void);
+
+/* JS-facing metrics export; returns a NUL-terminated JSON string (do not free). */
+EMSCRIPTEN_KEEPALIVE
+const char *anki_metrics(void) { return anki_metrics_json(); }
+
 static const char ANKI_VERSION[] = "0.1.0";
 
 static void anki_version_fn(sqlite3_context *ctx, int argc, sqlite3_value **argv) {
