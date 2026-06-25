@@ -7,6 +7,7 @@ pub mod embedder;
 pub mod error;
 pub mod extension;
 pub mod hnsw;
+pub mod loader;
 pub mod vtab;
 
 /// Extension version string surfaced by `anki_version()` SQL function.

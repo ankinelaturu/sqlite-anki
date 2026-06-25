@@ -4,7 +4,6 @@ description = "sqlite-anki WASM build with all-MiniLM-L6-v2 bundled"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-build = "build.rs"
 
 [lib]
 crate-type = ["staticlib"]

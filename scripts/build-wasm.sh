@@ -49,13 +49,9 @@ fi
 need_cmd emcc
 need_cmd wasm-strip
 
-# --- ONNX model --------------------------------------------------------------
-
-MODEL="$ROOT/models/all-MiniLM-L6-v2/model.onnx"
-if [[ ! -f "$MODEL" ]]; then
-  echo "==> Downloading all-MiniLM-L6-v2 model"
-  bash "$ROOT/scripts/download-model.sh"
-fi
+# The model is no longer bundled — it is fetched at runtime by the JS glue and
+# handed to the extension via anki_load_model (see docs/dynamic-model-loading.md).
+# scripts/download-model.sh remains a dev convenience for local testing.
 
 # --- Rust extension (static archive for emcc link) ----------------------------
 #
@@ -118,9 +114,12 @@ done
 # HEAPU64/HEAP64 are required: SQLite 3.49's JS glue accesses them, but this
 # Emscripten no longer auto-exports the int64 heap views, which otherwise aborts
 # in sqlite3ApiBootstrap with "HEAPU64 was not exported".
-ANKI_LINK="$ANKI_LIB -sEXPORTED_RUNTIME_METHODS=wasmMemory,HEAPU64,HEAP64"
+# HEAPU8 is needed so the JS glue can copy model/tokenizer bytes into the wasm
+# heap before calling anki_load_model.
+ANKI_LINK="$ANKI_LIB -sEXPORTED_RUNTIME_METHODS=wasmMemory,HEAPU64,HEAP64,HEAPU8"
 
-# Larger initial memory for bundled ONNX (~86MB model + runtime).
+# Headroom for the runtime-loaded ONNX model (copied into the heap at load) +
+# inference arenas. ALLOW_MEMORY_GROWTH covers larger models.
 EMCC_INITIAL_MEMORY="${EMCC_INITIAL_MEMORY:-128}"
 
 echo "==> Building official SQLite WASM (ext/wasm)"
@@ -158,7 +157,7 @@ sqlite-anki custom WASM build
 sqlite tag: $SQLITE_TAG
 emcc: $(emcc --version | head -1)
 rust target: $WASM_TARGET
-embedded model: all-MiniLM-L6-v2
+model: runtime-loaded (not bundled)
 built: $(date -u +"%Y-%m-%dT%H:%M:%SZ")
 EOF
 

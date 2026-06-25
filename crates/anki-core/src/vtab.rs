@@ -255,6 +255,8 @@ extern "C" {
     fn sqlite3_column_text(stmt: *mut sqlite3_stmt, i: c_int) -> *const u8;
     fn sqlite3_column_blob(stmt: *mut sqlite3_stmt, i: c_int) -> *const c_void;
     fn sqlite3_column_bytes(stmt: *mut sqlite3_stmt, i: c_int) -> c_int;
+
+    fn sqlite3_malloc(n: c_int) -> *mut c_void;
 }
 
 // --- table state -------------------------------------------------------------
@@ -390,6 +392,95 @@ unsafe fn zeroed_vtab() -> sqlite3_vtab {
         pModule: ptr::null(),
         nRef: 0,
         zErrMsg: ptr::null_mut(),
+    }
+}
+
+/// Sets `*pz_err` to a `sqlite3_malloc`-owned copy of `msg` (SQLite frees it).
+unsafe fn set_err(pz_err: *mut *mut c_char, msg: &str) {
+    if pz_err.is_null() {
+        return;
+    }
+    let bytes = msg.as_bytes();
+    let p = sqlite3_malloc((bytes.len() + 1) as c_int) as *mut u8;
+    if p.is_null() {
+        return;
+    }
+    ptr::copy_nonoverlapping(bytes.as_ptr(), p, bytes.len());
+    *p.add(bytes.len()) = 0;
+    *pz_err = p as *mut c_char;
+}
+
+/// Quoted, db-qualified `anki_meta` table name (database-wide model metadata).
+fn meta_table_ident(db_name: &str) -> String {
+    format!("{}.{}", quote_ident(db_name), quote_ident("anki_meta"))
+}
+
+/// Records the active model's `(id, dim)` in `anki_meta` (idempotent upsert).
+unsafe fn write_meta(db: *mut sqlite3, meta_table: &str, id: &str, dim: usize) -> c_int {
+    let ddl = format!(
+        "CREATE TABLE IF NOT EXISTS {meta_table}(key TEXT PRIMARY KEY, value TEXT)"
+    );
+    if exec(db, &ddl) != SQLITE_OK {
+        return SQLITE_ERROR;
+    }
+    let sql = format!("INSERT OR REPLACE INTO {meta_table}(key, value) VALUES('model_id', ?), ('embed_dim', ?)");
+    let csql = match CString::new(sql) {
+        Ok(c) => c,
+        Err(_) => return SQLITE_ERROR,
+    };
+    let mut stmt: *mut sqlite3_stmt = ptr::null_mut();
+    if sqlite3_prepare_v2(db, csql.as_ptr(), -1, &mut stmt, ptr::null_mut()) != SQLITE_OK {
+        return SQLITE_ERROR;
+    }
+    sqlite3_bind_text(
+        stmt,
+        1,
+        id.as_ptr() as *const c_char,
+        id.len() as c_int,
+        transient(),
+    );
+    let dim_s = dim.to_string();
+    sqlite3_bind_text(
+        stmt,
+        2,
+        dim_s.as_ptr() as *const c_char,
+        dim_s.len() as c_int,
+        transient(),
+    );
+    let rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    if rc == SQLITE_DONE {
+        SQLITE_OK
+    } else {
+        SQLITE_ERROR
+    }
+}
+
+/// Reads `(model_id, dim)` from `anki_meta`, or `None` if absent/incomplete.
+unsafe fn read_meta(db: *mut sqlite3, meta_table: &str) -> Option<(String, usize)> {
+    let sql = format!("SELECT key, value FROM {meta_table}");
+    let csql = CString::new(sql).ok()?;
+    let mut stmt: *mut sqlite3_stmt = ptr::null_mut();
+    if sqlite3_prepare_v2(db, csql.as_ptr(), -1, &mut stmt, ptr::null_mut()) != SQLITE_OK {
+        return None;
+    }
+    let mut id: Option<String> = None;
+    let mut dim: Option<usize> = None;
+    while sqlite3_step(stmt) == SQLITE_ROW {
+        let key = column_to_cell(stmt, 0);
+        let val = column_to_cell(stmt, 1);
+        if let (Cell::Text(k), Cell::Text(v)) = (key, val) {
+            match k.as_str() {
+                "model_id" => id = Some(v),
+                "embed_dim" => dim = v.parse::<usize>().ok(),
+                _ => {}
+            }
+        }
+    }
+    sqlite3_finalize(stmt);
+    match (id, dim) {
+        (Some(i), Some(d)) => Some((i, d)),
+        _ => None,
     }
 }
 
@@ -757,6 +848,15 @@ unsafe extern "C" fn x_create(
         return rc;
     }
 
+    // Record the active model so a later reopen with a different model is caught.
+    if let Some((id, dim)) = crate::loader::current() {
+        let meta = meta_table_ident(&arg_str(argv, 1));
+        if write_meta(db, &meta, &id, dim) != SQLITE_OK {
+            drop(Box::from_raw(state));
+            return SQLITE_ERROR;
+        }
+    }
+
     let vt = Box::into_raw(Box::new(AnkiVtab {
         base: zeroed_vtab(),
         state,
@@ -771,13 +871,34 @@ unsafe extern "C" fn x_connect(
     argc: c_int,
     argv: *const *const c_char,
     pp_vtab: *mut *mut sqlite3_vtab,
-    _err: *mut *mut c_char,
+    pz_err: *mut *mut c_char,
 ) -> c_int {
     // Reopen: the shadow table already exists; reload its rows into memory.
     let state = match new_state(db, argc, argv) {
         Some(s) => s,
         None => return SQLITE_ERROR,
     };
+
+    // Guard against opening a table whose stored vectors were built with a
+    // different model (incompatible dimension / vector space).
+    if let Some((cur_id, cur_dim)) = crate::loader::current() {
+        let meta = meta_table_ident(&arg_str(argv, 1));
+        if let Some((stored_id, stored_dim)) = read_meta(db, &meta) {
+            let id_conflict = !stored_id.is_empty() && !cur_id.is_empty() && stored_id != cur_id;
+            if stored_dim != cur_dim || id_conflict {
+                set_err(
+                    pz_err,
+                    &format!(
+                        "anki: table built with model '{stored_id}' (dim {stored_dim}), \
+                         current model is '{cur_id}' (dim {cur_dim}) — reindex required"
+                    ),
+                );
+                drop(Box::from_raw(state));
+                return SQLITE_ERROR;
+            }
+        }
+    }
+
     load_all(&mut *state);
 
     let vt = Box::into_raw(Box::new(AnkiVtab {
@@ -1140,6 +1261,30 @@ unsafe extern "C" fn similarity_stub(
     sqlite3_result_null(ctx);
 }
 
+/// `anki_model()` — id of the loaded model, or `NULL` if none loaded.
+unsafe extern "C" fn anki_model_fn(
+    ctx: *mut sqlite3_context,
+    _argc: c_int,
+    _argv: *mut *mut sqlite3_value,
+) {
+    match crate::loader::current() {
+        Some((id, _)) if !id.is_empty() => result_text(ctx, &id),
+        _ => sqlite3_result_null(ctx),
+    }
+}
+
+/// `anki_dim()` — embedding dimension of the loaded model, or `NULL` if none.
+unsafe extern "C" fn anki_dim_fn(
+    ctx: *mut sqlite3_context,
+    _argc: c_int,
+    _argv: *mut *mut sqlite3_value,
+) {
+    match crate::loader::current() {
+        Some((_, dim)) => sqlite3_result_int64(ctx, dim as sqlite3_int64),
+        None => sqlite3_result_null(ctx),
+    }
+}
+
 static ANKI_MODULE: sqlite3_module = sqlite3_module {
     iVersion: 2,
     xCreate: Some(x_create),
@@ -1187,13 +1332,42 @@ pub unsafe extern "C" fn anki_register_vtab(db: *mut sqlite3) -> c_int {
     if rc != SQLITE_OK {
         return rc;
     }
-    sqlite3_create_function_v2(
+    let rc = sqlite3_create_function_v2(
         db,
         b"similarity\0".as_ptr() as *const c_char,
         1,
         SQLITE_UTF8,
         ptr::null_mut(),
         Some(similarity_stub),
+        None,
+        None,
+        None,
+    );
+    if rc != SQLITE_OK {
+        return rc;
+    }
+    // anki_model() / anki_dim() read the runtime-loaded model metadata.
+    let rc = sqlite3_create_function_v2(
+        db,
+        b"anki_model\0".as_ptr() as *const c_char,
+        0,
+        SQLITE_UTF8,
+        ptr::null_mut(),
+        Some(anki_model_fn),
+        None,
+        None,
+        None,
+    );
+    if rc != SQLITE_OK {
+        return rc;
+    }
+    sqlite3_create_function_v2(
+        db,
+        b"anki_dim\0".as_ptr() as *const c_char,
+        0,
+        SQLITE_UTF8,
+        ptr::null_mut(),
+        Some(anki_dim_fn),
         None,
         None,
         None,

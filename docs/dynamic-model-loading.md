@@ -1,7 +1,21 @@
 # Dynamic model loading (un-bundle the model)
 
-**Status:** planned — not yet implemented
+**Status:** ✅ implemented
 **Last updated:** 2026-06-24
+
+## Outcome
+
+- wasm dropped from **~106 MB → ~15.6 MB** (model no longer bundled; remaining
+  size is Tract + tokenizers).
+- Model is loaded at runtime from bytes via the exported `anki_load_model`;
+  `anki_model()` / `anki_dim()` reflect the loaded model (dynamic dim).
+- Model-mismatch guard fires on reopen with a clear error.
+- No-model state is graceful (NULL `anki_dim()`, `MATCH` returns nothing, no crash).
+- Verified in Node: dynamic load + vtab ranking, no-model behavior, mismatch
+  guard, persistence + transactions under dynamic load; host unit tests pass.
+
+Open items remaining: registry default is still the ~90 MB fp32 model (switch to
+quantized — decision #5); OPFS model cache; `onMismatch: "reindex"`.
 
 ## Goal
 

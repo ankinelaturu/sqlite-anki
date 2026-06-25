@@ -1,4 +1,8 @@
 //! ONNX sentence embedding via Tract.
+//!
+//! The model is **not** bundled. It is loaded at runtime from bytes handed in by
+//! the JS glue (see `docs/dynamic-model-loading.md`) via [`Embedder::load`]. The
+//! embedding dimension is a property of the loaded model, not a constant.
 
 use crate::error::AnkiError;
 use once_cell::sync::OnceCell;
@@ -8,41 +12,58 @@ use tokenizers::Tokenizer;
 use tract_core::prelude::*;
 use tract_onnx::prelude::*;
 
-/// Embedding dimension for the default `all-MiniLM-L6-v2` model.
-pub const EMBED_DIM: usize = 384;
-
-/// Logical model identifier baked into this build.
-pub const MODEL_ID: &str = "all-MiniLM-L6-v2";
-
 static EMBEDDER: OnceCell<Arc<Mutex<Embedder>>> = OnceCell::new();
 
-/// Sentence embedder backed by a bundled ONNX model and HuggingFace tokenizer.
+/// Sentence embedder backed by a runtime-loaded ONNX model and HF tokenizer.
 pub struct Embedder {
     model: SimplePlan<TypedFact, Box<dyn TypedOp>, Graph<TypedFact, Box<dyn TypedOp>>>,
     tokenizer: Tokenizer,
+    /// Output embedding dimension for the loaded model.
+    dim: usize,
 }
 
 impl Embedder {
-    /// Returns the shared embedder, initializing from bundled bytes on first use.
+    /// Returns the loaded shared embedder.
     ///
     /// # Errors
     ///
-    /// Returns [`AnkiError::Inference`] when the model fails to load or run.
+    /// Returns [`AnkiError::Inference`] if no model has been loaded yet (the JS
+    /// glue must call `anki_load_model` before any embedding happens).
     pub fn global() -> Result<Arc<Mutex<Embedder>>, AnkiError> {
         EMBEDDER
-            .get_or_try_init(|| {
-                let inner = Self::from_embedded()?;
-                Ok(Arc::new(Mutex::new(inner)))
-            })
-            .map(Arc::clone)
+            .get()
+            .cloned()
+            .ok_or_else(|| AnkiError::Inference("no model loaded".into()))
     }
 
-    /// Loads the embedder from ONNX + tokenizer bytes.
+    /// Loads the global embedder from ONNX + tokenizer bytes. First load wins;
+    /// a second call is rejected (one model per module instance for now).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AnkiError::Inference`] on parse failure or if already loaded.
+    pub fn load(model_onnx: &[u8], tokenizer_json: &str, dim: usize) -> Result<(), AnkiError> {
+        let embedder = Self::from_bytes(model_onnx, tokenizer_json, dim)?;
+        EMBEDDER
+            .set(Arc::new(Mutex::new(embedder)))
+            .map_err(|_| AnkiError::Inference("model already loaded".into()))
+    }
+
+    /// Returns the embedding dimension of the loaded model.
+    pub fn dim(&self) -> usize {
+        self.dim
+    }
+
+    /// Builds an embedder from ONNX + tokenizer bytes for a model of dimension `dim`.
     ///
     /// # Errors
     ///
     /// Returns [`AnkiError::Inference`] on parse or runtime failures.
-    pub fn from_bytes(model_onnx: &[u8], tokenizer_json: &str) -> Result<Self, AnkiError> {
+    pub fn from_bytes(
+        model_onnx: &[u8],
+        tokenizer_json: &str,
+        dim: usize,
+    ) -> Result<Self, AnkiError> {
         let tokenizer = Tokenizer::from_bytes(tokenizer_json.as_bytes())
             .map_err(|e| AnkiError::Inference(format!("tokenizer: {e}")))?;
 
@@ -54,30 +75,14 @@ impl Embedder {
             .into_runnable()
             .map_err(|e| AnkiError::Inference(format!("onnx runnable: {e}")))?;
 
-        Ok(Self { model, tokenizer })
+        Ok(Self {
+            model,
+            tokenizer,
+            dim,
+        })
     }
 
-    #[cfg(embedded_model)]
-    fn from_embedded() -> Result<Self, AnkiError> {
-        const MODEL: &[u8] = include_bytes!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../models/all-MiniLM-L6-v2/model.onnx"
-        ));
-        const TOKENIZER: &str = include_str!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../models/all-MiniLM-L6-v2/tokenizer.json"
-        ));
-        Self::from_bytes(MODEL, TOKENIZER)
-    }
-
-    #[cfg(not(embedded_model))]
-    fn from_embedded() -> Result<Self, AnkiError> {
-        Err(AnkiError::Inference(
-            "embedded model missing — run scripts/download-model.sh".into(),
-        ))
-    }
-
-    /// Embeds `text` into a fixed-size `f32` vector (length [`EMBED_DIM`]).
+    /// Embeds `text` into a fixed-size `f32` vector (length [`Embedder::dim`]).
     ///
     /// # Errors
     ///
@@ -137,12 +142,13 @@ impl Embedder {
             .as_slice()
             .ok_or_else(|| AnkiError::Inference("non-contiguous ONNX output".into()))?;
 
-        // all-MiniLM ONNX outputs token embeddings [1, seq, 384]; the sentence
-        // embedding is the mean over tokens (no padding for a single input, so a
-        // plain mean equals masked mean pooling). Some exports already pool to
-        // [1, 384].
+        // Sentence-transformer ONNX outputs token embeddings [1, seq, dim]; the
+        // sentence embedding is the mean over tokens (no padding for a single
+        // input, so a plain mean equals masked mean pooling). Some exports
+        // already pool to [1, dim].
+        let dim = self.dim;
         let pooled: Vec<f32> = match shape.as_slice() {
-            [_, seq, hid] if *hid == EMBED_DIM => {
+            [_, seq, hid] if *hid == dim => {
                 let (seq, hid) = (*seq, *hid);
                 let mut v = vec![0f32; hid];
                 for t in 0..seq {
@@ -157,11 +163,11 @@ impl Embedder {
                 }
                 v
             }
-            [_, hid] if *hid == EMBED_DIM => slice[..EMBED_DIM].to_vec(),
-            _ if slice.len() == EMBED_DIM => slice.to_vec(),
+            [_, hid] if *hid == dim => slice[..dim].to_vec(),
+            _ if slice.len() == dim => slice.to_vec(),
             _ => {
                 return Err(AnkiError::Inference(format!(
-                    "unexpected ONNX output shape {shape:?}"
+                    "unexpected ONNX output shape {shape:?} for dim {dim}"
                 )))
             }
         };
@@ -184,10 +190,9 @@ mod tests {
     use super::*;
 
     #[test]
-    #[cfg(embedded_model)]
-    fn embed_produces_correct_dim() {
-        let emb = Embedder::from_embedded().expect("model");
-        let v = emb.embed("hello world").expect("embed");
-        assert_eq!(v.len(), EMBED_DIM);
+    fn normalize_unit_length() {
+        let v = normalize_l2(&[3.0, 4.0]);
+        let norm: f32 = v.iter().map(|x| x * x).sum::<f32>().sqrt();
+        assert!((norm - 1.0).abs() < 1e-6);
     }
 }
