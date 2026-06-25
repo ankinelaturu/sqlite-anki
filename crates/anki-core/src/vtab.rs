@@ -946,6 +946,23 @@ unsafe fn rebuild_indexes(st: &mut TableState) {
 }
 
 // --- module callbacks --------------------------------------------------------
+//
+// These are the entry points SQLite calls — *we never call SQLite to "run a
+// query"*. This module is a row SOURCE, not a query interceptor: SQLite's
+// planner owns the query, and our table is just one input it pulls rows from.
+// The query's `WHERE`/`ORDER BY`/`LIMIT` are applied by SQLite to the rows we
+// emit; all we control is which rows we emit and in what order.
+//
+// Lifecycle for a `SELECT ... FROM anki_table WHERE col MATCH ? AND x = ?`:
+//   xCreate/xConnect   build per-table state (once per table / per connection)
+//   xBestIndex         planning: SQLite offers the WHERE constraints; we say
+//                      which we'll handle and how (encoded into idxStr)
+//   xOpen              make a cursor for one scan
+//   xFilter            start the scan: embed the query, build the result list
+//   xEof/xColumn/xNext/xRowid   hand rows back one at a time
+//   xClose             done
+// `similarity()` (via xFindFunction) reads the current cursor's score; xUpdate
+// handles writes. The constraint values (`?`) arrive in xFilter's `argv`.
 
 unsafe extern "C" fn x_create(
     db: *mut sqlite3,
@@ -956,16 +973,17 @@ unsafe extern "C" fn x_create(
     _err: *mut *mut c_char,
 ) -> c_int {
     // argv[0]=module, [1]=db, [2]=table, [3..]=column definitions.
+    // new_state parses the columns and declares the user-facing schema to SQLite.
     let state = match new_state(db, argc, argv) {
-        Some(s) => s,
+        Some(s) => s, // raw *mut TableState we now own
         None => return SQLITE_ERROR,
     };
 
-    // Create the persistent shadow table on first CREATE.
+    // Create the persistent shadow table (`<name>_data`) backing this vtab.
     let ddl = build_ddl(&(*state).data_table, (*state).ncol, &(*state).vector_cols);
     let rc = exec(db, &ddl);
     if rc != SQLITE_OK {
-        drop(Box::from_raw(state));
+        drop(Box::from_raw(state)); // reclaim the leaked state on the error path
         return rc;
     }
 
@@ -978,6 +996,9 @@ unsafe extern "C" fn x_create(
         }
     }
 
+    // Hand ownership of the vtab object to SQLite via *pp_vtab; it lives until
+    // xDisconnect/xDestroy. The base sqlite3_vtab must be the first field so the
+    // pointer can be cast both ways.
     let vt = Box::into_raw(Box::new(AnkiVtab {
         base: zeroed_vtab(),
         state,
@@ -1090,48 +1111,68 @@ unsafe extern "C" fn x_rollback_to(vtab: *mut sqlite3_vtab, _n: c_int) -> c_int 
     SQLITE_OK
 }
 
+/// Planning callback. SQLite has already decomposed the `WHERE` clause into
+/// simple `column OP value` constraints (it cannot offer OR / functions /
+/// column-vs-column — those it evaluates itself afterward). For each constraint
+/// we either "claim" it (assign an `argvIndex`, so its value is delivered to
+/// `xFilter`) or ignore it (SQLite applies it to our output).
+///
+/// We claim:
+///   - `MATCH` on a vector column, with `omit=1` (we fully satisfy it), and
+///   - the comparison ops (=,<>,<,<=,>,>=) on any column, with `omit=0` so
+///     SQLite still re-checks them — that lets our pre-filter be a conservative
+///     narrowing rather than an exact filter.
+/// The chosen plan is serialized into `idxStr` (token per claimed constraint,
+/// in argv order) for `xFilter` to read back. `estimatedCost` nudges the
+/// planner toward the filtered/pre-filter plan.
 unsafe extern "C" fn x_best_index(vtab: *mut sqlite3_vtab, info: *mut sqlite3_index_info) -> c_int {
     let vt = &*(vtab as *mut AnkiVtab);
     let st = &*vt.state;
     let info = &mut *info;
     let ncol = st.columns.len();
 
-    // Claim a MATCH on a vector column and any equality/range filters on other
-    // columns. Tokens are emitted in argv order; filters keep `omit = 0` so
-    // SQLite still verifies them (our pre-filter only narrows).
+    // Walk the offered constraints. `argv_n` is the 1-based slot each claimed
+    // constraint's value will occupy in xFilter's argv; we record the same order
+    // in `tokens` so xFilter can map argv[k] back to (kind, column, op).
     let mut tokens: Vec<String> = Vec::new();
     let mut argv_n: c_int = 0;
     let mut has_match = false;
     let mut has_filter = false;
 
     for i in 0..info.nConstraint as isize {
-        let c = &*info.aConstraint.offset(i);
+        let c = &*info.aConstraint.offset(i); // i-th constraint SQLite is offering
         if c.usable == 0 {
-            continue;
+            continue; // not usable in this plan (e.g. on the wrong side of a join)
         }
-        let col = c.iColumn;
+        let col = c.iColumn; // which table column this constraint is on
         if col < 0 || (col as usize) >= ncol {
-            continue;
+            continue; // rowid (-1) or out of range — we don't push these
         }
+        // aConstraintUsage[i] is our reply slot for constraint i.
         let u = &mut *info.aConstraintUsage.offset(i);
         if !has_match
             && c.op == SQLITE_INDEX_CONSTRAINT_MATCH
             && st.columns[col as usize].is_vector
         {
+            // Semantic search on a TEXT VECTOR column. Take the first one.
             argv_n += 1;
-            u.argvIndex = argv_n;
+            u.argvIndex = argv_n; // its RHS arrives as xFilter argv[argv_n-1]
             u.omit = 1; // MATCH is fully handled here
             has_match = true;
-            tokens.push(format!("m{col}"));
+            tokens.push(format!("m{col}")); // record: argv slot -> MATCH on `col`
         } else if is_filter_op(c.op) {
+            // A relational comparison (=,<>,<,<=,>,>=) we can pre-filter on.
             argv_n += 1;
             u.argvIndex = argv_n;
             u.omit = 0; // SQLite re-checks; pre-filter only narrows
             has_filter = true;
-            tokens.push(format!("f{col},{}", c.op));
+            tokens.push(format!("f{col},{}", c.op)); // record: filter on `col`/`op`
         }
+        // anything else: left unclaimed -> SQLite evaluates it on our output
     }
 
+    // Tell the planner this plan is usable and roughly how cheap it is. Lower =
+    // preferred; the filtered/pre-filter plans are cheapest so SQLite picks them.
     info.idxNum = if has_match || has_filter { 1 } else { 0 };
     info.estimatedCost = if has_match {
         // Pre-filtering avoids the post-filter recall cliff; prefer this plan.
@@ -1151,6 +1192,8 @@ unsafe extern "C" fn x_best_index(vtab: *mut sqlite3_vtab, info: *mut sqlite3_in
     SQLITE_OK
 }
 
+/// Opens a cursor for one scan. The cursor holds the *materialized result list*
+/// that `xFilter` will populate; `xNext`/`xEof`/`xColumn`/`xRowid` then walk it.
 unsafe extern "C" fn x_open(vtab: *mut sqlite3_vtab, pp: *mut *mut sqlite3_vtab_cursor) -> c_int {
     let cur = Box::into_raw(Box::new(AnkiCursor {
         base: sqlite3_vtab_cursor { pVtab: vtab },
@@ -1171,6 +1214,16 @@ unsafe extern "C" fn x_close(cur: *mut sqlite3_vtab_cursor) -> c_int {
     SQLITE_OK
 }
 
+/// Starts a scan: decodes the plan from `idxStr`, reads the constraint values
+/// from `argv`, and builds the cursor's result list. This is where the
+/// "filter-first vs MATCH-first" decision lives. Three shapes:
+///   1. MATCH + relational filter → PRE-FILTER: rank only rows passing the
+///      filter (no candidate cap over the subset → no recall cliff).
+///   2. MATCH only → HNSW over the whole table (or exact scan if no index yet).
+///   3. no MATCH → a (possibly filtered) plain scan; `similarity()` stays NULL.
+/// SQLite re-applies every `WHERE` term to the rows we emit, so correctness does
+/// not depend on us getting the filter exactly right — only on emitting a
+/// superset of the matching rows.
 unsafe extern "C" fn x_filter(
     cur: *mut sqlite3_vtab_cursor,
     _idx_num: c_int,
@@ -1178,26 +1231,29 @@ unsafe extern "C" fn x_filter(
     _argc: c_int,
     argv: *mut *mut sqlite3_value,
 ) -> c_int {
-    let c = &mut *(cur as *mut AnkiCursor);
-    let st = &mut *(*c.vtab).state;
+    let c = &mut *(cur as *mut AnkiCursor); // our cursor (subclass of the base)
+    let st = &mut *(*c.vtab).state; // the shared per-table state
 
     // Resync the cache if a prior transaction rolled back the shadow table.
     if st.dirty {
         load_all(st);
     }
 
+    // Reset the cursor for a fresh scan.
     c.results.clear();
     c.pos = 0;
     c.match_col = -1;
 
+    // Decode the plan x_best_index chose (which argv slots are MATCH vs filters).
     let plan = parse_idx_str(idx_str);
 
-    // Resolve each pushed filter's right-hand value from argv.
+    // Pair each pushed filter with its actual RHS value from argv (e.g. 'active').
     let preds: Vec<(usize, u8, Cell)> = plan
         .filters
         .iter()
         .map(|f| (f.col, f.op, value_to_cell(*argv.offset(f.slot as isize))))
         .collect();
+    // A row survives the relational filter iff it satisfies every pushed pred.
     let row_passes = |row: &Row| -> bool {
         preds.iter().all(|(col, op, rhs)| {
             row.cells
@@ -1207,9 +1263,11 @@ unsafe extern "C" fn x_filter(
     };
 
     match plan.match_ {
+        // --- has a semantic MATCH ---
         Some((col, slot)) => {
-            c.match_col = col as i32;
+            c.match_col = col as i32; // remember it so similarity() can read scores
             let query = value_to_string(*argv.offset(slot as isize));
+            // Embed the query text once; empty/None query => no results.
             if let Some(q) = query.as_deref().and_then(embed_text) {
                 if preds.is_empty() {
                     // No relational filter: HNSW (or exact scan with no index).
@@ -1270,6 +1328,9 @@ unsafe extern "C" fn x_filter(
     SQLITE_OK
 }
 
+// Advance to the next result row. We also stash the cursor globally so a
+// `similarity()` call evaluated for this row can find its score (see
+// similarity_fn / CURRENT_CURSOR).
 unsafe extern "C" fn x_next(cur: *mut sqlite3_vtab_cursor) -> c_int {
     let c = &mut *(cur as *mut AnkiCursor);
     c.pos += 1;
@@ -1277,11 +1338,14 @@ unsafe extern "C" fn x_next(cur: *mut sqlite3_vtab_cursor) -> c_int {
     SQLITE_OK
 }
 
+// End-of-scan when we've walked past the last materialized result.
 unsafe extern "C" fn x_eof(cur: *mut sqlite3_vtab_cursor) -> c_int {
     let c = &*(cur as *mut AnkiCursor);
     (c.pos >= c.results.len()) as c_int
 }
 
+// Return column `i` of the current result row. The result list holds rowids;
+// the actual cell values come from the in-memory cache keyed by rowid.
 unsafe extern "C" fn x_column(
     cur: *mut sqlite3_vtab_cursor,
     ctx: *mut sqlite3_context,
@@ -1306,12 +1370,22 @@ unsafe extern "C" fn x_column(
     SQLITE_OK
 }
 
+// The current row's rowid (our internal id), used by SQLite to join/order.
 unsafe extern "C" fn x_rowid(cur: *mut sqlite3_vtab_cursor, p: *mut sqlite3_int64) -> c_int {
     let c = &*(cur as *mut AnkiCursor);
     *p = c.results.get(c.pos).map(|r| r.rowid).unwrap_or(0);
     SQLITE_OK
 }
 
+/// All writes (INSERT/UPDATE/DELETE) funnel through here via SQLite's protocol,
+/// encoded in `argc`/`argv`:
+///   - `argc == 1`            → DELETE the row whose rowid is `argv[0]`.
+///   - `argv[0]` is NULL      → INSERT (`argv[1]` = new rowid or NULL; columns
+///                              follow in `argv[2..]`).
+///   - `argv[0]` non-NULL     → UPDATE the row `argv[0]` (rowid may change to
+///                              `argv[1]`).
+/// On insert/update we (re-)embed each `TEXT VECTOR` column, write through to
+/// the shadow table, update the cache, and mark the HNSW index dirty.
 unsafe extern "C" fn x_update(
     vtab: *mut sqlite3_vtab,
     argc: c_int,
@@ -1336,20 +1410,24 @@ unsafe extern "C" fn x_update(
         return SQLITE_OK;
     }
 
+    // INSERT or UPDATE. argv[0]=old rowid (NULL for insert), argv[1]=new rowid,
+    // argv[2..]=the column values in declared order.
     let old = *argv.offset(0);
     let new_rowid_v = *argv.offset(1);
     let ncol = st.ncol;
 
+    // Read the new column values into our Cell representation.
     let mut cells: Vec<Cell> = Vec::with_capacity(ncol);
     for i in 0..ncol {
         cells.push(value_to_cell(*argv.offset(2 + i as isize)));
     }
 
+    // (Re-)embed each TEXT VECTOR column; non-vector or non-text cells get none.
     let mut embeddings: Vec<Option<Vec<f32>>> = Vec::with_capacity(ncol);
     for i in 0..ncol {
         let emb = if st.columns[i].is_vector {
             match &cells[i] {
-                Cell::Text(s) => embed_text(s),
+                Cell::Text(s) => embed_text(s), // None for empty/whitespace text
                 _ => None,
             }
         } else {
@@ -1359,6 +1437,7 @@ unsafe extern "C" fn x_update(
     }
 
     let is_insert = sqlite3_value_type(old) == SQLITE_NULL;
+    // Use the rowid SQLite supplies, or assign the next one for a bare INSERT.
     let rowid = if sqlite3_value_type(new_rowid_v) != SQLITE_NULL {
         sqlite3_value_int64(new_rowid_v)
     } else {
@@ -1372,6 +1451,7 @@ unsafe extern "C" fn x_update(
         return rc;
     }
 
+    // UPDATE that moves the rowid: drop the old entry first.
     if !is_insert {
         let oldid = sqlite3_value_int64(old);
         if oldid != rowid {
@@ -1380,13 +1460,14 @@ unsafe extern "C" fn x_update(
         }
     }
 
+    // Update the in-memory cache and bookkeeping (index rebuilt lazily on query).
     st.rows.insert(rowid, Row { cells, embeddings });
     if rowid >= st.next_rowid {
         st.next_rowid = rowid + 1;
     }
     st.index_dirty = true;
     if !p_rowid.is_null() {
-        *p_rowid = rowid;
+        *p_rowid = rowid; // report the rowid SQLite should associate with the row
     }
     SQLITE_OK
 }
