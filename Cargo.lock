@@ -46,7 +46,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "anki-wasm-minilm"
+name = "anki-wasm"
 version = "0.1.0"
 dependencies = [
  "anki-core",

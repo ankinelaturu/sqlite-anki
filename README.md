@@ -25,9 +25,9 @@ pnpm build:wasm   # Custom WASM (stub until Emscripten pipeline is wired)
 ## Monorepo layout
 
 ```
-crates/           Rust extension (anki-core, anki-wasm-minilm)
+crates/           Rust extension (anki-core, anki-wasm)
 packages/
-  wasm-minilm/    SQLite WASM bundle (@sqlite-anki/wasm-minilm)
+  wasm/    SQLite WASM bundle (@sqlite-anki/wasm)
   db-client/      Worker + schema + CRUD API (@sqlite-anki/db-client)
 apps/
   explorer/       Two-panel test SPA (@sqlite-anki/explorer)

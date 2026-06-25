@@ -12,7 +12,7 @@ models/**/*.onnx
 models/**/*.onnx.data
 
 # WASM build output
-packages/wasm-minilm/dist/
+packages/wasm/dist/
 
 # Vendored SQLite + Emscripten (fetched by scripts/build-wasm.sh)
 vendor/sqlite/

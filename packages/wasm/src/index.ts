@@ -152,7 +152,7 @@ export async function loadAnkiModel(
   const wasm = (sqlite3 as any).wasm;
   if (!wasm?.exports?.anki_load_model) {
     throw new Error(
-      "anki: this build has no anki_load_model — use the custom @sqlite-anki/wasm-minilm build, not upstream @sqlite.org/sqlite-wasm"
+      "anki: this build has no anki_load_model — use the custom @sqlite-anki/wasm build, not upstream @sqlite.org/sqlite-wasm"
     );
   }
 

@@ -77,7 +77,7 @@ const sqlite3 = await sqlite3Init({
   `anki_register_vtab`) so they read the **runtime** metadata. `anki_version()`
   stays a build constant.
 
-### 3. `crates/anki-wasm-minilm/src/lib.rs`
+### 3. `crates/anki-wasm/src/lib.rs`
 - Remove `anki_embedder_init` (no eager warm-up). lib.rs becomes minimal (keeps
   anki-core linked).
 
@@ -98,7 +98,7 @@ const sqlite3 = await sqlite3Init({
 - `scripts/download-model.sh` becomes a dev/test convenience (self-hosting), not
   part of the build.
 
-### 7. JS glue — `packages/wasm-minilm/src/index.ts`
+### 7. JS glue — `packages/wasm/src/index.ts`
 - Export `sqlite3Init(opts)`: `await sqlite3InitModule()` → if `opts.anki`,
   resolve id/URLs from a JS **registry**, `fetch` model + tokenizer (HTTP cache
   for now; OPFS later), `sqlite3.wasm.allocFromTypedArray(...)`, call

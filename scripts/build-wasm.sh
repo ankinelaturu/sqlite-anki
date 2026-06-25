@@ -5,7 +5,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 VENDOR="${SQLITE_SRC:-$ROOT/vendor/sqlite}"
 SQLITE_TAG="${SQLITE_TAG:-version-3.49.1}"
-DIST="$ROOT/packages/wasm-minilm/dist"
+DIST="$ROOT/packages/wasm/dist"
 # Emscripten target so Rust's ABI + getrandom backend match the emcc link
 # (vs. wasm32-unknown-unknown, which mismatches the triple and needs JS RNG shims).
 WASM_TARGET="wasm32-unknown-emscripten"
@@ -61,10 +61,10 @@ need_cmd wasm-strip
 # the members it needs. Loose .bc files omit the sysroot and break the link the
 # moment the embedder is actually reachable.
 
-echo "==> Building anki-wasm-minilm ($WASM_TARGET, staticlib)"
-cargo build -p anki-wasm-minilm --target "$WASM_TARGET" --release
+echo "==> Building anki-wasm ($WASM_TARGET, staticlib)"
+cargo build -p anki-wasm --target "$WASM_TARGET" --release
 
-ANKI_LIB="$CARGO_TARGET/libanki_wasm_minilm.a"
+ANKI_LIB="$CARGO_TARGET/libanki_wasm.a"
 [[ -f "$ANKI_LIB" ]] || die "missing staticlib $ANKI_LIB (cargo build failed?)"
 
 echo "    linking $ANKI_LIB"
@@ -129,11 +129,12 @@ make -C "$WASM_DIR" -j"$(sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || e
   "emcc.flags.sqlite3=${ANKI_LINK}" \
   jswasm/sqlite3.mjs \
   jswasm/sqlite3-bundler-friendly.mjs \
+  jswasm/sqlite3-node.mjs \
   jswasm/sqlite3-worker1.js \
   jswasm/sqlite3-worker1-bundler-friendly.mjs \
   jswasm/sqlite3-opfs-async-proxy.js
 
-# --- Publish to packages/wasm-minilm/dist --------------------------------------
+# --- Publish to packages/wasm/dist ---------------------------------------------
 
 echo "==> Copying artifacts to $DIST"
 mkdir -p "$DIST"
@@ -142,6 +143,7 @@ for f in \
   "$WASM_DIR/jswasm/sqlite3.mjs" \
   "$WASM_DIR/jswasm/sqlite3.wasm" \
   "$WASM_DIR/jswasm/sqlite3-bundler-friendly.mjs" \
+  "$WASM_DIR/jswasm/sqlite3-node.mjs" \
   "$WASM_DIR/jswasm/sqlite3-worker1.js" \
   "$WASM_DIR/jswasm/sqlite3-worker1-bundler-friendly.mjs" \
   "$WASM_DIR/jswasm/sqlite3-opfs-async-proxy.js" \
@@ -162,5 +164,5 @@ built: $(date -u +"%Y-%m-%dT%H:%M:%SZ")
 EOF
 
 echo ""
-echo "Done. Custom WASM is in packages/wasm-minilm/dist/"
+echo "Done. Custom WASM is in packages/wasm/dist/"
 echo "Run: pnpm --filter @sqlite-anki/explorer dev"

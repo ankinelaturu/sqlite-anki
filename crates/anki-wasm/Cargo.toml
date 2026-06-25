@@ -1,6 +1,6 @@
 [package]
-name = "anki-wasm-minilm"
-description = "sqlite-anki WASM build with all-MiniLM-L6-v2 bundled"
+name = "anki-wasm"
+description = "sqlite-anki extension compiled to WASM (model loaded at runtime, not bundled)"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

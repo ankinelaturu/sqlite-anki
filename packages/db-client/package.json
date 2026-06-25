@@ -13,7 +13,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@sqlite-anki/wasm-minilm": "workspace:*",
+    "@sqlite-anki/wasm": "workspace:*",
     "comlink": "^4.4.2"
   },
   "devDependencies": {

@@ -38,9 +38,9 @@ importers:
 
   packages/db-client:
     dependencies:
-      '@sqlite-anki/wasm-minilm':
+      '@sqlite-anki/wasm':
         specifier: workspace:*
-        version: link:../wasm-minilm
+        version: link:../wasm
       comlink:
         specifier: ^4.4.2
         version: 4.4.2
@@ -52,7 +52,7 @@ importers:
         specifier: ^5.8.3
         version: 5.9.3
 
-  packages/wasm-minilm:
+  packages/wasm:
     dependencies:
       '@sqlite.org/sqlite-wasm':
         specifier: ^3.49.1-build4

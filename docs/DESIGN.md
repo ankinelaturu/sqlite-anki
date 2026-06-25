@@ -701,14 +701,14 @@ sqlite-anki/
 ├── pnpm-workspace.yaml
 ├── crates/
 │   ├── anki-core/                # vtab module, Tract embedder, hnsw_rs
-│   └── anki-wasm-minilm/         # include_bytes! model; links into SQLite WASM
+│   └── anki-wasm/         # include_bytes! model; links into SQLite WASM
 ├── wasm/
 │   ├── sqlite3_wasm_extra_init.c
 │   └── README.md                 # build instructions (Makefile when wired)
 ├── models/
 │   └── all-MiniLM-L6-v2/         # ONNX + tokenizer (not committed until pinned)
 ├── packages/
-│   ├── wasm-minilm/              # @sqlite-anki/wasm-minilm — sqlite3.js + .wasm
+│   ├── wasm/              # @sqlite-anki/wasm — sqlite3.js + .wasm
 │   └── db-client/                # @sqlite-anki/db-client — worker + schema + CRUD
 ├── apps/
 │   └── explorer/                 # @sqlite-anki/explorer — SPA test harness
@@ -722,10 +722,10 @@ sqlite-anki/
 | Path | Role |
 |------|------|
 | `crates/` | Rust sqlite-anki extension (no UI) |
-| `packages/wasm-minilm/` | WASM bundle consumed by apps; stub uses `@sqlite.org/sqlite-wasm` until custom build |
+| `packages/wasm/` | WASM bundle consumed by apps; stub uses `@sqlite.org/sqlite-wasm` until custom build |
 | `packages/db-client/` | Typed TS API: OPFS worker, schema introspection, CRUD, semantic search |
 | `apps/explorer/` | Two-panel SPA for manual testing |
-| `scripts/build-wasm.sh` | Builds custom WASM and copies into `packages/wasm-minilm/dist/` |
+| `scripts/build-wasm.sh` | Builds custom WASM and copies into `packages/wasm/dist/` |
 
 ---
 
@@ -777,7 +777,7 @@ apps/explorer  →  packages/db-client  →  Web Worker  →  sqlite3.wasm (OPFS
 ```
 
 - Vite dev server sets **COOP/COEP** headers required for OPFS.
-- Worker uses `@sqlite-anki/wasm-minilm` (custom build when available).
+- Worker uses `@sqlite-anki/wasm` (custom build when available).
 
 ### Commands
 

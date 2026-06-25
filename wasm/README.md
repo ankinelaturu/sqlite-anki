@@ -21,13 +21,13 @@ pnpm build:wasm
 
 This script:
 
-1. Builds `anki-wasm-minilm` as LLVM bitcode (`RUSTFLAGS=--emit=llvm-bc`)
+1. Builds `anki-wasm` as LLVM bitcode (`RUSTFLAGS=--emit=llvm-bc`)
 2. Fetches SQLite `version-3.49.1` into `vendor/sqlite/` (override with `SQLITE_SRC`)
 3. Installs `wasm/sqlite3_wasm_extra_init.c` → `ext/wasm/sqlite3_wasm_extra_init.c`
 4. Runs the official `ext/wasm` Makefile, appending Rust `.bc` files to the emcc link
-5. Copies `jswasm/*` artifacts to `packages/wasm-minilm/dist/`
+5. Copies `jswasm/*` artifacts to `packages/wasm/dist/`
 
-`@sqlite-anki/wasm-minilm` loads the custom `dist/` bundle when present; otherwise it re-exports `@sqlite.org/sqlite-wasm`.
+`@sqlite-anki/wasm` loads the custom `dist/` bundle when present; otherwise it re-exports `@sqlite.org/sqlite-wasm`.
 
 ## Environment
 

@@ -1,7 +1,7 @@
 /**
  * SQLite worker: runs the WASM engine and OPFS database off the main thread.
  */
-import initSqliteAnki from "@sqlite-anki/wasm-minilm";
+import initSqliteAnki from "@sqlite-anki/wasm";
 import * as Comlink from "comlink";
 import type {
   AnkiDatabaseApi,
