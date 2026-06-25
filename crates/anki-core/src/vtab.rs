@@ -14,6 +14,7 @@
 
 use crate::embedder::Embedder;
 use crate::hnsw::Hnsw;
+use crate::match_query::{parse_match, Mode};
 use crate::{DEFAULT_SIMILARITY_THRESHOLD, HNSW_CANDIDATE_CAP};
 use core::cmp::Ordering;
 use std::collections::BTreeMap;
@@ -945,6 +946,34 @@ unsafe fn rebuild_indexes(st: &mut TableState) {
     st.index_dirty = false;
 }
 
+/// Brute-force cosine over `rows` for column `col`, pushing rows above the
+/// similarity threshold into `results`. With `filter`, only rows passing it are
+/// considered (the relational pre-filter). No candidate cap — exact + complete.
+fn exact_scan(
+    results: &mut Vec<MatchRow>,
+    rows: &BTreeMap<i64, Row>,
+    col: usize,
+    q: &[f32],
+    filter: Option<&dyn Fn(&Row) -> bool>,
+) {
+    for (rowid, row) in rows.iter() {
+        if let Some(f) = filter {
+            if !f(row) {
+                continue;
+            }
+        }
+        if let Some(Some(emb)) = row.embeddings.get(col) {
+            let sim = cosine(q, emb);
+            if sim >= DEFAULT_SIMILARITY_THRESHOLD {
+                results.push(MatchRow {
+                    rowid: *rowid,
+                    sim: Some(sim),
+                });
+            }
+        }
+    }
+}
+
 // --- module callbacks --------------------------------------------------------
 //
 // These are the entry points SQLite calls — *we never call SQLite to "run a
@@ -1266,49 +1295,58 @@ unsafe extern "C" fn x_filter(
         // --- has a semantic MATCH ---
         Some((col, slot)) => {
             c.match_col = col as i32; // remember it so similarity() can read scores
-            let query = value_to_string(*argv.offset(slot as isize));
-            // Embed the query text once; empty/None query => no results.
-            if let Some(q) = query.as_deref().and_then(embed_text) {
-                if preds.is_empty() {
-                    // No relational filter: HNSW (or exact scan with no index).
-                    if st.index_dirty {
-                        rebuild_indexes(st);
+
+            // Parse the MATCH DSL ("query[/mode[:candidates]]"). A parse error
+            // (bad directive) sets the vtab error and aborts the scan.
+            let raw = value_to_string(*argv.offset(slot as isize));
+            let mq = match raw.as_deref() {
+                Some(s) => match parse_match(s) {
+                    Ok(mq) => Some(mq),
+                    Err(e) => {
+                        set_err(&mut (*c.vtab).base.zErrMsg, &format!("anki: {e}"));
+                        return SQLITE_ERROR;
                     }
-                    match st.indexes.get(col).and_then(|o| o.as_ref()) {
-                        Some(idx) => {
-                            let k = HNSW_CANDIDATE_CAP.min(st.rows.len());
-                            for (rowid, sim) in idx.search(&q, k, HNSW_CANDIDATE_CAP) {
-                                if sim >= DEFAULT_SIMILARITY_THRESHOLD {
-                                    c.results.push(MatchRow { rowid, sim: Some(sim) });
-                                }
+                },
+                None => None, // NULL match value => no results
+            };
+
+            // Embed the query text once; empty/None query => no results.
+            if let Some(q) = mq.as_ref().and_then(|m| embed_text(&m.query)) {
+                let mq = mq.unwrap();
+                if preds.is_empty() {
+                    // No relational filter. `mode` chooses the strategy here.
+                    match mq.mode {
+                        Mode::Hnsw => {
+                            if st.index_dirty {
+                                rebuild_indexes(st);
                             }
-                        }
-                        None => {
-                            for (rowid, row) in st.rows.iter() {
-                                if let Some(Some(emb)) = row.embeddings.get(col) {
-                                    let sim = cosine(&q, emb);
-                                    if sim >= DEFAULT_SIMILARITY_THRESHOLD {
-                                        c.results.push(MatchRow { rowid: *rowid, sim: Some(sim) });
+                            let cap = mq.candidates.unwrap_or(HNSW_CANDIDATE_CAP);
+                            match st.indexes.get(col).and_then(|o| o.as_ref()) {
+                                Some(idx) => {
+                                    let k = cap.min(st.rows.len());
+                                    for (rowid, sim) in idx.search(&q, k, cap) {
+                                        if sim >= DEFAULT_SIMILARITY_THRESHOLD {
+                                            c.results.push(MatchRow { rowid, sim: Some(sim) });
+                                        }
                                     }
                                 }
+                                None => exact_scan(&mut c.results, &st.rows, col, &q, None),
                             }
                         }
+                        // exact: brute-force over all rows, no candidate cap.
+                        Mode::Exact => exact_scan(&mut c.results, &st.rows, col, &q, None),
                     }
                 } else {
-                    // Pre-filter: rank only the rows passing the relational
-                    // filter. No candidate cap over the filtered subset, so no
-                    // post-filter recall cliff (see docs/hybrid-filtering.md).
-                    for (rowid, row) in st.rows.iter() {
-                        if !row_passes(row) {
-                            continue;
-                        }
-                        if let Some(Some(emb)) = row.embeddings.get(col) {
-                            let sim = cosine(&q, emb);
-                            if sim >= DEFAULT_SIMILARITY_THRESHOLD {
-                                c.results.push(MatchRow { rowid: *rowid, sim: Some(sim) });
-                            }
-                        }
-                    }
+                    // Relational filter present: rank only the rows passing it.
+                    // Brute-force over that subset (no cap → no recall cliff);
+                    // this path is already exact regardless of `mode`.
+                    exact_scan(
+                        &mut c.results,
+                        &st.rows,
+                        col,
+                        &q,
+                        Some(&row_passes as &dyn Fn(&Row) -> bool),
+                    );
                 }
                 c.results
                     .sort_by(|a, b| b.sim.partial_cmp(&a.sim).unwrap_or(Ordering::Equal));
