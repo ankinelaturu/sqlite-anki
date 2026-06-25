@@ -1,7 +1,34 @@
 # Hybrid filtering (relational `WHERE` + semantic `MATCH`)
 
-**Status:** known limitation — pushdown not yet implemented
-**Last updated:** 2026-06-24
+**Status:** ✅ implemented (equality/range pushdown + pre-filter)
+**Last updated:** 2026-06-25
+
+## Outcome
+
+Equality/range filters are pushed down and, when present, the vtab **pre-filters**
+— it ranks only the rows passing the filter instead of ranking everything and
+filtering after. This eliminates the post-filter recall cliff: a row that passes
+the filter is never dropped because non-matching rows are more similar.
+
+- `xBestIndex` claims `MATCH` (`omit=1`) plus `=,<>,<,<=,>,>=` constraints
+  (`omit=0`, so SQLite still verifies — the pre-filter only has to *narrow*),
+  encoding the plan into `idxStr`.
+- `xFilter` evaluates the pushed predicates against the in-memory cache and, when
+  a filter is present, brute-force ranks the surviving subset (no candidate cap →
+  no cliff). With no filter it uses the HNSW path as before.
+- Verified by `packages/wasm/test/hybrid-filtering.test.mjs`, including a cliff
+  case: 3 `active` rows are all returned despite 300 more-similar `archived` rows.
+
+Chosen trade-offs (see "Decisions" history): **in-memory** predicate evaluation
+(not a shadow-btree query); **always** pre-filter when a pushable filter is
+present (no selectivity heuristic yet); push down the six comparison ops only
+(LIKE/GLOB/OR/functions stay post-filtered by SQLite, still correct).
+
+### Still open
+- Selectivity heuristic (fall back to HNSW for non-selective filters over very
+  large tables — pre-filtering is correct there, just brute-force).
+- Pushdown via the shadow btree's real indexes (for huge filtered sets).
+- Multiple simultaneous `MATCH` columns (separate limitation).
 
 ## The query that matters
 
@@ -17,12 +44,12 @@ This is the "query + question" fusion — the single strongest reason to put
 semantic search *inside* SQL instead of beside it. Getting it right is core to
 the project's value, not a nice-to-have.
 
-## What happens today
+## The problem (post-filtering — what happened *before* the fix)
 
-The `anki` vtab folds regular columns and `TEXT VECTOR` columns into one virtual
-table. `xBestIndex` only claims the `MATCH` constraint on the vector column; it
-**ignores** `status = 'active'`. When a vtab does not claim a constraint, SQLite
-applies it itself, against each row the vtab emits. So execution is:
+Originally, `xBestIndex` only claimed the `MATCH` constraint on the vector
+column and **ignored** `status = 'active'`. When a vtab does not claim a
+constraint, SQLite applies it itself, against each row the vtab emits. So
+execution was:
 
 1. `xFilter` runs HNSW → up to **256** candidates, sorted by similarity.
 2. SQLite filters those 256 by `status = 'active'` (`xColumn` per row).
@@ -45,10 +72,12 @@ This is the cost of the one-table DX choice. sqlite-vec's "normal `TABLE` +
 metadata/partition columns to `vec0` for in-index pre-filtering). We traded that
 for `text in / one table / no join`.
 
-## What's in our favor (not yet used)
+## Alternative not taken (shadow btree)
 
-The shadow table `<name>_data` is a **real SQLite btree table** we control —
-unlike an in-memory ANN index. That gives a natural pushdown path:
+We evaluate predicates against the in-memory cache. A different option — kept for
+the future, for very large filtered sets — is to push down to the shadow table
+`<name>_data`, which is a **real SQLite btree table** we control (unlike an
+in-memory ANN index):
 
 - **Selective filter** → query the shadow btree first
   (`SELECT id FROM <name>_data WHERE status = 'active'`, index-accelerated),
@@ -59,26 +88,24 @@ unlike an in-memory ANN index. That gives a natural pushdown path:
 - Choose pre- vs post-filter by estimated selectivity — what mature vector DBs
   do.
 
-## Planned fix
+## Implementation (shipped)
 
-1. `xBestIndex` accepts equality/range constraints on non-vector columns (mark
-   `argvIndex`, leave `omit = 0` so SQLite still re-checks for correctness), and
-   estimates selectivity.
-2. `xFilter` receives those predicates and chooses:
-   - **pre-filter**: resolve candidate ids from the shadow btree, then
-     brute-force cosine over that subset; or
-   - **post-filter**: HNSW first, filter the candidates (raise the effective
-     candidate count when a filter is present to soften the cliff).
-3. Optionally add user-defined indexes on the shadow table for hot filter
-   columns.
+1. `xBestIndex` claims `MATCH` (`omit=1`) and the comparison constraints
+   `=,<>,<,<=,>,>=` on any column (`omit=0`, so SQLite still re-checks —
+   the pre-filter only has to *narrow*). The plan (match column + each filter's
+   column/op and argv slot) is encoded into `idxStr`.
+2. `xFilter` parses `idxStr`, reads the right-hand values from `argv`, and:
+   - **filter present** → pre-filter: iterate the in-memory cache, keep rows that
+     satisfy the predicates (`cell_passes`, conservative on NULL/cross-type), and
+     brute-force cosine-rank that subset. No candidate cap → no cliff.
+   - **no filter** → the existing HNSW path.
+   - **no MATCH** → a filtered scan (`similarity()` stays NULL).
 
-### Interim mitigation (cheap)
+Predicate evaluation is conservative: when a comparison is unknown (NULL or
+cross-type) the row is kept, and SQLite re-checks it — so completeness is
+guaranteed without re-implementing exact SQL comparison semantics.
 
-Even before full pushdown: when non-`MATCH` constraints are present, over-fetch
-from HNSW (raise the effective `k` toward/above the cap) so the post-filter has
-more to work with. Reduces, does not eliminate, the cliff.
-
-## Why this is its own track
+## Why this was its own track
 
 It is independent of model loading and of the core vtab/persistence/HNSW work
 already done. It touches `xBestIndex`/`xFilter` planning and the shadow-table

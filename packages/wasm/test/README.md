@@ -34,6 +34,7 @@ missing.
 | `vtab.test.mjs` | CREATE/INSERT/UPDATE/DELETE, `MATCH`, `similarity()`, thresholds |
 | `persistence.test.mjs` | close/reopen reload, search on reloaded vectors, `DROP`/xDestroy |
 | `transactions.test.mjs` | `ROLLBACK`, `COMMIT`, `SAVEPOINT`/`ROLLBACK TO` |
+| `hybrid-filtering.test.mjs` | relational `WHERE` + `MATCH` pushdown, incl. the recall-cliff case |
 | `guards.test.mjs` | no-model graceful behavior, model-mismatch guard |
 | `hnsw-scale.test.mjs` | exact-match retrieval across row counts (HNSW regression guard) |
 

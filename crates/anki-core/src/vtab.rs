@@ -49,7 +49,27 @@ const SQLITE_NULL: c_int = 5;
 const SQLITE_ROW: c_int = 100;
 const SQLITE_DONE: c_int = 101;
 
+// Constraint operators we push down (relational filters) plus MATCH.
+const SQLITE_INDEX_CONSTRAINT_EQ: u8 = 2;
+const SQLITE_INDEX_CONSTRAINT_GT: u8 = 4;
+const SQLITE_INDEX_CONSTRAINT_LE: u8 = 8;
+const SQLITE_INDEX_CONSTRAINT_LT: u8 = 16;
+const SQLITE_INDEX_CONSTRAINT_GE: u8 = 32;
 const SQLITE_INDEX_CONSTRAINT_MATCH: u8 = 64;
+const SQLITE_INDEX_CONSTRAINT_NE: u8 = 68;
+
+/// True for the comparison ops we evaluate as a pre-filter.
+fn is_filter_op(op: u8) -> bool {
+    matches!(
+        op,
+        SQLITE_INDEX_CONSTRAINT_EQ
+            | SQLITE_INDEX_CONSTRAINT_GT
+            | SQLITE_INDEX_CONSTRAINT_LE
+            | SQLITE_INDEX_CONSTRAINT_LT
+            | SQLITE_INDEX_CONSTRAINT_GE
+            | SQLITE_INDEX_CONSTRAINT_NE
+    )
+}
 
 #[repr(C)]
 struct sqlite3_vtab {
@@ -347,6 +367,107 @@ fn cosine(a: &[f32], b: &[f32]) -> f32 {
         s += a[i] * b[i];
     }
     s
+}
+
+// --- hybrid filter pushdown (relational WHERE + MATCH) -----------------------
+
+/// Orders two cells where comparable: numbers numerically, text lexically.
+/// Returns `None` for NULL or cross-type pairs (treated as "unknown").
+fn cell_partial_cmp(a: &Cell, b: &Cell) -> Option<Ordering> {
+    match (a, b) {
+        (Cell::Int(x), Cell::Int(y)) => x.partial_cmp(y),
+        (Cell::Real(x), Cell::Real(y)) => x.partial_cmp(y),
+        (Cell::Int(x), Cell::Real(y)) => (*x as f64).partial_cmp(y),
+        (Cell::Real(x), Cell::Int(y)) => x.partial_cmp(&(*y as f64)),
+        (Cell::Text(x), Cell::Text(y)) => Some(x.cmp(y)),
+        _ => None,
+    }
+}
+
+/// Whether `cell <op> rhs` holds. Conservative: when the comparison is unknown
+/// (NULL / cross-type), returns `true` so the row is KEPT — SQLite re-checks the
+/// constraint (we leave `omit = 0`), so a pre-filter only has to narrow, never
+/// to be exact. This guarantees completeness.
+fn cell_passes(cell: &Cell, op: u8, rhs: &Cell) -> bool {
+    match cell_partial_cmp(cell, rhs) {
+        Some(ord) => match op {
+            SQLITE_INDEX_CONSTRAINT_EQ => ord == Ordering::Equal,
+            SQLITE_INDEX_CONSTRAINT_NE => ord != Ordering::Equal,
+            SQLITE_INDEX_CONSTRAINT_LT => ord == Ordering::Less,
+            SQLITE_INDEX_CONSTRAINT_LE => ord != Ordering::Greater,
+            SQLITE_INDEX_CONSTRAINT_GT => ord == Ordering::Greater,
+            SQLITE_INDEX_CONSTRAINT_GE => ord != Ordering::Less,
+            _ => true,
+        },
+        None => true,
+    }
+}
+
+/// A pushed-down filter: column index, operator, and the `xFilter` argv slot
+/// holding the right-hand value.
+struct Filter {
+    col: usize,
+    op: u8,
+    slot: usize,
+}
+
+/// The plan `xBestIndex` encodes into `idxStr` and `xFilter` parses back:
+/// the optional `MATCH` (vector column + argv slot) and the pushed filters.
+struct Plan {
+    match_: Option<(usize, usize)>,
+    filters: Vec<Filter>,
+}
+
+/// Sets `idxStr` to a `sqlite3_malloc`-owned copy (SQLite frees it).
+unsafe fn set_idx_str(info: &mut sqlite3_index_info, s: &str) {
+    let bytes = s.as_bytes();
+    let p = sqlite3_malloc((bytes.len() + 1) as c_int) as *mut c_char;
+    if p.is_null() {
+        return;
+    }
+    ptr::copy_nonoverlapping(bytes.as_ptr(), p as *mut u8, bytes.len());
+    *p.add(bytes.len()) = 0;
+    info.idxStr = p;
+    info.needToFreeIdxStr = 1;
+}
+
+/// Parses the `idxStr` produced by `x_best_index`. Tokens are `;`-joined and in
+/// argv order: `m<col>` (MATCH on vector column) or `f<col>,<op>` (filter).
+unsafe fn parse_idx_str(idx_str: *const c_char) -> Plan {
+    let mut plan = Plan {
+        match_: None,
+        filters: Vec::new(),
+    };
+    if idx_str.is_null() {
+        return plan;
+    }
+    let s = match CStr::from_ptr(idx_str).to_str() {
+        Ok(s) => s,
+        Err(_) => return plan,
+    };
+    for (slot, tok) in s.split(';').enumerate() {
+        if tok.is_empty() {
+            continue;
+        }
+        let (kind, rest) = tok.split_at(1);
+        match kind {
+            "m" => {
+                if let Ok(col) = rest.parse::<usize>() {
+                    plan.match_ = Some((col, slot));
+                }
+            }
+            "f" => {
+                let mut it = rest.split(',');
+                if let (Some(cs), Some(os)) = (it.next(), it.next()) {
+                    if let (Ok(col), Ok(op)) = (cs.parse::<usize>(), os.parse::<u8>()) {
+                        plan.filters.push(Filter { col, op, slot });
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    plan
 }
 
 fn parse_column(def: &str) -> Option<ColumnDef> {
@@ -973,28 +1094,59 @@ unsafe extern "C" fn x_best_index(vtab: *mut sqlite3_vtab, info: *mut sqlite3_in
     let vt = &*(vtab as *mut AnkiVtab);
     let st = &*vt.state;
     let info = &mut *info;
+    let ncol = st.columns.len();
 
-    let mut match_col: i32 = -1;
+    // Claim a MATCH on a vector column and any equality/range filters on other
+    // columns. Tokens are emitted in argv order; filters keep `omit = 0` so
+    // SQLite still verifies them (our pre-filter only narrows).
+    let mut tokens: Vec<String> = Vec::new();
+    let mut argv_n: c_int = 0;
+    let mut has_match = false;
+    let mut has_filter = false;
+
     for i in 0..info.nConstraint as isize {
         let c = &*info.aConstraint.offset(i);
-        if c.usable != 0 && c.op == SQLITE_INDEX_CONSTRAINT_MATCH {
-            let col = c.iColumn;
-            if col >= 0 && (col as usize) < st.columns.len() && st.columns[col as usize].is_vector {
-                let u = &mut *info.aConstraintUsage.offset(i);
-                u.argvIndex = 1;
-                u.omit = 1;
-                match_col = col;
-                break;
-            }
+        if c.usable == 0 {
+            continue;
+        }
+        let col = c.iColumn;
+        if col < 0 || (col as usize) >= ncol {
+            continue;
+        }
+        let u = &mut *info.aConstraintUsage.offset(i);
+        if !has_match
+            && c.op == SQLITE_INDEX_CONSTRAINT_MATCH
+            && st.columns[col as usize].is_vector
+        {
+            argv_n += 1;
+            u.argvIndex = argv_n;
+            u.omit = 1; // MATCH is fully handled here
+            has_match = true;
+            tokens.push(format!("m{col}"));
+        } else if is_filter_op(c.op) {
+            argv_n += 1;
+            u.argvIndex = argv_n;
+            u.omit = 0; // SQLite re-checks; pre-filter only narrows
+            has_filter = true;
+            tokens.push(format!("f{col},{}", c.op));
         }
     }
 
-    if match_col >= 0 {
-        info.idxNum = match_col + 1;
-        info.estimatedCost = 1.0;
+    info.idxNum = if has_match || has_filter { 1 } else { 0 };
+    info.estimatedCost = if has_match {
+        // Pre-filtering avoids the post-filter recall cliff; prefer this plan.
+        if has_filter {
+            1.0
+        } else {
+            10.0
+        }
+    } else if has_filter {
+        100.0
     } else {
-        info.idxNum = 0;
-        info.estimatedCost = 1.0e9;
+        1.0e9
+    };
+    if !tokens.is_empty() {
+        set_idx_str(info, &tokens.join(";"));
     }
     SQLITE_OK
 }
@@ -1021,9 +1173,9 @@ unsafe extern "C" fn x_close(cur: *mut sqlite3_vtab_cursor) -> c_int {
 
 unsafe extern "C" fn x_filter(
     cur: *mut sqlite3_vtab_cursor,
-    idx_num: c_int,
-    _idx_str: *const c_char,
-    argc: c_int,
+    _idx_num: c_int,
+    idx_str: *const c_char,
+    _argc: c_int,
     argv: *mut *mut sqlite3_value,
 ) -> c_int {
     let c = &mut *(cur as *mut AnkiCursor);
@@ -1038,51 +1190,79 @@ unsafe extern "C" fn x_filter(
     c.pos = 0;
     c.match_col = -1;
 
-    if idx_num > 0 && argc >= 1 {
-        let col = (idx_num - 1) as usize;
-        c.match_col = col as i32;
-        let query = value_to_string(*argv.offset(0));
-        if let Some(q) = query.as_deref().and_then(embed_text) {
-            if st.index_dirty {
-                rebuild_indexes(st);
-            }
-            match st.indexes.get(col).and_then(|o| o.as_ref()) {
-                // HNSW: retrieve up to the candidate cap, then threshold.
-                Some(idx) => {
-                    let k = HNSW_CANDIDATE_CAP.min(st.rows.len());
-                    for (rowid, sim) in idx.search(&q, k, HNSW_CANDIDATE_CAP) {
-                        if sim >= DEFAULT_SIMILARITY_THRESHOLD {
-                            c.results.push(MatchRow {
-                                rowid,
-                                sim: Some(sim),
-                            });
+    let plan = parse_idx_str(idx_str);
+
+    // Resolve each pushed filter's right-hand value from argv.
+    let preds: Vec<(usize, u8, Cell)> = plan
+        .filters
+        .iter()
+        .map(|f| (f.col, f.op, value_to_cell(*argv.offset(f.slot as isize))))
+        .collect();
+    let row_passes = |row: &Row| -> bool {
+        preds.iter().all(|(col, op, rhs)| {
+            row.cells
+                .get(*col)
+                .map_or(true, |cell| cell_passes(cell, *op, rhs))
+        })
+    };
+
+    match plan.match_ {
+        Some((col, slot)) => {
+            c.match_col = col as i32;
+            let query = value_to_string(*argv.offset(slot as isize));
+            if let Some(q) = query.as_deref().and_then(embed_text) {
+                if preds.is_empty() {
+                    // No relational filter: HNSW (or exact scan with no index).
+                    if st.index_dirty {
+                        rebuild_indexes(st);
+                    }
+                    match st.indexes.get(col).and_then(|o| o.as_ref()) {
+                        Some(idx) => {
+                            let k = HNSW_CANDIDATE_CAP.min(st.rows.len());
+                            for (rowid, sim) in idx.search(&q, k, HNSW_CANDIDATE_CAP) {
+                                if sim >= DEFAULT_SIMILARITY_THRESHOLD {
+                                    c.results.push(MatchRow { rowid, sim: Some(sim) });
+                                }
+                            }
+                        }
+                        None => {
+                            for (rowid, row) in st.rows.iter() {
+                                if let Some(Some(emb)) = row.embeddings.get(col) {
+                                    let sim = cosine(&q, emb);
+                                    if sim >= DEFAULT_SIMILARITY_THRESHOLD {
+                                        c.results.push(MatchRow { rowid: *rowid, sim: Some(sim) });
+                                    }
+                                }
+                            }
                         }
                     }
-                }
-                // No index yet (column has no embeddings): exact scan.
-                None => {
+                } else {
+                    // Pre-filter: rank only the rows passing the relational
+                    // filter. No candidate cap over the filtered subset, so no
+                    // post-filter recall cliff (see docs/hybrid-filtering.md).
                     for (rowid, row) in st.rows.iter() {
+                        if !row_passes(row) {
+                            continue;
+                        }
                         if let Some(Some(emb)) = row.embeddings.get(col) {
                             let sim = cosine(&q, emb);
                             if sim >= DEFAULT_SIMILARITY_THRESHOLD {
-                                c.results.push(MatchRow {
-                                    rowid: *rowid,
-                                    sim: Some(sim),
-                                });
+                                c.results.push(MatchRow { rowid: *rowid, sim: Some(sim) });
                             }
                         }
                     }
                 }
+                c.results
+                    .sort_by(|a, b| b.sim.partial_cmp(&a.sim).unwrap_or(Ordering::Equal));
             }
-            c.results
-                .sort_by(|a, b| b.sim.partial_cmp(&a.sim).unwrap_or(Ordering::Equal));
         }
-    } else {
-        for rowid in st.rows.keys() {
-            c.results.push(MatchRow {
-                rowid: *rowid,
-                sim: None,
-            });
+        None => {
+            // No MATCH: a (possibly filtered) scan. `similarity()` stays NULL.
+            for (rowid, row) in st.rows.iter() {
+                if row_passes(row) {
+                    c.results.push(MatchRow { rowid: *rowid, sim: None });
+                }
+            }
         }
     }
 
