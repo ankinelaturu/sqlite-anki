@@ -1,239 +1,238 @@
 /**
- * SQLite worker: runs the WASM engine and OPFS database off the main thread.
+ * SQLite worker: runs the WASM engine + OPFS databases off the main thread,
+ * loads the embedding model, and captures per-operation metrics.
  */
 import initSqliteAnki from "@sqlite-anki/wasm";
 import * as Comlink from "comlink";
-import type {
-  AnkiDatabaseApi,
-  ColumnInfo,
-  QueryResult,
-  Row,
-  SqlValue,
-  TableInfo,
+import {
+  ZERO_METRICS,
+  type AnkiWorkerApi,
+  type ColumnInfo,
+  type InitResult,
+  type Metrics,
+  type ModelSpec,
+  type QueryResult,
+  type Row,
+  type SqlValue,
+  type TableInfo,
 } from "./types";
 
-type Sqlite3 = Awaited<ReturnType<typeof initSqliteAnki>>;
-type Db = InstanceType<Sqlite3["oo1"]["DB"]> | InstanceType<Sqlite3["oo1"]["OpfsDb"]>;
+/* eslint-disable @typescript-eslint/no-explicit-any */
+type Sqlite3 = any;
+type Db = any;
 
-/** Escapes a SQLite identifier (table/column name). */
-function quoteIdent(name: string): string {
+function quote(name: string): string {
   return `"${name.replace(/"/g, '""')}"`;
 }
 
-/** Returns true when the declared column type is a TEXT VECTOR (or contains VECTOR). */
-function isVectorType(declaredType: string): boolean {
-  return declaredType.toUpperCase().includes("VECTOR");
+/** Extracts which columns are `TEXT VECTOR` from a `USING anki(...)` statement. */
+function vectorColumns(sql: string): Set<string> {
+  const out = new Set<string>();
+  const m = /using\s+anki\s*\(([\s\S]*)\)/i.exec(sql);
+  if (!m) return out;
+  for (const part of m[1].split(",")) {
+    const tokens = part.trim().split(/\s+/);
+    if (tokens.length === 0) continue;
+    const name = tokens[0].replace(/["`[\]]/g, "");
+    if (tokens.slice(1).some((t) => t.toUpperCase() === "VECTOR")) out.add(name);
+  }
+  return out;
 }
 
-/**
- * Database worker implementation — one instance per worker global.
- * All methods assume `open()` was called successfully first.
- */
-class AnkiDatabaseWorker implements AnkiDatabaseApi {
+class AnkiWorker implements AnkiWorkerApi {
   private sqlite3: Sqlite3 | null = null;
-  private db: Db | null = null;
+  private opfsAvailable = false;
+  private dbs = new Map<string, Db>();
 
-  /** Opens (or creates) the OPFS-backed database at `dbPath`. */
-  async open(dbPath: string): Promise<{ opfs: boolean; version: string }> {
-    this.sqlite3 = await initSqliteAnki();
-    const sqlite3 = this.sqlite3;
-
-    if ("opfs" in sqlite3 && sqlite3.opfs) {
-      this.db = new sqlite3.oo1.OpfsDb(dbPath);
-    } else {
-      this.db = new sqlite3.oo1.DB(dbPath, "ct");
-    }
-
+  async init(model: ModelSpec): Promise<InitResult> {
+    this.sqlite3 = await initSqliteAnki(
+      model && (model.model || model.modelUrl || model.modelBytes)
+        ? { anki: model as any }
+        : undefined,
+    );
+    const s = this.sqlite3;
+    this.opfsAvailable = "opfs" in s && Boolean(s.opfs);
     return {
-      opfs: "opfs" in sqlite3 && Boolean(sqlite3.opfs),
-      version: sqlite3.version.libVersion,
+      opfs: this.opfsAvailable,
+      version: s.version.libVersion,
+      modelId: model.modelId ?? model.model ?? null,
+      dim: model.dim ?? null,
     };
   }
 
-  /** Lists user tables from `sqlite_master`. */
-  async listTables(): Promise<TableInfo[]> {
-    const db = this.requireDb();
-    const rows = db.selectObjects(
+  async listDatabases(): Promise<string[]> {
+    try {
+      const root = await (navigator as any).storage.getDirectory();
+      const names: string[] = [];
+      for await (const [name, handle] of (root as any).entries()) {
+        if (handle.kind === "file" && name.endsWith(".db")) names.push(name);
+      }
+      return names.sort();
+    } catch {
+      return [];
+    }
+  }
+
+  async openDatabase(path: string): Promise<TableInfo[]> {
+    const s = this.require();
+    if (!this.dbs.has(path)) {
+      const db = this.opfsAvailable
+        ? new s.oo1.OpfsDb(path)
+        : new s.oo1.DB(path, "ct");
+      this.dbs.set(path, db);
+    }
+    return this.schema(path);
+  }
+
+  async dropDatabase(path: string): Promise<void> {
+    this.dbs.get(path)?.close();
+    this.dbs.delete(path);
+    try {
+      const root = await (navigator as any).storage.getDirectory();
+      await root.removeEntry(path.replace(/^\//, ""));
+    } catch {
+      /* ignore */
+    }
+  }
+
+  async schema(path: string): Promise<TableInfo[]> {
+    const db = this.db(path);
+    const tables = db.selectObjects(
       `SELECT name, sql, type FROM sqlite_master
-       WHERE type IN ('table', 'virtual table')
-         AND name NOT LIKE 'sqlite_%'
-         AND name NOT LIKE 'anki_%'
+       WHERE type IN ('table', 'view')
+         AND name NOT LIKE 'sqlite_%' AND name NOT LIKE 'anki_%'
+         AND name NOT LIKE '%_data'
        ORDER BY name`,
     ) as Array<{ name: string; sql: string; type: string }>;
 
-    return rows.map((r) => ({
-      name: r.name,
-      sql: r.sql ?? "",
-      isVirtual: r.type === "virtual table",
-    }));
+    return tables.map((t) => {
+      const isAnki = /using\s+anki/i.test(t.sql ?? "");
+      const vec = isAnki ? vectorColumns(t.sql) : new Set<string>();
+      const cols = db.selectObjects(
+        `PRAGMA table_info(${quote(t.name)})`,
+      ) as Array<{ name: string; type: string; notnull: number; pk: number }>;
+      const columns: ColumnInfo[] = cols.map((c) => ({
+        name: c.name,
+        type: c.type || (vec.has(c.name) ? "TEXT VECTOR" : ""),
+        notnull: c.notnull === 1,
+        pk: c.pk === 1,
+        isVector: vec.has(c.name),
+      }));
+      return {
+        name: t.name,
+        sql: t.sql ?? "",
+        isVirtual: isAnki,
+        isAnki,
+        columns,
+      };
+    });
   }
 
-  /** Returns column metadata for `table` via `PRAGMA table_info`. */
-  async getColumns(table: string): Promise<ColumnInfo[]> {
-    const db = this.requireDb();
-    const rows = db.selectObjects(
-      `PRAGMA table_info(${quoteIdent(table)})`,
-    ) as Array<{
-      cid: number;
-      name: string;
-      type: string;
-      notnull: number;
-      dflt_value: string | null;
-      pk: number;
-    }>;
-
-    return rows.map((r) => ({
-      cid: r.cid,
-      name: r.name,
-      type: r.type,
-      notnull: r.notnull === 1,
-      dflt_value: r.dflt_value,
-      pk: r.pk === 1,
-      isVector: isVectorType(r.type),
-    }));
+  async query(path: string, sql: string, params: SqlValue[] = []): Promise<QueryResult> {
+    const db = this.db(path);
+    const before = this.readMetrics();
+    const t0 = performance.now();
+    const rows = db.exec({
+      sql,
+      bind: params,
+      rowMode: "object",
+      returnValue: "resultRows",
+    }) as Row[];
+    const elapsedMs = performance.now() - t0;
+    const after = this.readMetrics();
+    const columns = rows.length > 0 ? Object.keys(rows[0]) : [];
+    return {
+      columns,
+      rows,
+      rowsAffected: db.changes(),
+      elapsedMs,
+      metrics: this.diff(before, after),
+    };
   }
 
-  /** Fetches a page of rows including `rowid`. */
-  async fetchRows(
+  async tableData(
+    path: string,
     table: string,
     limit: number,
     offset: number,
   ): Promise<QueryResult> {
-    const db = this.requireDb();
-    const columns = (await this.getColumns(table)).map((c) => c.name);
-    const colList = ["rowid", ...columns.map(quoteIdent)].join(", ");
-    const sql = `SELECT ${colList} FROM ${quoteIdent(table)} LIMIT ? OFFSET ?`;
-
-    const rows = db.selectObjects(sql, [limit, offset]) as Row[];
-    return {
-      columns: ["rowid", ...columns],
-      rows,
-    };
+    return this.query(
+      path,
+      `SELECT rowid AS rowid, * FROM ${quote(table)} LIMIT ? OFFSET ?`,
+      [limit, offset],
+    );
   }
 
-  /** Inserts one row; returns SQLite `rowid`. */
-  async insertRow(
-    table: string,
-    values: Record<string, SqlValue>,
-  ): Promise<number> {
-    const db = this.requireDb();
-    const keys = Object.keys(values);
-    if (keys.length === 0) {
-      throw new Error("insertRow: no columns provided");
-    }
-
-    const cols = keys.map(quoteIdent).join(", ");
-    const placeholders = keys.map(() => "?").join(", ");
-    const sql = `INSERT INTO ${quoteIdent(table)} (${cols}) VALUES (${placeholders})`;
-
-    db.exec({ sql, bind: keys.map((k) => values[k]) });
-    const [{ rowid }] = db.selectObjects("SELECT last_insert_rowid() AS rowid") as [
-      { rowid: number },
-    ];
-    return rowid;
-  }
-
-  /** Updates a single cell by `rowid`. */
   async updateCell(
+    path: string,
     table: string,
     rowid: number,
     column: string,
     value: SqlValue,
-  ): Promise<void> {
-    const db = this.requireDb();
-    const sql = `UPDATE ${quoteIdent(table)} SET ${quoteIdent(column)} = ? WHERE rowid = ?`;
-    db.exec({ sql, bind: [value, rowid] });
-  }
-
-  /** Deletes one row by `rowid`. */
-  async deleteRow(table: string, rowid: number): Promise<void> {
-    const db = this.requireDb();
-    db.exec({ sql: `DELETE FROM ${quoteIdent(table)} WHERE rowid = ?`, bind: [rowid] });
-  }
-
-  /**
-   * Semantic search on a TEXT VECTOR column.
-   * Requires sqlite-anki extension (`MATCH` / `similarity()`).
-   */
-  async semanticSearch(
-    table: string,
-    column: string,
-    query: string,
-    limit: number,
-    minSimilarity = 0.5,
   ): Promise<QueryResult> {
-    const db = this.requireDb();
-    const columns = (await this.getColumns(table)).map((c) => c.name);
-    const colList = ["rowid", ...columns.map(quoteIdent)].join(", ");
-
-    const sql = `SELECT ${colList}, similarity(${quoteIdent(column)}) AS _similarity
-      FROM ${quoteIdent(table)}
-      WHERE ${quoteIdent(column)} MATCH ?
-        AND similarity(${quoteIdent(column)}) > ?
-      ORDER BY _similarity DESC
-      LIMIT ?`;
-
-    try {
-      const rows = db.selectObjects(sql, [query, minSimilarity, limit]) as Row[];
-      return {
-        columns: ["rowid", ...columns, "_similarity"],
-        rows,
-      };
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      throw new Error(
-        `Semantic search failed (is sqlite-anki loaded?): ${message}`,
-      );
-    }
+    return this.query(
+      path,
+      `UPDATE ${quote(table)} SET ${quote(column)} = ? WHERE rowid = ?`,
+      [value, rowid],
+    );
   }
 
-  /** Runs arbitrary SQL with optional bound parameters. */
-  async exec(sql: string, params: SqlValue[] = []): Promise<void> {
-    this.requireDb().exec({ sql, bind: params });
+  async insertRow(
+    path: string,
+    table: string,
+    values: Record<string, SqlValue>,
+  ): Promise<QueryResult> {
+    const keys = Object.keys(values);
+    if (keys.length === 0) throw new Error("insertRow: no columns");
+    const cols = keys.map(quote).join(", ");
+    const ph = keys.map(() => "?").join(", ");
+    return this.query(
+      path,
+      `INSERT INTO ${quote(table)} (${cols}) VALUES (${ph})`,
+      keys.map((k) => values[k]),
+    );
   }
 
-  /**
-   * Creates sample data for the explorer.
-   * Tries `anki` virtual table first; falls back to a regular table.
-   */
-  async seedDemo(): Promise<void> {
-    const db = this.requireDb();
+  async deleteRow(path: string, table: string, rowid: number): Promise<QueryResult> {
+    return this.query(path, `DELETE FROM ${quote(table)} WHERE rowid = ?`, [rowid]);
+  }
 
+  async metrics(): Promise<Metrics> {
+    return this.readMetrics();
+  }
+
+  // --- internals ---
+
+  private require(): Sqlite3 {
+    if (!this.sqlite3) throw new Error("worker not initialized — call init() first");
+    return this.sqlite3;
+  }
+
+  private db(path: string): Db {
+    const db = this.dbs.get(path);
+    if (!db) throw new Error(`database not open: ${path}`);
+    return db;
+  }
+
+  private readMetrics(): Metrics {
     try {
-      db.exec(`CREATE VIRTUAL TABLE IF NOT EXISTS customers USING anki(
-        customer_name TEXT,
-        notes TEXT VECTOR
-      )`);
+      const wasm = this.sqlite3?.wasm;
+      const fn = wasm?.exports?.anki_metrics;
+      if (!fn) return { ...ZERO_METRICS };
+      const ptr = fn();
+      return { ...ZERO_METRICS, ...JSON.parse(wasm.cstrToJs(ptr)) };
     } catch {
-      db.exec(`CREATE TABLE IF NOT EXISTS customers (
-        customer_name TEXT NOT NULL,
-        notes TEXT
-      )`);
-    }
-
-    const count = db.selectValue(
-      "SELECT COUNT(*) FROM customers",
-    ) as number;
-
-    if (count === 0) {
-      db.exec({
-        sql: `INSERT INTO customers (customer_name, notes) VALUES (?, ?), (?, ?)`,
-        bind: [
-          "Acme Corp",
-          "Discussed renewal — potential upsell opportunity in Q3",
-          "Beta LLC",
-          "Support ticket about billing, no sales interest",
-        ],
-      });
+      return { ...ZERO_METRICS };
     }
   }
 
-  private requireDb(): Db {
-    if (!this.db) {
-      throw new Error("Database not open — call open() first");
+  private diff(a: Metrics, b: Metrics): Metrics {
+    const out = { ...ZERO_METRICS };
+    for (const k of Object.keys(out) as (keyof Metrics)[]) {
+      out[k] = +(b[k] - a[k]).toFixed(3);
     }
-    return this.db;
+    return out;
   }
 }
 
-Comlink.expose(new AnkiDatabaseWorker());
+Comlink.expose(new AnkiWorker());

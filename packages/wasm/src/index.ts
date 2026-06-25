@@ -64,6 +64,8 @@ async function loadCustomInit(): Promise<(() => Promise<Sqlite3Module>) | null> 
     return customInit;
   }
   try {
+    // Generated Emscripten output — no type declarations ship with it.
+    // @ts-expect-error untyped generated .mjs
     const mod = await import("../dist/sqlite3-bundler-friendly.mjs");
     customInit = mod.default as () => Promise<Sqlite3Module>;
     return customInit;

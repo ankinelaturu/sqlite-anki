@@ -1,222 +1,385 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
+import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import {
-  connectAnkiDatabase,
-  disconnectAnkiDatabase,
-  type AnkiDatabaseApi,
-  type ColumnInfo,
-  type Row,
+  Boxes,
+  Cpu,
+  Database,
+  FileCode2,
+  Plus,
+  RefreshCw,
+  Sparkles,
+  Table2,
+  X,
+} from "lucide-react";
+import { ANKI_MODEL_REGISTRY } from "@sqlite-anki/wasm";
+import {
+  getDbWorker,
+  resetDbWorker,
+  type InitResult,
+  type QueryResult,
   type TableInfo,
 } from "@sqlite-anki/db-client";
-import { DataGrid } from "./components/DataGrid";
-import { SchemaTree } from "./components/SchemaTree";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Separator } from "@/components/ui/separator";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import { SchemaTree } from "@/components/SchemaTree";
+import { TableView } from "@/components/TableView";
+import { QueryView } from "@/components/QueryView";
+import { StatusBar, type OpStatus } from "@/components/StatusBar";
+import { cn } from "@/lib/utils";
 
-/** Root explorer application: schema tree (left) + CRUD grid (right). */
+const MODELS = Object.keys(ANKI_MODEL_REGISTRY);
+
+interface Tab {
+  key: string;
+  kind: "query" | "table";
+  table?: TableInfo;
+  title: string;
+}
+
+const queryTab: Tab = { key: "__query__", kind: "query", title: "SQL" };
+
 export function App() {
-  const [db, setDb] = useState<AnkiDatabaseApi | null>(null);
-  const [meta, setMeta] = useState<{ opfs: boolean; version: string } | null>(null);
+  // The Comlink remote is a *callable* proxy — never put it in React state
+  // (a state setter would invoke it as an updater). Use the memoized singleton.
+  const api = getDbWorker();
+
+  const [info, setInfo] = useState<InitResult | null>(null);
+  const [modelChoice, setModelChoice] = useState(MODELS[0] ?? "");
+  const [loadingModel, setLoadingModel] = useState(false);
+
+  const [databases, setDatabases] = useState<string[]>([]);
+  const [activeDb, setActiveDb] = useState<string | null>(null);
   const [tables, setTables] = useState<TableInfo[]>([]);
-  const [columnsByTable, setColumnsByTable] = useState<Record<string, ColumnInfo[]>>({});
-  const [selectedTable, setSelectedTable] = useState<string | null>(null);
-  const [columns, setColumns] = useState<ColumnInfo[]>([]);
-  const [dataColumns, setDataColumns] = useState<string[]>([]);
-  const [rows, setRows] = useState<Row[]>([]);
-  const [semanticMode, setSemanticMode] = useState(false);
-  const [loading, setLoading] = useState(true);
+  const [tabsByDb, setTabsByDb] = useState<Record<string, { tabs: Tab[]; active: string }>>({});
+
+  const [op, setOp] = useState<OpStatus | null>(null);
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [status, setStatus] = useState("");
+  const [newDbName, setNewDbName] = useState("");
+  const [dialogOpen, setDialogOpen] = useState(false);
 
-  const loadSchema = useCallback(async (api: AnkiDatabaseApi) => {
-    const list = await api.listTables();
-    setTables(list);
-
-    const colMap: Record<string, ColumnInfo[]> = {};
-    for (const t of list) {
-      colMap[t.name] = await api.getColumns(t.name);
-    }
-    setColumnsByTable(colMap);
-    return list;
+  const onOp = useCallback((label: string, r: QueryResult) => {
+    setOp({ label, elapsedMs: r.elapsedMs, metrics: r.metrics });
+    setError(null);
   }, []);
+  const onError = useCallback((m: string) => setError(m), []);
 
-  const loadTableData = useCallback(
-    async (api: AnkiDatabaseApi, table: string, semantic = false) => {
-      setSemanticMode(semantic);
-      const result = semantic
-        ? null
-        : await api.fetchRows(table, 500, 0);
-      if (result) {
-        setDataColumns(result.columns);
-        setRows(result.rows);
-        setStatus(`${result.rows.length} row(s)`);
-      }
-    },
-    [],
-  );
-
-  const selectTable = useCallback(
-    async (api: AnkiDatabaseApi, table: string) => {
-      setSelectedTable(table);
-      const cols = await api.getColumns(table);
-      setColumns(cols);
-      await loadTableData(api, table, false);
-    },
-    [loadTableData],
-  );
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function init() {
-      try {
-        setLoading(true);
-        setError(null);
-        const { api, opfs, version } = await connectAnkiDatabase();
-        if (cancelled) return;
-
-        setDb(api);
-        setMeta({ opfs, version });
-
-        const list = await loadSchema(api);
-        if (list.length > 0) {
-          await selectTable(api, list[0]!.name);
-        }
-      } catch (e) {
-        if (!cancelled) {
-          setError(e instanceof Error ? e.message : String(e));
-        }
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    }
-
-    void init();
-
-    return () => {
-      cancelled = true;
-      disconnectAnkiDatabase();
-    };
-  }, [loadSchema, selectTable]);
-
-  const refresh = async () => {
-    if (!db || !selectedTable) return;
-    await loadSchema(db);
-    await loadTableData(db, selectedTable, false);
-  };
-
-  const handleSeed = async () => {
-    if (!db) return;
+  const loadModel = async () => {
+    setLoadingModel(true);
+    setError(null);
     try {
-      setError(null);
-      await db.seedDemo();
-      const list = await loadSchema(db);
-      if (list.length > 0) {
-        await selectTable(db, list[0]!.name);
-      }
-      setStatus("Demo data ready");
+      const reg = ANKI_MODEL_REGISTRY[modelChoice];
+      const res = await api.init({ model: modelChoice, modelId: modelChoice, dim: reg?.dim });
+      setInfo(res);
+      setDatabases(await api.listDatabases());
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoadingModel(false);
     }
   };
 
-  const handleSemanticSearch = async (
-    column: string,
-    query: string,
-    minSimilarity: number,
-  ) => {
-    if (!db || !selectedTable) return;
+  const refreshSchema = useCallback(
+    async (path: string) => {
+      setTables(await api.schema(path));
+    },
+    [api],
+  );
+
+  const openDb = async (path: string) => {
+    setBusy(true);
     try {
-      setError(null);
-      const result = await db.semanticSearch(
-        selectedTable,
-        column,
-        query,
-        20,
-        minSimilarity,
+      const t = await api.openDatabase(path);
+      setActiveDb(path);
+      setTables(t);
+      setTabsByDb((m) =>
+        m[path] ? m : { ...m, [path]: { tabs: [queryTab], active: queryTab.key } },
       );
-      setDataColumns(result.columns);
-      setRows(result.rows);
-      setSemanticMode(true);
-      setStatus(`Semantic search: ${result.rows.length} row(s)`);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
     }
   };
 
-  return (
-    <div className="app">
-      <header className="app-header">
-        <div>
-          <h1>sqlite-anki Explorer</h1>
-          <div className="meta">
-            {meta
-              ? `SQLite ${meta.version} · ${meta.opfs ? "OPFS" : "transient"}`
-              : "Connecting…"}
+  const createDb = async () => {
+    const name = newDbName.trim().replace(/[^a-zA-Z0-9_-]/g, "");
+    if (!name) return;
+    setDialogOpen(false);
+    setNewDbName("");
+    await openDb(`/${name}.db`);
+    setDatabases(await api.listDatabases());
+  };
+
+  const openTable = (table: TableInfo) => {
+    if (!activeDb) return;
+    const key = `table:${table.name}`;
+    setTabsByDb((m) => {
+      const cur = m[activeDb] ?? { tabs: [queryTab], active: queryTab.key };
+      const exists = cur.tabs.some((t) => t.key === key);
+      const tabs = exists
+        ? cur.tabs.map((t) => (t.key === key ? { ...t, table } : t))
+        : [...cur.tabs, { key, kind: "table" as const, table, title: table.name }];
+      return { ...m, [activeDb]: { tabs, active: key } };
+    });
+  };
+
+  const closeTab = (key: string) => {
+    if (!activeDb || key === queryTab.key) return;
+    setTabsByDb((m) => {
+      const cur = m[activeDb];
+      if (!cur) return m;
+      const tabs = cur.tabs.filter((t) => t.key !== key);
+      const active = cur.active === key ? queryTab.key : cur.active;
+      return { ...m, [activeDb]: { tabs, active } };
+    });
+  };
+
+  const setActiveTab = (key: string) => {
+    if (!activeDb) return;
+    setTabsByDb((m) => ({ ...m, [activeDb]: { ...m[activeDb], active: key } }));
+  };
+
+  const runQuery = useCallback(
+    async (sql: string): Promise<QueryResult> => {
+      if (!activeDb) throw new Error("no database open");
+      const r = await api.query(activeDb, sql);
+      onOp("query", r);
+      void refreshSchema(activeDb); // DDL may have changed schema
+      return r;
+    },
+    [api, activeDb, onOp, refreshSchema],
+  );
+
+  const current = activeDb ? tabsByDb[activeDb] : undefined;
+  const activeTab = current?.tabs.find((t) => t.key === current.active);
+
+  // ---- model gate ----
+  if (!info) {
+    return (
+      <div className="flex h-full items-center justify-center bg-background">
+        <div className="w-[26rem] rounded-xl border bg-card p-6 shadow-xl">
+          <div className="mb-1 flex items-center gap-2 text-lg font-semibold">
+            <Boxes className="h-5 w-5 text-primary" /> sqlite-anki Explorer
           </div>
-        </div>
-        <div className="actions">
-          <button type="button" onClick={() => void handleSeed()}>
-            Seed demo
-          </button>
-          <button type="button" onClick={() => void refresh()}>
-            Reload schema
-          </button>
-        </div>
-      </header>
-
-      {error && <div className="error-banner">{error}</div>}
-
-      {loading ? (
-        <div className="empty-state">Loading database…</div>
-      ) : (
-        <div className="app-body">
-          <aside className="panel panel-left">
-            <div className="panel-title">Schema</div>
-            <SchemaTree
-              tables={tables}
-              columnsByTable={columnsByTable}
-              selectedTable={selectedTable}
-              onSelectTable={(name) => {
-                if (db) void selectTable(db, name);
-              }}
-            />
-          </aside>
-
-          <main className="panel panel-right">
-            <div className="panel-title">Data</div>
-            {selectedTable && db ? (
+          <p className="mb-5 text-sm text-muted-foreground">
+            Choose an embedding model to load into the browser. It downloads once
+            and powers semantic search for every database this session.
+          </p>
+          <Label className="mb-1.5 block">Model</Label>
+          <Select value={modelChoice} onValueChange={setModelChoice}>
+            <SelectTrigger className="mb-4">
+              <SelectValue placeholder="Select a model" />
+            </SelectTrigger>
+            <SelectContent>
+              {MODELS.map((m) => (
+                <SelectItem key={m} value={m}>
+                  {m} · {ANKI_MODEL_REGISTRY[m].dim}d
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Button className="w-full" onClick={() => void loadModel()} disabled={loadingModel}>
+            {loadingModel ? (
               <>
-                <DataGrid
-                  table={selectedTable}
-                  columns={columns}
-                  dataColumns={dataColumns}
-                  rows={rows}
-                  semanticMode={semanticMode}
-                  onRefresh={() => void refresh()}
-                  onUpdateCell={async (rowid, column, value) => {
-                    await db.updateCell(selectedTable, rowid, column, value);
-                    await loadTableData(db, selectedTable, false);
-                  }}
-                  onDeleteRow={async (rowid) => {
-                    await db.deleteRow(selectedTable, rowid);
-                    await loadTableData(db, selectedTable, false);
-                  }}
-                  onInsertRow={async (values) => {
-                    await db.insertRow(selectedTable, values);
-                    await loadTableData(db, selectedTable, false);
-                  }}
-                  onSemanticSearch={(col, q, min) =>
-                    void handleSemanticSearch(col, q, min)
-                  }
-                />
-                <div className="status-bar">{status}</div>
+                <RefreshCw className="animate-spin" /> Loading model…
               </>
             ) : (
-              <div className="empty-state">
-                Select a table or seed demo data to begin.
-              </div>
+              <>
+                <Cpu /> Load &amp; start
+              </>
             )}
-          </main>
+          </Button>
+          {error && <p className="mt-3 text-sm text-destructive">{error}</p>}
         </div>
-      )}
-    </div>
+      </div>
+    );
+  }
+
+  return (
+    <TooltipProvider delayDuration={300}>
+      <div className="flex h-full flex-col bg-background">
+        {/* header */}
+        <header className="flex h-12 shrink-0 items-center gap-3 border-b bg-card px-4">
+          <div className="flex items-center gap-2 font-semibold">
+            <Boxes className="h-5 w-5 text-primary" /> sqlite-anki
+          </div>
+          <Separator orientation="vertical" className="h-6" />
+          <span className="flex items-center gap-1.5 text-sm text-muted-foreground">
+            <Cpu className="h-4 w-4 text-violet-400" /> {info.modelId}
+          </span>
+          <Button
+            variant="ghost"
+            size="xs"
+            className="text-muted-foreground"
+            onClick={() => {
+              resetDbWorker();
+              setInfo(null);
+              setActiveDb(null);
+              setTables([]);
+              setTabsByDb({});
+            }}
+          >
+            change
+          </Button>
+        </header>
+
+        <PanelGroup direction="horizontal" className="min-h-0 flex-1">
+          {/* sidebar */}
+          <Panel defaultSize={22} minSize={15} className="flex flex-col border-r bg-card">
+            <div className="flex items-center justify-between px-3 py-2">
+              <span className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                <Database className="h-3.5 w-3.5" /> Databases
+              </span>
+              <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+                <DialogTrigger asChild>
+                  <Button variant="ghost" size="icon-sm" title="New database">
+                    <Plus />
+                  </Button>
+                </DialogTrigger>
+                <DialogContent>
+                  <DialogHeader>
+                    <DialogTitle>New OPFS database</DialogTitle>
+                  </DialogHeader>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      autoFocus
+                      placeholder="my-database"
+                      value={newDbName}
+                      onChange={(e) => setNewDbName(e.target.value)}
+                      onKeyDown={(e) => e.key === "Enter" && void createDb()}
+                    />
+                    <span className="text-sm text-muted-foreground">.db</span>
+                  </div>
+                  <DialogFooter>
+                    <Button onClick={() => void createDb()}>Create</Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
+            </div>
+            <div className="scrollbar-thin flex-1 overflow-auto px-1.5">
+              {databases.length === 0 && (
+                <p className="px-2 py-1 text-xs text-muted-foreground">
+                  No databases yet. Create one →
+                </p>
+              )}
+              {databases.map((path) => (
+                <div key={path}>
+                  <button
+                    onClick={() => void openDb(path)}
+                    className={cn(
+                      "flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-sm",
+                      activeDb === path ? "bg-accent text-foreground" : "text-muted-foreground hover:text-foreground",
+                    )}
+                  >
+                    <Database className="h-4 w-4 text-sky-400" />
+                    <span className="truncate">{path.replace(/^\//, "")}</span>
+                  </button>
+                  {activeDb === path && (
+                    <SchemaTree
+                      tables={tables}
+                      activeTable={activeTab?.kind === "table" ? activeTab.table?.name ?? null : null}
+                      onOpenTable={openTable}
+                    />
+                  )}
+                </div>
+              ))}
+            </div>
+          </Panel>
+
+          <PanelResizeHandle className="w-px bg-border transition-colors hover:bg-primary/50" />
+
+          {/* workspace */}
+          <Panel className="flex min-w-0 flex-col">
+            {!activeDb ? (
+              <div className="flex h-full flex-col items-center justify-center gap-2 text-muted-foreground">
+                <Database className="h-10 w-10 opacity-40" />
+                <p className="text-sm">Select or create a database to begin.</p>
+              </div>
+            ) : (
+              <>
+                {/* tab bar */}
+                <div className="flex h-10 shrink-0 items-center gap-1 overflow-x-auto border-b bg-card px-2">
+                  {current?.tabs.map((t) => (
+                    <div
+                      key={t.key}
+                      className={cn(
+                        "group flex h-8 items-center gap-1.5 rounded-md px-2.5 text-sm",
+                        current.active === t.key
+                          ? "bg-accent text-foreground"
+                          : "text-muted-foreground hover:text-foreground",
+                      )}
+                    >
+                      <button
+                        className="flex items-center gap-1.5"
+                        onClick={() => setActiveTab(t.key)}
+                      >
+                        {t.kind === "query" ? (
+                          <FileCode2 className="h-4 w-4 text-emerald-400" />
+                        ) : t.table?.isAnki ? (
+                          <Sparkles className="h-4 w-4 text-violet-400" />
+                        ) : (
+                          <Table2 className="h-4 w-4 text-sky-400" />
+                        )}
+                        {t.title}
+                      </button>
+                      {t.kind !== "query" && (
+                        <button
+                          className="opacity-0 group-hover:opacity-100"
+                          onClick={() => closeTab(t.key)}
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+                <div className="min-h-0 flex-1">
+                  {activeTab?.kind === "query" && <QueryView run={runQuery} />}
+                  {activeTab?.kind === "table" && activeTab.table && (
+                    <TableView
+                      key={`${activeDb}:${activeTab.table.name}`}
+                      api={api}
+                      path={activeDb}
+                      table={activeTab.table}
+                      onOp={onOp}
+                      onError={onError}
+                    />
+                  )}
+                </div>
+              </>
+            )}
+          </Panel>
+        </PanelGroup>
+
+        <StatusBar
+          opfs={info.opfs}
+          version={info.version}
+          modelId={info.modelId}
+          dim={info.dim}
+          op={op}
+          busy={busy || loadingModel}
+          error={error}
+        />
+      </div>
+    </TooltipProvider>
   );
 }

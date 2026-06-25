@@ -1,253 +1,135 @@
-import { useCallback, useState } from "react";
-import type { ColumnInfo, Row } from "@sqlite-anki/db-client";
+import { useState } from "react";
+import { Trash2 } from "lucide-react";
+import type { Row, SqlValue } from "@sqlite-anki/db-client";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 
 interface DataGridProps {
-  table: string;
-  columns: ColumnInfo[];
-  dataColumns: string[];
+  columns: string[];
   rows: Row[];
-  onRefresh: () => void;
-  onUpdateCell: (
-    rowid: number,
-    column: string,
-    value: string | number | null,
-  ) => Promise<void>;
-  onDeleteRow: (rowid: number) => Promise<void>;
-  onInsertRow: (values: Record<string, string | null>) => Promise<void>;
-  onSemanticSearch: (column: string, query: string, minSimilarity: number) => void;
-  semanticMode: boolean;
+  vectorColumns?: Set<string>;
+  editable?: boolean;
+  onEditCommit?: (rowid: number, column: string, value: SqlValue) => void;
+  onDeleteRow?: (rowid: number) => void;
 }
 
-function formatCell(value: unknown): string {
-  if (value === null || value === undefined) return "";
-  if (typeof value === "bigint") return value.toString();
-  return String(value);
+function renderValue(v: unknown): string {
+  if (v === null || v === undefined) return "";
+  if (typeof v === "number") return Number.isInteger(v) ? String(v) : v.toFixed(4);
+  if (v instanceof Uint8Array) return `‹blob ${v.length}b›`;
+  return String(v);
 }
 
-/** Right panel: editable table grid with row delete and semantic search hook. */
 export function DataGrid({
-  table,
   columns,
-  dataColumns,
   rows,
-  onRefresh,
-  onUpdateCell,
+  vectorColumns,
+  editable = false,
+  onEditCommit,
   onDeleteRow,
-  onInsertRow,
-  onSemanticSearch,
-  semanticMode,
 }: DataGridProps) {
-  const [editing, setEditing] = useState<{
-    rowid: number;
-    column: string;
-    value: string;
-  } | null>(null);
-  const [showNewRow, setShowNewRow] = useState(false);
-  const [newRow, setNewRow] = useState<Record<string, string>>({});
-  const [searchQuery, setSearchQuery] = useState("");
-  const [searchColumn, setSearchColumn] = useState("");
-  const [minSimilarity, setMinSimilarity] = useState(0.5);
+  const [editing, setEditing] = useState<{ rowid: number; col: string } | null>(null);
+  const [draft, setDraft] = useState("");
 
-  const editableColumns = columns.filter((c) => c.name !== "rowid");
-  const vectorColumns = columns.filter((c) => c.isVector);
+  if (columns.length === 0) {
+    return (
+      <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+        No rows.
+      </div>
+    );
+  }
 
-  const commitEdit = useCallback(async () => {
-    if (!editing) return;
-    const { rowid, column, value } = editing;
+  const dataCols = columns.filter((c) => c !== "rowid");
+  const hasRowid = columns.includes("rowid");
+
+  const commit = (rowid: number, col: string) => {
+    onEditCommit?.(rowid, col, draft === "" ? null : draft);
     setEditing(null);
-    await onUpdateCell(rowid, column, value === "" ? null : value);
-  }, [editing, onUpdateCell]);
-
-  const handleNewRowSubmit = async () => {
-    const values: Record<string, string | null> = {};
-    for (const col of editableColumns) {
-      const v = newRow[col.name];
-      values[col.name] = v === undefined || v === "" ? null : v;
-    }
-    await onInsertRow(values);
-    setNewRow({});
-    setShowNewRow(false);
   };
 
-  const displayColumns = dataColumns.length > 0 ? dataColumns : ["rowid", ...editableColumns.map((c) => c.name)];
-
   return (
-    <>
-      <div className="toolbar">
-        <strong>{table}</strong>
-        <button type="button" onClick={onRefresh}>
-          Refresh
-        </button>
-        <button type="button" className="primary" onClick={() => setShowNewRow((v) => !v)}>
-          {showNewRow ? "Cancel" : "Add row"}
-        </button>
-
-        {vectorColumns.length > 0 && (
-          <div className="semantic-bar">
-            <select
-              value={searchColumn || vectorColumns[0]?.name || ""}
-              onChange={(e) => setSearchColumn(e.target.value)}
-            >
-              {vectorColumns.map((c) => (
-                <option key={c.name} value={c.name}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
-            <input
-              type="text"
-              placeholder="Semantic search (MATCH)…"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && searchQuery.trim()) {
-                  onSemanticSearch(
-                    searchColumn || vectorColumns[0]!.name,
-                    searchQuery.trim(),
-                    minSimilarity,
-                  );
-                }
-              }}
-            />
-            <input
-              type="number"
-              min={0}
-              max={1}
-              step={0.05}
-              value={minSimilarity}
-              onChange={(e) => setMinSimilarity(Number(e.target.value))}
-              title="Min similarity"
-              style={{ width: "4rem" }}
-            />
-            <button
-              type="button"
-              className="primary"
-              disabled={!searchQuery.trim()}
-              onClick={() =>
-                onSemanticSearch(
-                  searchColumn || vectorColumns[0]!.name,
-                  searchQuery.trim(),
-                  minSimilarity,
-                )
-              }
-            >
-              Search
-            </button>
-          </div>
-        )}
-      </div>
-
-      {semanticMode && (
-        <div className="status-bar" style={{ background: "#eff6ff" }}>
-          Showing semantic search results
-        </div>
-      )}
-
-      {showNewRow && (
-        <div className="new-row-form">
-          {editableColumns.map((col) => (
-            <label key={col.name}>
-              {col.name}
-              {col.isVector && <span className="badge-vector">vector</span>}
-              <input
-                value={newRow[col.name] ?? ""}
-                onChange={(e) =>
-                  setNewRow((prev) => ({ ...prev, [col.name]: e.target.value }))
-                }
-              />
-            </label>
-          ))}
-          <button type="button" className="primary" onClick={handleNewRowSubmit}>
-            Save row
-          </button>
-        </div>
-      )}
-
-      <div className="data-grid-wrap">
-        {rows.length === 0 ? (
-          <div className="empty-state">No rows in this table.</div>
-        ) : (
-          <table className="data-table">
-            <thead>
-              <tr>
-                {displayColumns.map((col) => (
-                  <th key={col}>{col}</th>
-                ))}
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((row) => {
-                const rowid = Number(row.rowid);
-                return (
-                  <tr key={rowid}>
-                    {displayColumns.map((col) => {
-                      const isEditing =
-                        editing?.rowid === rowid && editing.column === col;
-                      const raw = row[col];
-                      const isRowid = col === "rowid";
-
-                      return (
-                        <td key={col}>
-                          {isRowid ? (
-                            formatCell(raw)
-                          ) : isEditing ? (
-                            <input
-                              autoFocus
-                              value={editing.value}
-                              onChange={(e) =>
-                                setEditing({ ...editing, value: e.target.value })
-                              }
-                              onBlur={() => void commitEdit()}
-                              onKeyDown={(e) => {
-                                if (e.key === "Enter") void commitEdit();
-                                if (e.key === "Escape") setEditing(null);
-                              }}
-                            />
-                          ) : (
-                            <span
-                              role="button"
-                              tabIndex={0}
-                              className={raw == null ? "cell-null" : undefined}
-                              onDoubleClick={() =>
-                                setEditing({
-                                  rowid,
-                                  column: col,
-                                  value: formatCell(raw),
-                                })
-                              }
-                              onKeyDown={(e) => {
-                                if (e.key === "Enter") {
-                                  setEditing({
-                                    rowid,
-                                    column: col,
-                                    value: formatCell(raw),
-                                  });
-                                }
-                              }}
-                            >
-                              {raw == null ? "NULL" : formatCell(raw)}
-                            </span>
-                          )}
-                        </td>
-                      );
-                    })}
-                    <td>
-                      <button
-                        type="button"
-                        className="danger"
-                        onClick={() => void onDeleteRow(rowid)}
-                      >
-                        Delete
-                      </button>
+    <div className="scrollbar-thin h-full overflow-auto">
+      <table className="w-full border-collapse text-sm">
+        <thead className="sticky top-0 z-10 bg-card">
+          <tr className="border-b">
+            {hasRowid && (
+              <th className="px-3 py-2 text-left font-medium text-muted-foreground">#</th>
+            )}
+            {dataCols.map((c) => (
+              <th key={c} className="whitespace-nowrap px-3 py-2 text-left font-medium">
+                <span className="flex items-center gap-1.5">
+                  {c}
+                  {vectorColumns?.has(c) && <Badge variant="vector">vector</Badge>}
+                  {c === "_similarity" && <Badge variant="default">score</Badge>}
+                </span>
+              </th>
+            ))}
+            {editable && onDeleteRow && <th className="w-10" />}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row, i) => {
+            const rowid = hasRowid ? Number(row.rowid) : i;
+            return (
+              <tr key={rowid} className="border-b border-border/50 hover:bg-accent/40">
+                {hasRowid && (
+                  <td className="px-3 py-1.5 text-xs tabular-nums text-muted-foreground">
+                    {String(row.rowid)}
+                  </td>
+                )}
+                {dataCols.map((col) => {
+                  const isEditing = editing?.rowid === rowid && editing.col === col;
+                  return (
+                    <td
+                      key={col}
+                      className={cn(
+                        "max-w-[28rem] truncate px-3 py-1.5 align-top",
+                        editable && col !== "_similarity" && "cursor-text",
+                        col === "_similarity" && "tabular-nums text-violet-300",
+                      )}
+                      onDoubleClick={() => {
+                        if (!editable || !hasRowid || col === "_similarity") return;
+                        setEditing({ rowid, col });
+                        setDraft(row[col] == null ? "" : String(row[col]));
+                      }}
+                      title={renderValue(row[col])}
+                    >
+                      {isEditing ? (
+                        <input
+                          autoFocus
+                          value={draft}
+                          onChange={(e) => setDraft(e.target.value)}
+                          onBlur={() => commit(rowid, col)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") commit(rowid, col);
+                            if (e.key === "Escape") setEditing(null);
+                          }}
+                          className="w-full rounded border border-ring bg-background px-1 py-0.5 outline-none"
+                        />
+                      ) : (
+                        renderValue(row[col])
+                      )}
                     </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        )}
-      </div>
-    </>
+                  );
+                })}
+                {editable && onDeleteRow && (
+                  <td className="px-1">
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      onClick={() => onDeleteRow(rowid)}
+                      title="Delete row"
+                    >
+                      <Trash2 className="text-destructive" />
+                    </Button>
+                  </td>
+                )}
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
   );
 }
