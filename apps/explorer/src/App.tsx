@@ -5,6 +5,7 @@ import {
   Cpu,
   Database,
   FileCode2,
+  FileText,
   Plus,
   RefreshCw,
   Sparkles,
@@ -42,6 +43,7 @@ import {
 import { SchemaTree } from "@/components/SchemaTree";
 import { TableView } from "@/components/TableView";
 import { QueryView } from "@/components/QueryView";
+import { NotesView } from "@/components/NotesView";
 import { StatusBar, type OpStatus } from "@/components/StatusBar";
 import { cn } from "@/lib/utils";
 
@@ -49,12 +51,17 @@ const MODELS = Object.keys(ANKI_MODEL_REGISTRY);
 
 interface Tab {
   key: string;
-  kind: "query" | "table";
+  kind: "query" | "table" | "notes";
   table?: TableInfo;
   title: string;
 }
 
 const queryTab: Tab = { key: "__query__", kind: "query", title: "SQL" };
+const notesTab: Tab = { key: "__notes__", kind: "notes", title: "Notes" };
+const baseTabs = (): { tabs: Tab[]; active: string } => ({
+  tabs: [queryTab, notesTab],
+  active: queryTab.key,
+});
 
 export function App() {
   // The Comlink remote is a *callable* proxy — never put it in React state
@@ -89,7 +96,14 @@ export function App() {
       const reg = ANKI_MODEL_REGISTRY[modelChoice];
       const res = await api.init({ model: modelChoice, modelId: modelChoice, dim: reg?.dim });
       setInfo(res);
-      setDatabases(await api.listDatabases());
+      let dbs = await api.listDatabases();
+      if (dbs.length === 0) {
+        // First run: seed a sample database to explore immediately.
+        await api.seedDemo("/demo.db");
+        dbs = await api.listDatabases();
+        await openDb("/demo.db");
+      }
+      setDatabases(dbs);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -110,9 +124,7 @@ export function App() {
       const t = await api.openDatabase(path);
       setActiveDb(path);
       setTables(t);
-      setTabsByDb((m) =>
-        m[path] ? m : { ...m, [path]: { tabs: [queryTab], active: queryTab.key } },
-      );
+      setTabsByDb((m) => (m[path] ? m : { ...m, [path]: baseTabs() }));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -133,7 +145,7 @@ export function App() {
     if (!activeDb) return;
     const key = `table:${table.name}`;
     setTabsByDb((m) => {
-      const cur = m[activeDb] ?? { tabs: [queryTab], active: queryTab.key };
+      const cur = m[activeDb] ?? baseTabs();
       const exists = cur.tabs.some((t) => t.key === key);
       const tabs = exists
         ? cur.tabs.map((t) => (t.key === key ? { ...t, table } : t))
@@ -334,6 +346,8 @@ export function App() {
                       >
                         {t.kind === "query" ? (
                           <FileCode2 className="h-4 w-4 text-emerald-400" />
+                        ) : t.kind === "notes" ? (
+                          <FileText className="h-4 w-4 text-amber-400" />
                         ) : t.table?.isAnki ? (
                           <Sparkles className="h-4 w-4 text-violet-400" />
                         ) : (
@@ -341,7 +355,7 @@ export function App() {
                         )}
                         {t.title}
                       </button>
-                      {t.kind !== "query" && (
+                      {t.kind === "table" && (
                         <button
                           className="opacity-0 group-hover:opacity-100"
                           onClick={() => closeTab(t.key)}
@@ -354,6 +368,9 @@ export function App() {
                 </div>
                 <div className="min-h-0 flex-1">
                   {activeTab?.kind === "query" && <QueryView run={runQuery} />}
+                  {activeTab?.kind === "notes" && (
+                    <NotesView key={`${activeDb}:notes`} api={api} path={activeDb} />
+                  )}
                   {activeTab?.kind === "table" && activeTab.table && (
                     <TableView
                       key={`${activeDb}:${activeTab.table.name}`}

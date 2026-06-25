@@ -21,6 +21,11 @@ import {
 type Sqlite3 = any;
 type Db = any;
 
+// The host app serves the wasm dist (`sqlite3-bundler-friendly.mjs` + its
+// sibling `.wasm` and OPFS proxy) from the origin root — see the explorer's
+// `sync-wasm` script. This makes the URLs resolve the same in Vite dev & build.
+const WASM_MODULE_URL = "/sqlite3-bundler-friendly.mjs";
+
 function quote(name: string): string {
   return `"${name.replace(/"/g, '""')}"`;
 }
@@ -45,11 +50,10 @@ class AnkiWorker implements AnkiWorkerApi {
   private dbs = new Map<string, Db>();
 
   async init(model: ModelSpec): Promise<InitResult> {
-    this.sqlite3 = await initSqliteAnki(
-      model && (model.model || model.modelUrl || model.modelBytes)
-        ? { anki: model as any }
-        : undefined,
-    );
+    this.sqlite3 = await initSqliteAnki({
+      anki: model && (model.model || model.modelUrl) ? (model as any) : undefined,
+      wasmModuleUrl: WASM_MODULE_URL,
+    });
     const s = this.sqlite3;
     this.opfsAvailable = "opfs" in s && Boolean(s.opfs);
     return {
@@ -81,6 +85,7 @@ class AnkiWorker implements AnkiWorkerApi {
         : new s.oo1.DB(path, "ct");
       this.dbs.set(path, db);
     }
+    await this.ensureNotes(path);
     return this.schema(path);
   }
 
@@ -90,8 +95,73 @@ class AnkiWorker implements AnkiWorkerApi {
     try {
       const root = await (navigator as any).storage.getDirectory();
       await root.removeEntry(path.replace(/^\//, ""));
+      await root.removeEntry(notesName(path));
     } catch {
       /* ignore */
+    }
+  }
+
+  async seedDemo(path: string): Promise<TableInfo[]> {
+    await this.openDatabase(path);
+    const db = this.db(path);
+    db.exec(`CREATE VIRTUAL TABLE IF NOT EXISTS articles USING anki(
+      title TEXT, body TEXT VECTOR)`);
+    db.exec(`CREATE VIRTUAL TABLE IF NOT EXISTS tickets USING anki(
+      subject TEXT, status TEXT, message TEXT VECTOR)`);
+
+    if (!db.selectValue("SELECT count(*) FROM articles")) {
+      const articles: [string, string][] = [
+        ["Vector search in SQLite", "Find rows by meaning instead of exact keywords."],
+        ["Getting started with OPFS", "The origin private file system gives browser apps durable local storage."],
+        ["Embedding models explained", "A sentence transformer maps text to a vector so similar text sits nearby."],
+        ["Why local-first apps", "Keeping data on the device improves privacy and works offline."],
+        ["Tokenization basics", "Text is split into tokens before the model can process it."],
+      ];
+      for (const [title, body] of articles)
+        db.exec({ sql: "INSERT INTO articles(title, body) VALUES (?,?)", bind: [title, body] });
+
+      const tickets: [string, string, string][] = [
+        ["Cannot log in", "open", "The login button does nothing after I enter my password."],
+        ["Billing question", "open", "I was charged twice this month — please refund the duplicate."],
+        ["Feature request", "closed", "It would be great to export my notes as markdown."],
+        ["Search is slow", "open", "Semantic search takes a few seconds on my large database."],
+        ["Thank you", "closed", "Just wanted to say the semantic search works really well."],
+      ];
+      for (const [subject, status, message] of tickets)
+        db.exec({
+          sql: "INSERT INTO tickets(subject, status, message) VALUES (?,?,?)",
+          bind: [subject, status, message],
+        });
+    }
+
+    await this.writeNotes(path, demoNotes());
+    return this.schema(path);
+  }
+
+  async readNotes(path: string): Promise<string> {
+    try {
+      const root = await (navigator as any).storage.getDirectory();
+      const h = await root.getFileHandle(notesName(path));
+      return await (await h.getFile()).text();
+    } catch {
+      return "";
+    }
+  }
+
+  async writeNotes(path: string, content: string): Promise<void> {
+    const root = await (navigator as any).storage.getDirectory();
+    const h = await root.getFileHandle(notesName(path), { create: true });
+    const w = await h.createWritable();
+    await w.write(content);
+    await w.close();
+  }
+
+  private async ensureNotes(path: string): Promise<void> {
+    try {
+      const root = await (navigator as any).storage.getDirectory();
+      await root.getFileHandle(notesName(path));
+    } catch {
+      await this.writeNotes(path, defaultNotes(path));
     }
   }
 
@@ -233,6 +303,75 @@ class AnkiWorker implements AnkiWorkerApi {
     }
     return out;
   }
+}
+
+/** Sidecar notes filename for a database path: `/demo.db` → `demo.notes.md`. */
+function notesName(dbPath: string): string {
+  return `${dbPath.replace(/^\//, "").replace(/\.db$/, "")}.notes.md`;
+}
+
+function defaultNotes(dbPath: string): string {
+  const name = dbPath.replace(/^\//, "").replace(/\.db$/, "");
+  const date = new Date().toISOString().slice(0, 10);
+  return `# ${name}
+
+_Created ${date}. Markdown — autosaves as you type._
+
+## Purpose
+
+What is this database for?
+
+## Tables
+
+- Document tables, columns, and what each holds.
+
+## Handy queries
+
+\`\`\`sql
+SELECT name FROM sqlite_master WHERE type IN ('table','view');
+\`\`\`
+`;
+}
+
+function demoNotes(): string {
+  const date = new Date().toISOString().slice(0, 10);
+  return `# Sample database
+
+_Created ${date}. A guided tour of sqlite-anki._
+
+This database is pre-seeded with two **anki virtual tables** that have
+\`TEXT VECTOR\` columns (semantically searchable):
+
+| Table | Columns | Notes |
+| --- | --- | --- |
+| \`articles\` | \`title\`, \`body\` (vector) | short docs to search by meaning |
+| \`tickets\` | \`subject\`, \`status\`, \`message\` (vector) | \`status\` enables hybrid filtering |
+
+## Try it
+
+Semantic search (open the \`articles\` tab and use the search box, or run):
+
+\`\`\`sql
+SELECT title, round(similarity(body), 3) AS score
+FROM articles WHERE body MATCH 'private offline storage'
+ORDER BY score DESC;
+\`\`\`
+
+Hybrid — relational filter **and** semantic match:
+
+\`\`\`sql
+SELECT subject, message FROM tickets
+WHERE status = 'open' AND message MATCH 'refund';
+\`\`\`
+
+Pick the search strategy with the DSL suffix:
+
+\`\`\`sql
+SELECT subject FROM tickets WHERE message MATCH 'slow/exact';
+\`\`\`
+
+Watch the **status bar** for embedding / search / persist timings on every query.
+`;
 }
 
 Comlink.expose(new AnkiWorker());

@@ -89,6 +89,12 @@ export interface AnkiWorkerApi {
   ): Promise<QueryResult>;
   deleteRow(path: string, table: string, rowid: number): Promise<QueryResult>;
   metrics(): Promise<Metrics>;
+  /** Seeds a sample schema + rows (with TEXT VECTOR columns) into `path`. */
+  seedDemo(path: string): Promise<TableInfo[]>;
+  /** Reads the database's sidecar notes (`.notes.md`); "" if none. */
+  readNotes(path: string): Promise<string>;
+  /** Writes the database's sidecar notes. */
+  writeNotes(path: string, content: string): Promise<void>;
 }
 
 export const ZERO_METRICS: Metrics = {
