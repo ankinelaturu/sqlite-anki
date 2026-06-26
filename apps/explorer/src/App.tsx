@@ -1,13 +1,17 @@
 import { useCallback, useState } from "react";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import {
+  AppWindow,
+  Binary,
   Boxes,
+  BrainCircuit,
   Cpu,
   Database,
+  ExternalLink,
   FileCode2,
   FileText,
+  HardDrive,
   Plus,
-  RefreshCw,
   Sparkles,
   Table2,
   X,
@@ -20,6 +24,7 @@ import {
   type QueryResult,
   type TableInfo,
 } from "@sqlite-anki/db-client";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -48,6 +53,8 @@ import { StatusBar, type OpStatus } from "@/components/StatusBar";
 import { cn } from "@/lib/utils";
 
 const MODELS = Object.keys(ANKI_MODEL_REGISTRY);
+// Binary icons emitted from the model toward the app, one every 0.4s.
+const TRAVELERS = [0, 0.4, 0.8, 1.2];
 
 interface Tab {
   key: string;
@@ -190,9 +197,11 @@ export function App() {
 
   // ---- model gate ----
   if (!info) {
+    const sel = ANKI_MODEL_REGISTRY[modelChoice];
+    const large = (sel?.sizeMb ?? 0) > 200;
     return (
       <div className="flex h-full items-center justify-center bg-background">
-        <div className="w-[26rem] rounded-xl border bg-card p-6 shadow-xl">
+        <div className="w-[28rem] rounded-xl border bg-card p-6 shadow-xl">
           <div className="mb-1 flex items-center gap-2 text-lg font-semibold">
             <Boxes className="h-5 w-5 text-primary" /> sqlite-anki Explorer
           </div>
@@ -201,8 +210,8 @@ export function App() {
             and powers semantic search for every database this session.
           </p>
           <Label className="mb-1.5 block">Model</Label>
-          <Select value={modelChoice} onValueChange={setModelChoice}>
-            <SelectTrigger className="mb-4">
+          <Select value={modelChoice} onValueChange={setModelChoice} disabled={loadingModel}>
+            <SelectTrigger>
               <SelectValue placeholder="Select a model" />
             </SelectTrigger>
             <SelectContent>
@@ -213,14 +222,60 @@ export function App() {
               ))}
             </SelectContent>
           </Select>
-          <Button className="w-full" onClick={() => void loadModel()} disabled={loadingModel}>
+
+          {/* selected-model details */}
+          {sel && (
+            <div className="mt-3 rounded-lg border bg-secondary/30 p-3">
+              <p className="text-xs leading-relaxed text-muted-foreground">
+                {sel.description}
+              </p>
+              <div className="mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs">
+                <Badge variant="secondary">{sel.dim}-dim</Badge>
+                <span
+                  className={cn(
+                    "flex items-center gap-1 text-muted-foreground",
+                    large && "text-amber-400",
+                  )}
+                >
+                  <HardDrive className="h-3.5 w-3.5" /> {sel.sizeMb} MB
+                  {large ? " · large download" : ""}
+                </span>
+                <a
+                  href={sel.modelUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex items-center gap-1 text-primary hover:underline"
+                >
+                  <ExternalLink className="h-3.5 w-3.5" /> HuggingFace
+                </a>
+              </div>
+            </div>
+          )}
+
+          <Button
+            className={cn("mt-5 w-full", loadingModel && "cursor-progress disabled:opacity-100")}
+            onClick={() => void loadModel()}
+            disabled={loadingModel}
+          >
             {loadingModel ? (
-              <>
-                <RefreshCw className="animate-spin" /> Loading model…
-              </>
+              <span className="flex w-full items-center justify-between">
+                <BrainCircuit className="h-4 w-4 shrink-0" />
+                <span className="relative mx-3 h-4 flex-1 overflow-hidden">
+                  {TRAVELERS.map((delay) => (
+                    <Binary
+                      key={delay}
+                      className="anki-travel text-primary-foreground/85"
+                      style={{ width: "11px", height: "11px", animationDelay: `${delay}s` }}
+                    />
+                  ))}
+                </span>
+                <AppWindow className="h-4 w-4 shrink-0" />
+              </span>
             ) : (
               <>
-                <Cpu /> Load &amp; start
+                <BrainCircuit className="h-4 w-4" />
+                <span>Load &amp; Start</span>
+                <AppWindow className="h-4 w-4" />
               </>
             )}
           </Button>

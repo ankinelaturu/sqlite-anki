@@ -92,3 +92,30 @@ body {
   background: transparent !important;
   border: none !important;
 }
+
+/* model-loading button: binary icons travel from the model to the app */
+@keyframes anki-travel {
+  0% {
+    left: 0%;
+    opacity: 0;
+  }
+  20% {
+    opacity: 1;
+  }
+  80% {
+    opacity: 1;
+  }
+  100% {
+    left: 100%;
+    opacity: 0;
+  }
+}
+.anki-travel {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  opacity: 0;
+  transform: translate(-50%, -50%);
+  animation: anki-travel 1.6s linear infinite backwards;
+  will-change: left, opacity;
+}
