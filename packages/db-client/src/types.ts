@@ -95,6 +95,10 @@ export interface AnkiWorkerApi {
   readNotes(path: string): Promise<string>;
   /** Writes the database's sidecar notes. */
   writeNotes(path: string, content: string): Promise<void>;
+  /** Reads the database's sidecar SQL scratchpad (`.sql`); "" if none. */
+  readQuery(path: string): Promise<string>;
+  /** Writes the database's sidecar SQL scratchpad. */
+  writeQuery(path: string, content: string): Promise<void>;
 }
 
 export const ZERO_METRICS: Metrics = {

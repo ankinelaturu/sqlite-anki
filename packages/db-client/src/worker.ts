@@ -96,7 +96,8 @@ class AnkiWorker implements AnkiWorkerApi {
     try {
       const root = await (navigator as any).storage.getDirectory();
       await root.removeEntry(path.replace(/^\//, ""));
-      await root.removeEntry(notesName(path));
+      await root.removeEntry(notesName(path)).catch(() => {});
+      await root.removeEntry(queryName(path)).catch(() => {});
     } catch {
       /* ignore */
     }
@@ -136,25 +137,24 @@ class AnkiWorker implements AnkiWorkerApi {
     }
 
     await this.writeNotes(path, demoNotes());
+    await this.writeQuery(path, demoQuery());
     return this.schema(path);
   }
 
   async readNotes(path: string): Promise<string> {
-    try {
-      const root = await (navigator as any).storage.getDirectory();
-      const h = await root.getFileHandle(notesName(path));
-      return await (await h.getFile()).text();
-    } catch {
-      return "";
-    }
+    return readSidecar(notesName(path));
   }
 
   async writeNotes(path: string, content: string): Promise<void> {
-    const root = await (navigator as any).storage.getDirectory();
-    const h = await root.getFileHandle(notesName(path), { create: true });
-    const w = await h.createWritable();
-    await w.write(content);
-    await w.close();
+    return writeSidecar(notesName(path), content);
+  }
+
+  async readQuery(path: string): Promise<string> {
+    return readSidecar(queryName(path));
+  }
+
+  async writeQuery(path: string, content: string): Promise<void> {
+    return writeSidecar(queryName(path), content);
   }
 
   private async ensureNotes(path: string): Promise<void> {
@@ -162,7 +162,7 @@ class AnkiWorker implements AnkiWorkerApi {
       const root = await (navigator as any).storage.getDirectory();
       await root.getFileHandle(notesName(path));
     } catch {
-      await this.writeNotes(path, defaultNotes(path));
+      await writeSidecar(notesName(path), defaultNotes(path));
     }
   }
 
@@ -306,9 +306,49 @@ class AnkiWorker implements AnkiWorkerApi {
   }
 }
 
+/** Reads a sidecar file's text; "" if it doesn't exist. */
+async function readSidecar(name: string): Promise<string> {
+  try {
+    const root = await (navigator as any).storage.getDirectory();
+    const h = await root.getFileHandle(name);
+    return await (await h.getFile()).text();
+  } catch {
+    return "";
+  }
+}
+
+/** Writes (creating if needed) a sidecar file. */
+async function writeSidecar(name: string, content: string): Promise<void> {
+  const root = await (navigator as any).storage.getDirectory();
+  const h = await root.getFileHandle(name, { create: true });
+  const w = await h.createWritable();
+  await w.write(content);
+  await w.close();
+}
+
 /** Sidecar notes filename for a database path: `/demo.db` → `demo.notes.md`. */
 function notesName(dbPath: string): string {
   return `${dbPath.replace(/^\//, "").replace(/\.db$/, "")}.notes.md`;
+}
+
+/** Sidecar SQL scratchpad filename: `/demo.db` → `demo.sql`. */
+function queryName(dbPath: string): string {
+  return `${dbPath.replace(/^\//, "").replace(/\.db$/, "")}.sql`;
+}
+
+function demoQuery(): string {
+  return `-- Semantic search, ranked by similarity
+SELECT title, round(similarity(body), 3) AS score
+FROM articles
+WHERE body MATCH 'private offline storage'
+ORDER BY score DESC;
+
+-- Hybrid: relational filter + semantic match.
+-- Tip: select one statement and use "Run selection".
+SELECT subject, message
+FROM tickets
+WHERE status = 'open' AND message MATCH 'refund';
+`;
 }
 
 function defaultNotes(dbPath: string): string {

@@ -426,7 +426,11 @@ export function App() {
                   ))}
                 </div>
                 <div className="min-h-0 flex-1">
-                  {activeTab?.kind === "query" && <QueryView run={runQuery} />}
+                  {/* The SQL editor stays mounted (hidden) so its content,
+                      results and selection survive tab switches. */}
+                  <div className={cn("h-full", activeTab?.kind !== "query" && "hidden")}>
+                    <QueryView key={activeDb} api={api} path={activeDb} run={runQuery} />
+                  </div>
                   {activeTab?.kind === "notes" && (
                     <NotesView key={`${activeDb}:notes`} api={api} path={activeDb} />
                   )}
