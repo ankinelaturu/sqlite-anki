@@ -147,9 +147,14 @@ export function TableView({
   return (
     <div className="flex h-full flex-col">
       <div className="flex items-center gap-2 border-b px-3 py-2">
-        <Button variant="ghost" size="icon-sm" onClick={() => void reload()} title="Refresh">
-          <RefreshCw />
-        </Button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button variant="ghost" size="icon-sm" onClick={() => void reload()}>
+              <RefreshCw />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Refresh</TooltipContent>
+        </Tooltip>
         <Button variant="outline" size="sm" onClick={() => void addRow()}>
           <Plus /> Add row
         </Button>

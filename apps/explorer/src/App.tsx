@@ -378,11 +378,16 @@ export function App() {
                   </TooltipContent>
                 </Tooltip>
                 <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-                  <DialogTrigger asChild>
-                    <Button variant="ghost" size="icon-sm" title="New database">
-                      <Plus />
-                    </Button>
-                  </DialogTrigger>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <DialogTrigger asChild>
+                        <Button variant="ghost" size="icon-sm">
+                          <Plus />
+                        </Button>
+                      </DialogTrigger>
+                    </TooltipTrigger>
+                    <TooltipContent>New database</TooltipContent>
+                  </Tooltip>
                 <DialogContent>
                   <DialogHeader>
                     <DialogTitle>New OPFS database</DialogTitle>

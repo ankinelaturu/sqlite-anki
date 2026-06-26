@@ -113,7 +113,6 @@ export function QueryView({ api, path, run }: QueryViewProps) {
             variant="outline"
             disabled={!hasSelection || running}
             onClick={runSelection}
-            title="Run only the selected text"
           >
             <TextCursorInput /> Run selection
           </Button>

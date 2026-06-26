@@ -3,6 +3,7 @@ import { Trash2 } from "lucide-react";
 import type { Row, SqlValue } from "@sqlite-anki/db-client";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
 interface DataGridProps {
@@ -31,6 +32,20 @@ export function DataGrid({
 }: DataGridProps) {
   const [editing, setEditing] = useState<{ rowid: number; col: string } | null>(null);
   const [draft, setDraft] = useState("");
+  // One shared tooltip that follows the hovered cell — only when it's truncated.
+  const [hover, setHover] = useState<{ key: string; rect: DOMRect; text: string } | null>(null);
+
+  const onCellOver = (e: React.MouseEvent) => {
+    const td = (e.target as HTMLElement).closest<HTMLElement>("td[data-cell]");
+    if (!td || td.scrollWidth <= td.clientWidth) {
+      setHover((h) => (h ? null : h));
+      return;
+    }
+    const key = td.dataset.cell!;
+    setHover((h) =>
+      h && h.key === key ? h : { key, rect: td.getBoundingClientRect(), text: td.textContent ?? "" },
+    );
+  };
 
   if (columns.length === 0) {
     return (
@@ -49,7 +64,11 @@ export function DataGrid({
   };
 
   return (
-    <div className="scrollbar-thin h-full overflow-auto">
+    <div
+      className="scrollbar-thin h-full overflow-auto"
+      onMouseOver={onCellOver}
+      onMouseLeave={() => setHover(null)}
+    >
       <table className="w-full border-collapse text-sm">
         <thead className="sticky top-0 z-10 bg-card">
           <tr className="border-b">
@@ -83,6 +102,7 @@ export function DataGrid({
                   return (
                     <td
                       key={col}
+                      data-cell={`${rowid}:${col}`}
                       className={cn(
                         "max-w-[28rem] truncate px-3 py-1.5 align-top",
                         editable && col !== "_similarity" && "cursor-text",
@@ -93,7 +113,6 @@ export function DataGrid({
                         setEditing({ rowid, col });
                         setDraft(row[col] == null ? "" : String(row[col]));
                       }}
-                      title={renderValue(row[col])}
                     >
                       {isEditing ? (
                         <input
@@ -115,14 +134,18 @@ export function DataGrid({
                 })}
                 {editable && onDeleteRow && (
                   <td className="px-1">
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      onClick={() => onDeleteRow(rowid)}
-                      title="Delete row"
-                    >
-                      <Trash2 className="text-destructive" />
-                    </Button>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
+                          onClick={() => onDeleteRow(rowid)}
+                        >
+                          <Trash2 className="text-destructive" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>Delete row</TooltipContent>
+                    </Tooltip>
                   </td>
                 )}
               </tr>
@@ -130,6 +153,28 @@ export function DataGrid({
           })}
         </tbody>
       </table>
+
+      {/* single shared tooltip, anchored to the hovered (truncated) cell */}
+      {hover && (
+        <Tooltip open key={hover.key}>
+          <TooltipTrigger asChild>
+            <span
+              aria-hidden
+              style={{
+                position: "fixed",
+                left: hover.rect.left,
+                top: hover.rect.top,
+                width: hover.rect.width,
+                height: hover.rect.height,
+                pointerEvents: "none",
+              }}
+            />
+          </TooltipTrigger>
+          <TooltipContent className="max-w-md whitespace-pre-wrap break-words">
+            {hover.text}
+          </TooltipContent>
+        </Tooltip>
+      )}
     </div>
   );
 }
