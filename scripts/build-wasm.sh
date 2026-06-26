@@ -61,8 +61,11 @@ need_cmd wasm-strip
 # the members it needs. Loose .bc files omit the sysroot and break the link the
 # moment the embedder is actually reachable.
 
-echo "==> Building anki-wasm ($WASM_TARGET, staticlib)"
-cargo build -p anki-wasm --target "$WASM_TARGET" --release
+echo "==> Building anki-wasm ($WASM_TARGET, staticlib, +simd128)"
+# wasm SIMD (simd128) lets LLVM vectorize Tract's matmuls — the dominant cost of
+# embedding. Big speedup; requires a SIMD-capable browser (all modern ones).
+RUSTFLAGS="${RUSTFLAGS:-} -C target-feature=+simd128" \
+  cargo build -p anki-wasm --target "$WASM_TARGET" --release
 
 ANKI_LIB="$CARGO_TARGET/libanki_wasm.a"
 [[ -f "$ANKI_LIB" ]] || die "missing staticlib $ANKI_LIB (cargo build failed?)"
@@ -116,7 +119,7 @@ done
 # in sqlite3ApiBootstrap with "HEAPU64 was not exported".
 # HEAPU8 is needed so the JS glue can copy model/tokenizer bytes into the wasm
 # heap before calling anki_load_model.
-ANKI_LINK="$ANKI_LIB -sEXPORTED_RUNTIME_METHODS=wasmMemory,HEAPU64,HEAP64,HEAPU8"
+ANKI_LINK="$ANKI_LIB -msimd128 -sEXPORTED_RUNTIME_METHODS=wasmMemory,HEAPU64,HEAP64,HEAPU8"
 
 # Headroom for the runtime-loaded ONNX model (copied into the heap at load) +
 # inference arenas. ALLOW_MEMORY_GROWTH covers larger models.
