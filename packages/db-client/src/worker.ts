@@ -10,6 +10,7 @@
 import sqlite3InitModule from "@sqlite-anki/wasm/loader";
 import { loadAnkiModel } from "@sqlite-anki/wasm";
 import * as Comlink from "comlink";
+import DEMO_SQL from "./demo/demodb-schema.sql?raw";
 import {
   ZERO_METRICS,
   type AnkiWorkerApi,
@@ -70,7 +71,7 @@ class AnkiWorker implements AnkiWorkerApi {
       const root = await (navigator as any).storage.getDirectory();
       const names: string[] = [];
       for await (const [name, handle] of (root as any).entries()) {
-        if (handle.kind === "file" && name.endsWith(".db")) names.push(name);
+        if (handle.kind === "file" && name.endsWith(".db")) names.push(`/${name}`);
       }
       return names.sort();
     } catch {
@@ -103,41 +104,35 @@ class AnkiWorker implements AnkiWorkerApi {
     }
   }
 
-  async seedDemo(path: string): Promise<TableInfo[]> {
-    await this.openDatabase(path);
-    const db = this.db(path);
-    db.exec(`CREATE VIRTUAL TABLE IF NOT EXISTS articles USING anki(
-      title TEXT, body TEXT VECTOR)`);
-    db.exec(`CREATE VIRTUAL TABLE IF NOT EXISTS tickets USING anki(
-      subject TEXT, status TEXT, message TEXT VECTOR)`);
+  async populateDemo(
+    path: string,
+    onProgress: (done: number, total: number) => void,
+  ): Promise<TableInfo[]> {
+    // Overwrite: close + delete any existing database and its sidecars.
+    await this.dropDatabase(path);
 
-    if (!db.selectValue("SELECT count(*) FROM articles")) {
-      const articles: [string, string][] = [
-        ["Vector search in SQLite", "Find rows by meaning instead of exact keywords."],
-        ["Getting started with OPFS", "The origin private file system gives browser apps durable local storage."],
-        ["Embedding models explained", "A sentence transformer maps text to a vector so similar text sits nearby."],
-        ["Why local-first apps", "Keeping data on the device improves privacy and works offline."],
-        ["Tokenization basics", "Text is split into tokens before the model can process it."],
-      ];
-      for (const [title, body] of articles)
-        db.exec({ sql: "INSERT INTO articles(title, body) VALUES (?,?)", bind: [title, body] });
+    const s = this.require();
+    const db = this.opfsAvailable
+      ? new s.oo1.OpfsDb(path)
+      : new s.oo1.DB(path, "ct");
+    this.dbs.set(path, db);
 
-      const tickets: [string, string, string][] = [
-        ["Cannot log in", "open", "The login button does nothing after I enter my password."],
-        ["Billing question", "open", "I was charged twice this month — please refund the duplicate."],
-        ["Feature request", "closed", "It would be great to export my notes as markdown."],
-        ["Search is slow", "open", "Semantic search takes a few seconds on my large database."],
-        ["Thank you", "closed", "Just wanted to say the semantic search works really well."],
-      ];
-      for (const [subject, status, message] of tickets)
-        db.exec({
-          sql: "INSERT INTO tickets(subject, status, message) VALUES (?,?,?)",
-          bind: [subject, status, message],
-        });
+    // Setup (DDL + cheap data) runs as one blob; the vector-table rows run one
+    // at a time so we can report embedding progress.
+    const [setup, vectors = ""] = DEMO_SQL.split("--==VECTORS==--");
+    db.exec(setup);
+    const lines = vectors.split("\n").filter((l) => l.trim().length > 0);
+    const total = lines.length;
+    let done = 0;
+    onProgress(0, total);
+    for (const line of lines) {
+      db.exec(line);
+      done++;
+      if (done % 2 === 0 || done === total) onProgress(done, total);
     }
 
-    await this.writeNotes(path, demoNotes());
-    await this.writeQuery(path, demoQuery());
+    await writeSidecar(notesName(path), demoNotes());
+    await writeSidecar(queryName(path), demoQuery());
     return this.schema(path);
   }
 
@@ -173,8 +168,11 @@ class AnkiWorker implements AnkiWorkerApi {
        WHERE type IN ('table', 'view')
          AND name NOT LIKE 'sqlite_%' AND name NOT LIKE 'anki_%'
          AND name NOT LIKE '%_data'
+         AND name NOT LIKE '\\_%' ESCAPE '\\'
        ORDER BY name`,
     ) as Array<{ name: string; sql: string; type: string }>;
+
+    const desc = this.descriptions(db);
 
     return tables.map((t) => {
       const isAnki = /using\s+anki/i.test(t.sql ?? "");
@@ -188,6 +186,7 @@ class AnkiWorker implements AnkiWorkerApi {
         notnull: c.notnull === 1,
         pk: c.pk === 1,
         isVector: vec.has(c.name),
+        description: desc.get(`${t.name}.${c.name}`),
       }));
       return {
         name: t.name,
@@ -197,6 +196,20 @@ class AnkiWorker implements AnkiWorkerApi {
         columns,
       };
     });
+  }
+
+  /** Reads `_meta_columns` (if present) into a `table.column` → description map. */
+  private descriptions(db: Db): Map<string, string> {
+    const m = new Map<string, string>();
+    try {
+      const rows = db.selectObjects(
+        "SELECT tbl, col, description FROM _meta_columns",
+      ) as Array<{ tbl: string; col: string; description: string }>;
+      for (const r of rows) m.set(`${r.tbl}.${r.col}`, r.description);
+    } catch {
+      /* no _meta_columns table */
+    }
+    return m;
   }
 
   async query(path: string, sql: string, params: SqlValue[] = []): Promise<QueryResult> {
@@ -338,16 +351,37 @@ function queryName(dbPath: string): string {
 
 function demoQuery(): string {
   return `-- Semantic search, ranked by similarity
-SELECT title, round(similarity(body), 3) AS score
-FROM articles
-WHERE body MATCH 'private offline storage'
-ORDER BY score DESC;
+SELECT title, round(similarity(customer_notes), 3) AS score
+FROM opportunities
+WHERE customer_notes MATCH 'enterprise rollout'
+ORDER BY score DESC LIMIT 10;
 
--- Hybrid: relational filter + semantic match.
--- Tip: select one statement and use "Run selection".
-SELECT subject, message
-FROM tickets
-WHERE status = 'open' AND message MATCH 'refund';
+-- Exact vs approximate (MATCH DSL suffix). Select one line and Run selection.
+SELECT title FROM opportunities WHERE customer_notes MATCH 'budget approval/exact';
+SELECT title FROM opportunities WHERE customer_notes MATCH 'budget approval/hnsw:512';
+
+-- Hybrid: relational filter + semantic match, with a JOIN
+SELECT a.name, o.title, o.stage
+FROM opportunities o JOIN accounts a ON a.id = o.account_id
+WHERE o.stage = 'Negotiation' AND o.customer_notes MATCH 'budget approved';
+
+-- Support tickets: meaning beats keywords
+SELECT subject, resolution
+FROM support_tickets
+WHERE problem MATCH 'users cannot login after sso migration';
+
+-- Knowledge base
+SELECT title, category FROM knowledge_articles
+WHERE body MATCH 'how to migrate enterprise customers to the cloud';
+
+-- Multiple semantic columns in one query
+SELECT title,
+       round(similarity(summary), 3)        AS summary_score,
+       round(similarity(customer_notes), 3) AS notes_score
+FROM opportunities
+WHERE summary MATCH 'manufacturing expansion'
+  AND customer_notes MATCH 'budget approved'
+ORDER BY summary_score DESC;
 `;
 }
 
@@ -376,42 +410,27 @@ SELECT name FROM sqlite_master WHERE type IN ('table','view');
 
 function demoNotes(): string {
   const date = new Date().toISOString().slice(0, 10);
-  return `# Sample database
+  return `# Demo: CRM + Knowledge Base
 
-_Created ${date}. A guided tour of sqlite-anki._
+_Created ${date}. A realistic sqlite-anki playground (~870 rows)._
 
-This database is pre-seeded with two **anki virtual tables** that have
-\`TEXT VECTOR\` columns (semantically searchable):
+Standard SQLite tables alongside **anki virtual tables** with multiple
+\`TEXT VECTOR\` columns — semantic search behaves like a native SQL capability.
 
-| Table | Columns | Notes |
+| Table | Kind | Vector columns |
 | --- | --- | --- |
-| \`articles\` | \`title\`, \`body\` (vector) | short docs to search by meaning |
-| \`tickets\` | \`subject\`, \`status\`, \`message\` (vector) | \`status\` enables hybrid filtering |
+| \`accounts\` | table | — |
+| \`contacts\` | table | — |
+| \`interactions\` | table | — |
+| \`opportunities\` | anki | summary, customer_notes, next_steps |
+| \`support_tickets\` | anki | problem, resolution, internal_notes |
+| \`knowledge_articles\` | anki | abstract, body, troubleshooting |
+| \`pipeline\` | view | accounts ⋈ opportunities |
 
-## Try it
-
-Semantic search (open the \`articles\` tab and use the search box, or run):
-
-\`\`\`sql
-SELECT title, round(similarity(body), 3) AS score
-FROM articles WHERE body MATCH 'private offline storage'
-ORDER BY score DESC;
-\`\`\`
-
-Hybrid — relational filter **and** semantic match:
-
-\`\`\`sql
-SELECT subject, message FROM tickets
-WHERE status = 'open' AND message MATCH 'refund';
-\`\`\`
-
-Pick the search strategy with the DSL suffix:
-
-\`\`\`sql
-SELECT subject FROM tickets WHERE message MATCH 'slow/exact';
-\`\`\`
-
-Watch the **status bar** for embedding / search / persist timings on every query.
+Open the **SQL** tab for ready-to-run examples — semantic search, hybrid
+relational + \`MATCH\` filters, the MATCH DSL (\`/exact\`, \`/hnsw:N\`), JOINs, and
+multi-column \`similarity()\`. Tip: select one statement and use **Run selection**.
+Watch the **status bar** for embedding / search timings on every query.
 `;
 }
 

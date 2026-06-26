@@ -119,3 +119,23 @@ body {
   animation: anki-travel 1.6s linear infinite backwards;
   will-change: left, opacity;
 }
+
+/* demo-build progress bar shimmer */
+@keyframes anki-shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+.anki-progress {
+  background-image: linear-gradient(
+    90deg,
+    hsl(var(--primary)) 0%,
+    hsl(var(--primary) / 0.55) 50%,
+    hsl(var(--primary)) 100%
+  );
+  background-size: 200% 100%;
+  animation: anki-shimmer 1.4s linear infinite;
+}

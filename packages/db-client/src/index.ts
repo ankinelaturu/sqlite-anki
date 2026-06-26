@@ -6,6 +6,8 @@ import type { AnkiWorkerApi } from "./types";
 
 export * from "./types";
 export type Remote<T> = Comlink.Remote<T>;
+/** Wrap a callback before passing it to a worker method (e.g. onProgress). */
+export const proxy = Comlink.proxy;
 
 let worker: Worker | null = null;
 let api: Comlink.Remote<AnkiWorkerApi> | null = null;

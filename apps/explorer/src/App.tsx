@@ -7,6 +7,7 @@ import {
   BrainCircuit,
   Cpu,
   Database,
+  DatabaseZap,
   ExternalLink,
   FileCode2,
   FileText,
@@ -19,6 +20,7 @@ import {
 import { ANKI_MODEL_REGISTRY } from "@sqlite-anki/wasm";
 import {
   getDbWorker,
+  proxy,
   resetDbWorker,
   type InitResult,
   type QueryResult,
@@ -29,7 +31,12 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
-import { TooltipProvider } from "@/components/ui/tooltip";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import {
   Select,
   SelectContent,
@@ -53,6 +60,7 @@ import { StatusBar, type OpStatus } from "@/components/StatusBar";
 import { cn } from "@/lib/utils";
 
 const MODELS = Object.keys(ANKI_MODEL_REGISTRY);
+const DEMO_PATH = "/demo.db";
 // Binary icons emitted from the model toward the app, one every 0.4s.
 const TRAVELERS = [0, 0.4, 0.8, 1.2];
 
@@ -93,6 +101,8 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const [newDbName, setNewDbName] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [confirmDemo, setConfirmDemo] = useState(false);
+  const [populating, setPopulating] = useState<{ done: number; total: number } | null>(null);
 
   const onOp = useCallback((label: string, r: QueryResult) => {
     setOp({ label, elapsedMs: r.elapsedMs, metrics: r.metrics });
@@ -107,14 +117,7 @@ export function App() {
       const reg = ANKI_MODEL_REGISTRY[modelChoice];
       const res = await api.init({ model: modelChoice, modelId: modelChoice, dim: reg?.dim });
       setInfo(res);
-      let dbs = await api.listDatabases();
-      if (dbs.length === 0) {
-        // First run: seed a sample database to explore immediately.
-        await api.seedDemo("/demo.db");
-        dbs = await api.listDatabases();
-        await openDb("/demo.db");
-      }
-      setDatabases(dbs);
+      setDatabases(await api.listDatabases());
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -150,6 +153,29 @@ export function App() {
     setNewDbName("");
     await openDb(`/${name}.db`);
     setDatabases(await api.listDatabases());
+  };
+
+  const onPopulateDemo = () => {
+    if (databases.includes(DEMO_PATH)) setConfirmDemo(true);
+    else void startPopulate();
+  };
+
+  const startPopulate = async () => {
+    setConfirmDemo(false);
+    setError(null);
+    setPopulating({ done: 0, total: 0 });
+    try {
+      await api.populateDemo(
+        DEMO_PATH,
+        proxy((done, total) => setPopulating({ done, total })),
+      );
+      setPopulating(null);
+      setDatabases(await api.listDatabases());
+      await openDb(DEMO_PATH);
+    } catch (e) {
+      setPopulating(null);
+      setError(e instanceof Error ? e.message : String(e));
+    }
   };
 
   const openTable = (table: TableInfo) => {
@@ -320,12 +346,30 @@ export function App() {
               <span className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                 <Database className="h-3.5 w-3.5" /> Databases
               </span>
-              <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-                <DialogTrigger asChild>
-                  <Button variant="ghost" size="icon-sm" title="New database">
-                    <Plus />
-                  </Button>
-                </DialogTrigger>
+              <div className="flex items-center gap-0.5">
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      onClick={onPopulateDemo}
+                      disabled={!!populating}
+                    >
+                      <DatabaseZap className="text-primary" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent className="max-w-xs leading-relaxed">
+                    Populate a sample CRM + knowledge base (~870 rows: accounts,
+                    contacts, opportunities, tickets, articles). Embeds ~400 vector
+                    rows in your browser — a couple of minutes.
+                  </TooltipContent>
+                </Tooltip>
+                <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+                  <DialogTrigger asChild>
+                    <Button variant="ghost" size="icon-sm" title="New database">
+                      <Plus />
+                    </Button>
+                  </DialogTrigger>
                 <DialogContent>
                   <DialogHeader>
                     <DialogTitle>New OPFS database</DialogTitle>
@@ -344,7 +388,8 @@ export function App() {
                     <Button onClick={() => void createDb()}>Create</Button>
                   </DialogFooter>
                 </DialogContent>
-              </Dialog>
+                </Dialog>
+              </div>
             </div>
             <div className="scrollbar-thin flex-1 overflow-auto px-1.5">
               {databases.length === 0 && (
@@ -464,6 +509,65 @@ export function App() {
           error={error}
         />
       </div>
+
+      {/* confirm overwrite of the demo database */}
+      <Dialog open={confirmDemo} onOpenChange={setConfirmDemo}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Overwrite demo database?</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            A database named <code className="text-foreground">demo.db</code>{" "}
+            already exists. This deletes it (and its notes &amp; SQL scratchpad) and
+            rebuilds the sample CRM + knowledge base — ~870 rows, a couple of minutes
+            of embedding.
+          </p>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setConfirmDemo(false)}>
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={() => void startPopulate()}>
+              Overwrite &amp; rebuild
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* demo build progress */}
+      <Dialog open={!!populating}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <DatabaseZap className="h-5 w-5 text-primary" /> Building demo database…
+            </DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            Generating a CRM + knowledge base and embedding{" "}
+            {populating?.total || "…"} vector rows. This runs entirely in your
+            browser — feel free to wait; it only happens once.
+          </p>
+          <div className="mt-1">
+            <div className="h-2 w-full overflow-hidden rounded-full bg-secondary">
+              <div
+                className="anki-progress h-full rounded-full transition-[width] duration-200"
+                style={{
+                  width: `${
+                    populating && populating.total
+                      ? Math.round((populating.done / populating.total) * 100)
+                      : 4
+                  }%`,
+                }}
+              />
+            </div>
+            <div className="mt-1.5 flex justify-between text-xs tabular-nums text-muted-foreground">
+              <span>Embedding rows…</span>
+              <span>
+                {populating?.done ?? 0} / {populating?.total ?? 0}
+              </span>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </TooltipProvider>
   );
 }

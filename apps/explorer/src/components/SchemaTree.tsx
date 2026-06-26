@@ -55,6 +55,7 @@ export function SchemaTree({ tables, activeTable, onOpenTable }: SchemaTreeProps
                 {t.columns.map((c) => (
                   <div
                     key={c.name}
+                    title={c.description || undefined}
                     className="flex items-center gap-1.5 px-2 py-0.5 text-xs text-muted-foreground"
                   >
                     {c.pk ? (

@@ -11,6 +11,8 @@ export interface ColumnInfo {
   notnull: boolean;
   pk: boolean;
   isVector: boolean;
+  /** Human description from the `_meta_columns` table, if present. */
+  description?: string;
 }
 
 /** A user table (or anki virtual table). */
@@ -89,8 +91,15 @@ export interface AnkiWorkerApi {
   ): Promise<QueryResult>;
   deleteRow(path: string, table: string, rowid: number): Promise<QueryResult>;
   metrics(): Promise<Metrics>;
-  /** Seeds a sample schema + rows (with TEXT VECTOR columns) into `path`. */
-  seedDemo(path: string): Promise<TableInfo[]>;
+  /**
+   * Builds the demo CRM + knowledge-base database into `path`, overwriting any
+   * existing database/sidecars. Reports embedding progress via `onProgress`
+   * (wrap it with `proxy()` from this package). Slow — embeds ~400 rows.
+   */
+  populateDemo(
+    path: string,
+    onProgress: (done: number, total: number) => void,
+  ): Promise<TableInfo[]>;
   /** Reads the database's sidecar notes (`.notes.md`); "" if none. */
   readNotes(path: string): Promise<string>;
   /** Writes the database's sidecar notes. */
