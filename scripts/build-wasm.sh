@@ -87,17 +87,23 @@ fi
 
 WASM_DIR="$VENDOR/ext/wasm"
 
-if [[ ! -f "$WASM_DIR/config.make" ]]; then
-  echo "==> Writing $WASM_DIR/config.make"
-  WASM_OPT="$(command -v wasm-opt 2>/dev/null || true)"
-  cat >"$WASM_DIR/config.make" <<EOF
+# Always (re)write config.make so bin.wasm-opt reflects current tooling: if you
+# `brew install binaryen` later, the next build picks up wasm-opt automatically
+# (it was previously written once and never refreshed).
+WASM_OPT="$(command -v wasm-opt 2>/dev/null || true)"
+if [[ -n "$WASM_OPT" ]]; then
+  echo "==> wasm-opt found ($WASM_OPT) — binaryen optimization enabled"
+else
+  echo "==> wasm-opt NOT found — install binaryen for extra optimization (brew install binaryen)"
+fi
+echo "==> Writing $WASM_DIR/config.make"
+cat >"$WASM_DIR/config.make" <<EOF
 bin.bash = $(command -v bash)
 bin.emcc = $(command -v emcc)
 bin.wasm-strip = $(command -v wasm-strip)
 bin.wasm-opt = ${WASM_OPT:-false}
 SHELL := \$(bin.bash)
 EOF
-fi
 EXTRA_INIT_DST="$WASM_DIR/sqlite3_wasm_extra_init.c"
 ANKI_EXT_DST="$WASM_DIR/anki_extension.c"
 for pair in "$EXTRA_INIT_SRC:$EXTRA_INIT_DST" "$ANKI_EXT_SRC:$ANKI_EXT_DST"; do
@@ -125,9 +131,16 @@ ANKI_LINK="$ANKI_LIB -msimd128 -sEXPORTED_RUNTIME_METHODS=wasmMemory,HEAPU64,HEA
 # inference arenas. ALLOW_MEMORY_GROWTH covers larger models.
 EMCC_INITIAL_MEMORY="${EMCC_INITIAL_MEMORY:-128}"
 
-echo "==> Building official SQLite WASM (ext/wasm)"
+# Optimization level for the SQLite C + glue. The ext/wasm default for our
+# (non-"dist") targets is -O0; the makefile notes -O2 gives the fastest
+# deliverables. Override with EMCC_OPT=-Oz for smallest. (-g3 is always added by
+# the makefile, then removed below by wasm-strip / wasm-opt --strip-debug.)
+EMCC_OPT="${EMCC_OPT:--O2}"
+
+echo "==> Building official SQLite WASM (ext/wasm), emcc_opt=$EMCC_OPT"
 make -C "$WASM_DIR" clean >/dev/null 2>&1 || true
 make -C "$WASM_DIR" -j"$(sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 4)" \
+  emcc_opt="$EMCC_OPT" \
   emcc.INITIAL_MEMORY="$EMCC_INITIAL_MEMORY" \
   "emcc.flags.sqlite3=${ANKI_LINK}" \
   jswasm/sqlite3.mjs \
@@ -136,6 +149,14 @@ make -C "$WASM_DIR" -j"$(sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || e
   jswasm/sqlite3-worker1.js \
   jswasm/sqlite3-worker1-bundler-friendly.mjs \
   jswasm/sqlite3-opfs-async-proxy.js
+
+# Strip the -g3 debug info the makefile always adds. wasm-opt --strip-debug does
+# this when binaryen is present; this guarantees a small wasm even without it
+# (-g3 debug is the bulk of the ~16 MB unoptimized size).
+echo "==> Stripping debug info (wasm-strip)"
+for w in "$WASM_DIR"/jswasm/sqlite3*.wasm; do
+  [[ -f "$w" ]] && { wasm-strip "$w" || echo "    (wasm-strip failed on $(basename "$w"), continuing)"; }
+done
 
 # --- Publish to packages/wasm/dist ---------------------------------------------
 

@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import {
   AppWindow,
@@ -103,6 +103,19 @@ export function App() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [confirmDemo, setConfirmDemo] = useState(false);
   const [populating, setPopulating] = useState<{ done: number; total: number } | null>(null);
+  const [elapsedMs, setElapsedMs] = useState(0);
+  const populateStart = useRef(0);
+  const populateActive = populating !== null;
+
+  // Tick an elapsed timer on the main thread while building the demo, so there's
+  // visible motion even between the (slow) per-row progress updates.
+  useEffect(() => {
+    if (!populateActive) return;
+    populateStart.current = performance.now();
+    setElapsedMs(0);
+    const iv = setInterval(() => setElapsedMs(performance.now() - populateStart.current), 200);
+    return () => clearInterval(iv);
+  }, [populateActive]);
 
   const onOp = useCallback((label: string, r: QueryResult) => {
     setOp({ label, elapsedMs: r.elapsedMs, metrics: r.metrics });
@@ -560,7 +573,19 @@ export function App() {
               />
             </div>
             <div className="mt-1.5 flex justify-between text-xs tabular-nums text-muted-foreground">
-              <span>Embedding rows…</span>
+              <span>
+                {(elapsedMs / 1000).toFixed(1)}s elapsed
+                {populating && populating.done > 4
+                  ? ` · ~${Math.max(
+                      0,
+                      Math.round(
+                        ((populating.total - populating.done) *
+                          (elapsedMs / populating.done)) /
+                          1000,
+                      ),
+                    )}s left`
+                  : ""}
+              </span>
               <span>
                 {populating?.done ?? 0} / {populating?.total ?? 0}
               </span>
