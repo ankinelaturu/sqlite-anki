@@ -32,6 +32,32 @@ function quote(name: string): string {
   return `"${name.replace(/"/g, '""')}"`;
 }
 
+/**
+ * Pulls inline `--` comments out of a stored CREATE statement: a comment on the
+ * CREATE line is the table description; a comment trailing a column line is that
+ * column's description. (SQLite preserves the CREATE text, comments included.)
+ */
+function parseSqlDescriptions(sql: string): {
+  table?: string;
+  cols: Map<string, string>;
+} {
+  const cols = new Map<string, string>();
+  let table: string | undefined;
+  (sql || "").split("\n").forEach((line, i) => {
+    const ci = line.indexOf("--");
+    if (ci < 0) return;
+    const comment = line.slice(ci + 2).trim();
+    if (!comment) return;
+    if (i === 0) {
+      table = comment; // comment on the CREATE / AS line
+      return;
+    }
+    const m = line.slice(0, ci).match(/["'`[]?([A-Za-z_][A-Za-z0-9_]*)/);
+    if (m) cols.set(m[1], comment);
+  });
+  return { table, cols };
+}
+
 /** Extracts which columns are `TEXT VECTOR` from a `USING anki(...)` statement. */
 function vectorColumns(sql: string): Set<string> {
   const out = new Set<string>();
@@ -168,15 +194,13 @@ class AnkiWorker implements AnkiWorkerApi {
        WHERE type IN ('table', 'view')
          AND name NOT LIKE 'sqlite_%' AND name NOT LIKE 'anki_%'
          AND name NOT LIKE '%_data'
-         AND name NOT LIKE '\\_%' ESCAPE '\\'
        ORDER BY name`,
     ) as Array<{ name: string; sql: string; type: string }>;
-
-    const desc = this.descriptions(db);
 
     return tables.map((t) => {
       const isAnki = /using\s+anki/i.test(t.sql ?? "");
       const vec = isAnki ? vectorColumns(t.sql) : new Set<string>();
+      const desc = parseSqlDescriptions(t.sql ?? "");
       const cols = db.selectObjects(
         `PRAGMA table_info(${quote(t.name)})`,
       ) as Array<{ name: string; type: string; notnull: number; pk: number }>;
@@ -186,7 +210,7 @@ class AnkiWorker implements AnkiWorkerApi {
         notnull: c.notnull === 1,
         pk: c.pk === 1,
         isVector: vec.has(c.name),
-        description: desc.get(`${t.name}.${c.name}`),
+        description: desc.cols.get(c.name),
       }));
       return {
         name: t.name,
@@ -194,23 +218,11 @@ class AnkiWorker implements AnkiWorkerApi {
         isVirtual: isAnki,
         isAnki,
         columns,
+        description: desc.table,
       };
     });
   }
 
-  /** Reads `_meta_columns` (if present) into a `table.column` → description map. */
-  private descriptions(db: Db): Map<string, string> {
-    const m = new Map<string, string>();
-    try {
-      const rows = db.selectObjects(
-        "SELECT tbl, col, description FROM _meta_columns",
-      ) as Array<{ tbl: string; col: string; description: string }>;
-      for (const r of rows) m.set(`${r.tbl}.${r.col}`, r.description);
-    } catch {
-      /* no _meta_columns table */
-    }
-    return m;
-  }
 
   async query(path: string, sql: string, params: SqlValue[] = []): Promise<QueryResult> {
     const db = this.db(path);

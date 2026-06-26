@@ -2,49 +2,64 @@
 -- A small CRM + knowledge base: standard tables + anki virtual tables
 -- with multiple TEXT VECTOR columns. ~870 rows.
 
-CREATE TABLE accounts (
-  id INTEGER PRIMARY KEY, name TEXT, industry TEXT, region TEXT,
-  tier TEXT, status TEXT, created_at TEXT
+CREATE TABLE accounts ( -- Customer companies (the CRM accounts)
+  id INTEGER PRIMARY KEY,
+  name TEXT, -- Company name
+  industry TEXT, -- Primary industry vertical
+  region TEXT, -- Sales region
+  tier TEXT, -- Segment: Enterprise / Mid-Market / SMB
+  status TEXT, -- Account lifecycle status
+  created_at TEXT -- Date the account was created
 );
-CREATE TABLE contacts (
-  id INTEGER PRIMARY KEY, account_id INTEGER, name TEXT, title TEXT, email TEXT
+CREATE TABLE contacts ( -- People who work at the accounts
+  id INTEGER PRIMARY KEY,
+  account_id INTEGER, -- FK -> accounts.id
+  name TEXT, -- Full name
+  title TEXT, -- Job title
+  email TEXT -- Work email address
 );
-CREATE TABLE interactions (
-  id INTEGER PRIMARY KEY, account_id INTEGER, contact_id INTEGER,
-  kind TEXT, channel TEXT, happened_at TEXT, notes TEXT
+CREATE TABLE interactions ( -- Historical activity log with customers
+  id INTEGER PRIMARY KEY,
+  account_id INTEGER, -- FK -> accounts.id
+  contact_id INTEGER, -- FK -> contacts.id
+  kind TEXT, -- Email / Meeting / Phone Call / Demo / Support / Training
+  channel TEXT, -- Where it happened (Zoom, Phone, ...)
+  happened_at TEXT, -- Date of the interaction
+  notes TEXT -- Free-text notes (not embedded)
 );
-CREATE VIRTUAL TABLE opportunities USING anki(
-  id INTEGER PRIMARY KEY, account_id INTEGER, title TEXT, stage TEXT,
-  priority TEXT, amount INTEGER,
-  summary TEXT VECTOR, customer_notes TEXT VECTOR, next_steps TEXT VECTOR
+CREATE VIRTUAL TABLE opportunities USING anki( -- Sales deals — semantically searchable
+  id INTEGER PRIMARY KEY,
+  account_id INTEGER, -- FK -> accounts.id
+  title TEXT, -- Short deal title
+  stage TEXT, -- Pipeline stage (Discovery ... Closed Won/Lost)
+  priority TEXT, -- Low / Medium / High / Critical
+  amount INTEGER, -- Deal value in dollars
+  summary TEXT VECTOR, -- One-line summary of the deal (embedded)
+  customer_notes TEXT VECTOR, -- Free-text notes from the customer (embedded)
+  next_steps TEXT VECTOR -- Planned next actions (embedded)
 );
-CREATE VIRTUAL TABLE support_tickets USING anki(
-  id INTEGER PRIMARY KEY, account_id INTEGER, severity TEXT, status TEXT,
-  subject TEXT,
-  problem TEXT VECTOR, resolution TEXT VECTOR, internal_notes TEXT VECTOR
+CREATE VIRTUAL TABLE support_tickets USING anki( -- Support cases — semantically searchable
+  id INTEGER PRIMARY KEY,
+  account_id INTEGER, -- FK -> accounts.id
+  severity TEXT, -- S1 (worst) .. S4
+  status TEXT, -- Open / In Progress / Resolved / ...
+  subject TEXT, -- Short subject line
+  problem TEXT VECTOR, -- Description of the reported problem (embedded)
+  resolution TEXT VECTOR, -- How it was resolved (embedded)
+  internal_notes TEXT VECTOR -- Private engineering notes (embedded)
 );
-CREATE VIRTUAL TABLE knowledge_articles USING anki(
-  id INTEGER PRIMARY KEY, title TEXT, category TEXT, tags TEXT,
-  abstract TEXT VECTOR, body TEXT VECTOR, troubleshooting TEXT VECTOR
+CREATE VIRTUAL TABLE knowledge_articles USING anki( -- Knowledge base — semantically searchable
+  id INTEGER PRIMARY KEY,
+  title TEXT, -- Article title
+  category TEXT, -- Topic category
+  tags TEXT, -- Comma-separated tags
+  abstract TEXT VECTOR, -- Short summary (embedded)
+  body TEXT VECTOR, -- Full article body (embedded)
+  troubleshooting TEXT VECTOR -- Troubleshooting guidance (embedded)
 );
-CREATE VIEW pipeline AS
+CREATE VIEW pipeline AS -- Accounts joined with their open opportunities
   SELECT a.name AS account, o.title, o.stage, o.priority, o.amount
   FROM opportunities o JOIN accounts a ON a.id = o.account_id;
-CREATE TABLE _meta_columns (tbl TEXT, col TEXT, description TEXT);
-INSERT INTO _meta_columns VALUES ('accounts', 'name', 'Customer company name');
-INSERT INTO _meta_columns VALUES ('accounts', 'industry', 'Primary industry vertical');
-INSERT INTO _meta_columns VALUES ('accounts', 'tier', 'Segment: Enterprise, Mid-Market or SMB');
-INSERT INTO _meta_columns VALUES ('accounts', 'status', 'Account lifecycle status');
-INSERT INTO _meta_columns VALUES ('contacts', 'title', 'Job title of the contact');
-INSERT INTO _meta_columns VALUES ('opportunities', 'summary', 'Embedded one-line summary of the deal');
-INSERT INTO _meta_columns VALUES ('opportunities', 'customer_notes', 'Embedded free-text notes captured from the customer');
-INSERT INTO _meta_columns VALUES ('opportunities', 'next_steps', 'Embedded planned next actions for the deal');
-INSERT INTO _meta_columns VALUES ('support_tickets', 'problem', 'Embedded description of the reported problem');
-INSERT INTO _meta_columns VALUES ('support_tickets', 'resolution', 'Embedded resolution applied to the ticket');
-INSERT INTO _meta_columns VALUES ('support_tickets', 'internal_notes', 'Embedded private engineering notes');
-INSERT INTO _meta_columns VALUES ('knowledge_articles', 'abstract', 'Embedded short summary of the article');
-INSERT INTO _meta_columns VALUES ('knowledge_articles', 'body', 'Embedded full article body');
-INSERT INTO _meta_columns VALUES ('knowledge_articles', 'troubleshooting', 'Embedded troubleshooting guidance');
 
 -- accounts
 INSERT INTO accounts VALUES (1, 'Orchid Health', 'SaaS', 'LATAM', 'Enterprise', 'Prospect', '2026-06-04');

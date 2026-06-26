@@ -43,6 +43,7 @@ export function SchemaTree({ tables, activeTable, onOpenTable }: SchemaTreeProps
               </button>
               <button
                 className="flex min-w-0 flex-1 items-center gap-1.5"
+                title={t.description || undefined}
                 onClick={() => onOpenTable(t)}
               >
                 <Table2 className={cn("h-4 w-4 shrink-0", t.isAnki ? "text-violet-400" : "text-sky-400")} />

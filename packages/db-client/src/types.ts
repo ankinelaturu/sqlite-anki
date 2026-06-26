@@ -22,6 +22,8 @@ export interface TableInfo {
   isVirtual: boolean;
   isAnki: boolean;
   columns: ColumnInfo[];
+  /** Table description parsed from an inline `--` comment, if present. */
+  description?: string;
 }
 
 /** Cumulative metric counters from `anki_metrics()` (all numbers). */
