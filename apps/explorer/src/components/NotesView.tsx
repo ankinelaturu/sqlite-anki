@@ -1,9 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import CodeMirror from "@uiw/react-codemirror";
 import { markdown } from "@codemirror/lang-markdown";
+import MarkdownPreview from "@uiw/react-markdown-preview";
+import "@uiw/react-markdown-preview/markdown.css";
 import { Check, RefreshCw, Save } from "lucide-react";
 import type { AnkiWorkerApi, Remote } from "@sqlite-anki/db-client";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 
 interface NotesViewProps {
   api: Remote<AnkiWorkerApi>;
@@ -15,6 +18,7 @@ type SaveState = "loading" | "saved" | "dirty" | "saving";
 export function NotesView({ api, path }: NotesViewProps) {
   const [content, setContent] = useState("");
   const [state, setState] = useState<SaveState>("loading");
+  const [view, setView] = useState<"write" | "preview">("write");
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -56,7 +60,22 @@ export function NotesView({ api, path }: NotesViewProps) {
   return (
     <div className="flex h-full flex-col">
       <div className="flex items-center justify-between border-b px-3 py-2">
-        <span className="text-xs text-muted-foreground">notes.md · autosaves</span>
+        <div className="flex h-8 items-center rounded-md border border-input p-0.5">
+          {(["write", "preview"] as const).map((v) => (
+            <button
+              key={v}
+              onClick={() => setView(v)}
+              className={cn(
+                "h-6 rounded px-2.5 text-xs font-medium capitalize transition-colors",
+                view === v
+                  ? "bg-accent text-foreground"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              {v}
+            </button>
+          ))}
+        </div>
         <div className="flex items-center gap-3">
           <span className="flex items-center gap-1 text-xs text-muted-foreground">
             {state === "saved" ? (
@@ -82,15 +101,29 @@ export function NotesView({ api, path }: NotesViewProps) {
         </div>
       </div>
       <div className="min-h-0 flex-1">
-        <CodeMirror
-          value={content}
-          onChange={onChange}
-          theme="dark"
-          extensions={[markdown()]}
-          basicSetup={{ lineNumbers: false, foldGutter: false, highlightActiveLine: false }}
-          height="100%"
-          style={{ height: "100%" }}
-        />
+        {view === "write" ? (
+          <CodeMirror
+            value={content}
+            onChange={onChange}
+            theme="dark"
+            extensions={[markdown()]}
+            basicSetup={{ lineNumbers: false, foldGutter: false, highlightActiveLine: false }}
+            height="100%"
+            style={{ height: "100%" }}
+          />
+        ) : (
+          <div className="scrollbar-thin h-full overflow-auto px-5 py-4">
+            {content.trim() ? (
+              <MarkdownPreview
+                source={content}
+                style={{ background: "transparent", fontSize: 14 }}
+                wrapperElement={{ "data-color-mode": "dark" }}
+              />
+            ) : (
+              <p className="text-sm text-muted-foreground">Nothing to preview yet.</p>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

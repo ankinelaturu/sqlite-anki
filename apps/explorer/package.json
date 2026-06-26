@@ -24,6 +24,7 @@
     "@sqlite-anki/db-client": "workspace:*",
     "@sqlite-anki/wasm": "workspace:*",
     "@uiw/react-codemirror": "^4.25.10",
+    "@uiw/react-markdown-preview": "^5.2.1",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "lucide-react": "^1.21.0",
