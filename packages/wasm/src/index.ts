@@ -55,30 +55,18 @@ export interface AnkiOption {
 
 export interface Sqlite3InitOptions {
   anki?: AnkiOption;
-  /**
-   * URL of the Emscripten loader (`sqlite3-bundler-friendly.mjs`). When set, the
-   * loader is imported from here at runtime and the `.wasm` / OPFS proxy resolve
-   * as its siblings — letting an app serve the wasm dist from a stable path
-   * (e.g. `public/`) so Vite dev and prod behave the same. Defaults to the
-   * bundled `../dist/` copy.
-   */
-  wasmModuleUrl?: string;
 }
 
 let customInit: (() => Promise<Sqlite3Module>) | null | undefined;
 
-async function loadCustomInit(
-  moduleUrl?: string,
-): Promise<(() => Promise<Sqlite3Module>) | null> {
+async function loadCustomInit(): Promise<(() => Promise<Sqlite3Module>) | null> {
   if (customInit !== undefined) {
     return customInit;
   }
   try {
     // Generated Emscripten output — no type declarations ship with it.
-    const mod = moduleUrl
-      ? await import(/* @vite-ignore */ moduleUrl)
-      : // @ts-expect-error untyped generated .mjs
-        await import("../dist/sqlite3-bundler-friendly.mjs");
+    // @ts-expect-error untyped generated .mjs
+    const mod = await import("../dist/sqlite3-bundler-friendly.mjs");
     customInit = mod.default as () => Promise<Sqlite3Module>;
     return customInit;
   } catch {
@@ -201,7 +189,7 @@ export async function loadAnkiModel(
 export default async function initSqliteAnki(
   opts?: Sqlite3InitOptions
 ): Promise<Sqlite3Module> {
-  const custom = await loadCustomInit(opts?.wasmModuleUrl);
+  const custom = await loadCustomInit();
   const sqlite3 = custom
     ? await custom()
     : await (await import("@sqlite.org/sqlite-wasm")).default();

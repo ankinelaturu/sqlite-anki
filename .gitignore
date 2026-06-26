@@ -28,7 +28,3 @@ vendor/emsdk/
 .env
 .env.*
 
-# explorer: synced wasm artifacts (copied from packages/wasm/dist by sync-wasm)
-apps/explorer/public/sqlite3-bundler-friendly.mjs
-apps/explorer/public/sqlite3.wasm
-apps/explorer/public/sqlite3-opfs-async-proxy.js

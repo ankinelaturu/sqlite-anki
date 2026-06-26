@@ -2,7 +2,13 @@
  * SQLite worker: runs the WASM engine + OPFS databases off the main thread,
  * loads the embedding model, and captures per-operation metrics.
  */
-import initSqliteAnki from "@sqlite-anki/wasm";
+// Statically import the Emscripten loader so the bundler (Vite) transforms it
+// and rewrites its sibling `.wasm` / OPFS-proxy URLs — identically in dev and
+// build. (Going through the package's dynamic import left those URLs unresolved
+// in Vite dev → 404s.) `loadAnkiModel` does the model fetch + registration.
+// @ts-expect-error untyped generated .mjs
+import sqlite3InitModule from "@sqlite-anki/wasm/loader";
+import { loadAnkiModel } from "@sqlite-anki/wasm";
 import * as Comlink from "comlink";
 import {
   ZERO_METRICS,
@@ -20,11 +26,6 @@ import {
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type Sqlite3 = any;
 type Db = any;
-
-// The host app serves the wasm dist (`sqlite3-bundler-friendly.mjs` + its
-// sibling `.wasm` and OPFS proxy) from the origin root — see the explorer's
-// `sync-wasm` script. This makes the URLs resolve the same in Vite dev & build.
-const WASM_MODULE_URL = "/sqlite3-bundler-friendly.mjs";
 
 function quote(name: string): string {
   return `"${name.replace(/"/g, '""')}"`;
@@ -50,11 +51,11 @@ class AnkiWorker implements AnkiWorkerApi {
   private dbs = new Map<string, Db>();
 
   async init(model: ModelSpec): Promise<InitResult> {
-    this.sqlite3 = await initSqliteAnki({
-      anki: model && (model.model || model.modelUrl) ? (model as any) : undefined,
-      wasmModuleUrl: WASM_MODULE_URL,
-    });
-    const s = this.sqlite3;
+    const s = await sqlite3InitModule();
+    this.sqlite3 = s;
+    if (model && (model.model || model.modelUrl)) {
+      await loadAnkiModel(s, model as any);
+    }
     this.opfsAvailable = "opfs" in s && Boolean(s.opfs);
     return {
       opfs: this.opfsAvailable,

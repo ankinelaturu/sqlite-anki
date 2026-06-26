@@ -41,7 +41,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { SchemaTree } from "@/components/SchemaTree";
-import { TableView } from "@/components/TableView";
+import { TableView, type SearchMode } from "@/components/TableView";
 import { QueryView } from "@/components/QueryView";
 import { NotesView } from "@/components/NotesView";
 import { StatusBar, type OpStatus } from "@/components/StatusBar";
@@ -76,6 +76,10 @@ export function App() {
   const [activeDb, setActiveDb] = useState<string | null>(null);
   const [tables, setTables] = useState<TableInfo[]>([]);
   const [tabsByDb, setTabsByDb] = useState<Record<string, { tabs: Tab[]; active: string }>>({});
+
+  // Search settings persist across table switches (TableView remounts per table).
+  const [searchMode, setSearchMode] = useState<SearchMode>("hnsw");
+  const [candidates, setCandidates] = useState(256);
 
   const [op, setOp] = useState<OpStatus | null>(null);
   const [busy, setBusy] = useState(false);
@@ -379,6 +383,10 @@ export function App() {
                       table={activeTab.table}
                       onOp={onOp}
                       onError={onError}
+                      mode={searchMode}
+                      setMode={setSearchMode}
+                      candidates={candidates}
+                      setCandidates={setCandidates}
                     />
                   )}
                 </div>

@@ -4,9 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "sync-wasm": "node scripts/sync-wasm.mjs",
-    "dev": "node scripts/sync-wasm.mjs && vite",
-    "build": "node scripts/sync-wasm.mjs && tsc --noEmit && vite build",
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit"
   },
