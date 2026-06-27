@@ -14,6 +14,8 @@ Semantic text search for SQLite in the browser (WebAssembly).
 | [docs/hybrid-filtering.md](./docs/hybrid-filtering.md) | Relational `WHERE` + `MATCH` pushdown |
 | [docs/query-planning.md](./docs/query-planning.md) | How SQLite plans queries against the vtab |
 | [docs/metrics.md](./docs/metrics.md) | Per-operation metrics via `anki_metrics()` |
+| [docs/our-findings.md](./docs/our-findings.md) | Performance & size profiling: where the time/size go |
+| [docs/build-variants.md](./docs/build-variants.md) | WASM build variants (engine / threading) |
 
 ## Quick start
 
@@ -79,17 +81,47 @@ Notes:
 - Default similarity threshold is `0.5`; tighten with `AND similarity(col) > 0.7`.
 - The model runs in Rust/WASM — no JavaScript on the query hot path.
 
+## Performance
+
+In-browser embedding was profiled in depth — full data in
+[docs/our-findings.md](./docs/our-findings.md), build variants in
+[docs/build-variants.md](./docs/build-variants.md). Highlights:
+
+- **Where the size goes.** The wasm is ~14 MB not because of SQLite (~1 MB) or the
+  extension (~50 KB) but because it statically links a full ONNX engine
+  (Tract + ndarray ≈ 12 MB). An embedding is a single transformer forward pass;
+  the model, graph optimization, and tokenizer load **once**.
+- **The biggest win was the tokenizer, not the engine.** The model's tokenizer
+  padded every input to a fixed 128 tokens — ~82% of each forward pass wasted on
+  `[PAD]`. Padding to the input's actual length cut a short embed **~96 ms → ~11 ms
+  (~9×)** and the 1,200-embedding demo build **~105 s → ~19 s** — and corrected a
+  latent mean-pooling bug (it now matches sentence-transformers' masked mean).
+- **Engine choice (Tract vs Candle).** Both give identical embeddings and pass the
+  suite. Tract is faster for short text (the common case); Candle is **−65% smaller**
+  and edges ahead only for long documents:
+
+  | build | typical text | long (512 tok) | wasm |
+  |-------|-------------:|---------------:|-----:|
+  | `tract-st` (default) | ~16 ms | 525 ms | 14.4 MB |
+  | `candle-st` | ~21 ms | 506 ms | 5.0 MB |
+
+  Per-embed time scales ~linearly with tokens (BERT caps at 512). wasm threads
+  (`candle-mt`) gave **no** measurable gain at any length — the per-sentence
+  matmuls are too small. Native (non-wasm) ONNX would be ~single-digit ms, but
+  that's a different deliverable.
+
+Default is **`tract-st`** (fastest, stable toolchain, no nightly).
+
 ## Monorepo layout
 
 ```
 crates/           Rust extension (anki-core, anki-wasm)
 packages/
-  wasm/    SQLite WASM bundle (@sqlite-anki/wasm)
-  db-client/      Worker + schema + CRUD API (@sqlite-anki/db-client)
+  wasm/           SQLite WASM bundle (@sqlite-anki/wasm) — sqlite3Init + model loader
 apps/
-  explorer/       Two-panel test SPA (@sqlite-anki/explorer)
-wasm/             sqlite3_wasm_extra_init.c
-models/           ONNX + tokenizer (see models/all-MiniLM-L6-v2/README.md)
+  explorer/       Test SPA (@sqlite-anki/explorer); src/db/ holds the worker + DB client
+wasm/             sqlite3_wasm_extra_init.c + anki_extension.c (C glue / exports)
+models/           ONNX + tokenizer — dev/test fixture, not bundled (see models/all-MiniLM-L6-v2/README.md)
 ```
 
 ## Explorer app
@@ -107,7 +139,8 @@ Uses OPFS for persistence. Requires COOP/COEP headers (configured in Vite).
 - **Search:** HNSW ANN + exact brute-force (`MATCH` DSL `mode`), hybrid
   relational+semantic pre-filtering, and **multiple `MATCH` columns per query**
   (AND'd, each with its own `similarity()` score).
-- **Model:** loaded at runtime (not bundled); wasm ≈ 14 MB.
+- **Model:** loaded at runtime (not bundled); wasm ≈ 14 MB (Tract default) or
+  ≈ 5 MB (Candle build variant). See [Performance](#performance).
 - **Tests:** Rust unit tests (`cargo test`) + WASM integration suite
   (`pnpm --filter @sqlite-anki/wasm test`).
 - **Not yet:** `similarity()` inside aggregates, quantized model.
