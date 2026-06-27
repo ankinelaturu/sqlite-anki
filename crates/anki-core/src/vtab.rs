@@ -358,13 +358,8 @@ fn embed_text(text: &str) -> Option<Vec<f32>> {
         return None;
     }
     match Embedder::global() {
-        Ok(e) => {
-            // Time the actual inference (the headline browser-ML metric).
-            let t0 = metrics::now_ms();
-            let r = e.lock().embed(t).ok();
-            metrics::record_embed(t, metrics::now_ms() - t0);
-            r
-        }
+        // embed() times itself and records metrics (it knows the token counts).
+        Ok(e) => e.lock().embed(t).ok(),
         Err(_) => None,
     }
 }

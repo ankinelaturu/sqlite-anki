@@ -104,6 +104,8 @@ impl Embedder {
             return Err(AnkiError::EmptyInput);
         }
 
+        let t0 = crate::metrics::now_ms();
+
         let encoding = self
             .tokenizer
             .encode(trimmed, true)
@@ -121,13 +123,27 @@ impl Embedder {
             .map(|&t| t as i64)
             .collect();
 
+        // Sequence the model actually processes (= padded length) vs the real
+        // (non-pad) tokens. With the model's Fixed(128) padding these differ a
+        // lot for short text — surfaced per-embed in anki_embed_log.
+        let total_tokens = input_ids.len();
+        let real_tokens = attention_mask.iter().filter(|&&m| m != 0).count();
+
         // Engine runs the forward pass and returns the raw output (flat data +
         // shape); pooling/normalization is identical across engines.
         let (out, shape) = self
             .engine
             .run(&input_ids, &attention_mask, &token_type_ids)?;
         let pooled = pool(&out, &shape, self.dim)?;
-        Ok(normalize_l2(&pooled))
+        let vector = normalize_l2(&pooled);
+
+        crate::metrics::record_embed(
+            trimmed,
+            crate::metrics::now_ms() - t0,
+            real_tokens,
+            total_tokens,
+        );
+        Ok(vector)
     }
 }
 

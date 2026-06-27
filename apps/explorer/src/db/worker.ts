@@ -160,7 +160,7 @@ class AnkiWorker implements AnkiWorkerApi {
   }
 
   /** Reads the per-embedding profiling log from the wasm. */
-  private embedLog(): Array<{ text: string; ms: number }> {
+  private embedLog(): Array<{ text: string; ms: number; real_tokens: number; pad_tokens: number }> {
     try {
       const wasm = this.sqlite3?.wasm;
       const fn = wasm?.exports?.anki_embed_log;
@@ -176,11 +176,13 @@ class AnkiWorker implements AnkiWorkerApi {
     if (log.length === 0) return;
     const ms = log.map((e) => e.ms).sort((a, b) => a - b);
     const sum = ms.reduce((a, b) => a + b, 0);
+    const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length;
     const pct = (p: number) => ms[Math.min(ms.length - 1, Math.floor((p / 100) * ms.length))];
     console.log(
       `[anki] embeddings: ${log.length} | avg ${(sum / log.length).toFixed(1)}ms | ` +
         `min ${ms[0].toFixed(1)} | p50 ${pct(50).toFixed(1)} | p95 ${pct(95).toFixed(1)} | ` +
-        `max ${ms[ms.length - 1].toFixed(1)} | total ${(sum / 1000).toFixed(1)}s`,
+        `max ${ms[ms.length - 1].toFixed(1)} | total ${(sum / 1000).toFixed(1)}s | ` +
+        `tokens avg real ${mean(log.map((e) => e.real_tokens)).toFixed(1)} / pad ${mean(log.map((e) => e.pad_tokens)).toFixed(1)}`,
     );
     console.log(JSON.stringify(log));
   }

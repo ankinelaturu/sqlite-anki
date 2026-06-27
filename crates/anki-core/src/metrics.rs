@@ -37,8 +37,9 @@ static METRICS: Mutex<Metrics> = Mutex::new(ZERO);
 /// Holds the last JSON snapshot alive while JS reads the returned pointer.
 static JSON_BUF: Mutex<Option<CString>> = Mutex::new(None);
 
-/// Per-embedding profiling log: (text snippet, ms). Capped to bound memory.
-static EMBED_LOG: Mutex<Vec<(String, f64)>> = Mutex::new(Vec::new());
+/// Per-embedding profiling log: (text snippet, ms, real_tokens, total_tokens).
+/// Capped to bound memory.
+static EMBED_LOG: Mutex<Vec<(String, f64, usize, usize)>> = Mutex::new(Vec::new());
 static LOG_BUF: Mutex<Option<CString>> = Mutex::new(None);
 const EMBED_LOG_CAP: usize = 8000;
 
@@ -63,7 +64,7 @@ pub fn now_ms() -> f64 {
     }
 }
 
-pub fn record_embed(text: &str, ms: f64) {
+pub fn record_embed(text: &str, ms: f64, real_tokens: usize, total_tokens: usize) {
     {
         let mut m = METRICS.lock();
         m.embed_ms += ms;
@@ -71,7 +72,7 @@ pub fn record_embed(text: &str, ms: f64) {
     }
     let mut log = EMBED_LOG.lock();
     if log.len() < EMBED_LOG_CAP {
-        log.push((text.chars().take(80).collect(), ms));
+        log.push((text.chars().take(80).collect(), ms, real_tokens, total_tokens));
     }
 }
 
@@ -148,11 +149,17 @@ fn json_escape(s: &str) -> String {
 pub unsafe extern "C" fn anki_embed_log_json() -> *const c_char {
     let log = EMBED_LOG.lock();
     let mut s = String::from("[");
-    for (i, (text, ms)) in log.iter().enumerate() {
+    for (i, (text, ms, real, total)) in log.iter().enumerate() {
         if i > 0 {
             s.push(',');
         }
-        s.push_str(&format!("{{\"text\":\"{}\",\"ms\":{:.2}}}", json_escape(text), ms));
+        s.push_str(&format!(
+            "{{\"text\":\"{}\",\"ms\":{:.2},\"real_tokens\":{},\"pad_tokens\":{}}}",
+            json_escape(text),
+            ms,
+            real,
+            total.saturating_sub(*real)
+        ));
     }
     s.push(']');
     let cs = CString::new(s).unwrap_or_else(|_| CString::new("[]").unwrap());
