@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import CodeMirror, { type ReactCodeMirrorRef } from "@uiw/react-codemirror";
 import { sql, SQLite } from "@codemirror/lang-sql";
 import { Check, Play, RefreshCw, TextCursorInput } from "lucide-react";
-import type { AnkiWorkerApi, QueryResult, Remote } from "@sqlite-anki/db-client";
+import type { AnkiWorkerApi, QueryResult, Remote } from "@/db";
 import { Button } from "@/components/ui/button";
 import { DataGrid } from "@/components/DataGrid";
 import { useTheme } from "@/lib/theme";

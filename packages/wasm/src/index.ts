@@ -9,90 +9,20 @@
  *
  * See `docs/dynamic-model-loading.md`.
  *
- * Uses a custom `dist/` build when present (after `pnpm build:wasm`); otherwise
- * falls back to upstream `@sqlite.org/sqlite-wasm` (which has no `anki`).
+ * `sqlite3Init` is THE public entry point: it boots the custom `dist/` build and
+ * (given `opts.anki`) loads the model. The loader is imported statically so the
+ * bundler rewrites its sibling `sqlite3.wasm` / OPFS-proxy URLs (works in Vite
+ * dev + build); it's pulled in only here, not by the model registry, so a main
+ * thread that only reads `@sqlite-anki/wasm/registry` stays free of the wasm.
  */
 import type { default as UpstreamInit } from "@sqlite.org/sqlite-wasm";
+// @ts-ignore untyped generated .mjs
+import sqlite3WasmInit from "../dist/sqlite3-bundler-friendly.mjs";
+import { ANKI_MODEL_REGISTRY, type AnkiModelSpec } from "./registry";
 
 export type Sqlite3Module = Awaited<ReturnType<typeof UpstreamInit>>;
-
-/** A model the glue knows how to fetch by id. */
-export interface AnkiModelSpec {
-  modelUrl: string;
-  tokenizerUrl: string;
-  /** Embedding dimension — must match the model's output. */
-  dim: number;
-  /** Optional integrity pin for the model bytes. */
-  sha256?: string;
-  /** Approximate model download size in MB (for UIs). */
-  sizeMb?: number;
-  /** One-line human description (for UIs). */
-  description?: string;
-}
-
-/** Builds a registry entry from a HuggingFace repo with an `onnx/` export. */
-function hf(
-  repo: string,
-  dim: number,
-  sizeMb: number,
-  description: string,
-): AnkiModelSpec {
-  const base = `https://huggingface.co/${repo}/resolve/main`;
-  return {
-    modelUrl: `${base}/onnx/model.onnx`,
-    tokenizerUrl: `${base}/tokenizer.json`,
-    dim,
-    sizeMb,
-    description,
-  };
-}
-
-/**
- * Built-in model registry. Extend it or pass custom URLs/bytes instead.
- *
- * All entries are **mean-pooling** sentence-transformers (matching the
- * embedder's pooling) served as fp32 ONNX from the reliable `Xenova/*` mirrors.
- * Mixed dimensions (384 vs 768) are intentional — vectors are only comparable
- * within one model, so a database is tied to the model that built it.
- */
-export const ANKI_MODEL_REGISTRY: Record<string, AnkiModelSpec> = {
-  "all-MiniLM-L6-v2": hf(
-    "Xenova/all-MiniLM-L6-v2",
-    384,
-    90,
-    "Fast, general-purpose baseline. The best default for English semantic search.",
-  ),
-  "all-MiniLM-L12-v2": hf(
-    "Xenova/all-MiniLM-L12-v2",
-    384,
-    133,
-    "Deeper MiniLM — a little more accurate than L6, slightly slower.",
-  ),
-  "all-mpnet-base-v2": hf(
-    "Xenova/all-mpnet-base-v2",
-    768,
-    435,
-    "Highest general quality (768-dimensional). Best results, largest download.",
-  ),
-  "multi-qa-MiniLM-L6-cos-v1": hf(
-    "Xenova/multi-qa-MiniLM-L6-cos-v1",
-    384,
-    90,
-    "Tuned for question→passage retrieval and semantic search over documents.",
-  ),
-  "paraphrase-multilingual-MiniLM-L12-v2": hf(
-    "Xenova/paraphrase-multilingual-MiniLM-L12-v2",
-    384,
-    470,
-    "Multilingual (50+ languages) — search and match across different languages.",
-  ),
-  "gte-small": hf(
-    "Xenova/gte-small",
-    384,
-    133,
-    "Strong modern general-text embeddings with competitive retrieval quality.",
-  ),
-};
+export { ANKI_MODEL_REGISTRY };
+export type { AnkiModelSpec };
 
 export interface AnkiOption {
   /** Registry id (resolves URLs + dim). */
@@ -112,24 +42,6 @@ export interface AnkiOption {
 
 export interface Sqlite3InitOptions {
   anki?: AnkiOption;
-}
-
-let customInit: (() => Promise<Sqlite3Module>) | null | undefined;
-
-async function loadCustomInit(): Promise<(() => Promise<Sqlite3Module>) | null> {
-  if (customInit !== undefined) {
-    return customInit;
-  }
-  try {
-    // Generated Emscripten output — no type declarations ship with it.
-    // @ts-ignore untyped generated .mjs
-    const mod = await import("../dist/sqlite3-bundler-friendly.mjs");
-    customInit = mod.default as () => Promise<Sqlite3Module>;
-    return customInit;
-  } catch {
-    customInit = null;
-    return null;
-  }
 }
 
 interface ResolvedSpec {
@@ -172,13 +84,60 @@ function resolveSpec(a: AnkiOption): ResolvedSpec {
   );
 }
 
+/** OPFS subdirectory where fetched model/tokenizer bytes are cached. */
+const MODEL_CACHE_DIR = "anki-models";
+
+/** Stable cache filename for a URL (sanitized, no collisions across our URLs). */
+function cacheFileName(url: string): string {
+  return url.replace(/^https?:\/\//, "").replace(/[^a-zA-Z0-9._-]/g, "_");
+}
+
+/** The OPFS cache directory, or null when OPFS is unavailable. */
+async function modelCacheDir(): Promise<any> {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const root = await (navigator as any)?.storage?.getDirectory?.();
+    return root ? await root.getDirectoryHandle(MODEL_CACHE_DIR, { create: true }) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Fetches bytes, caching them in OPFS so the (large) model isn't re-downloaded
+ * on later sessions — only the first load hits the network. Falls back to a
+ * plain fetch when OPFS is unavailable.
+ */
 async function fetchBytes(url: string, what: string): Promise<Uint8Array> {
-  // HTTP cache handles repeat loads; OPFS caching is a future improvement.
+  const name = cacheFileName(url);
+  const dir = await modelCacheDir();
+
+  if (dir) {
+    try {
+      const file = await (await dir.getFileHandle(name)).getFile();
+      if (file.size > 0) return new Uint8Array(await file.arrayBuffer());
+    } catch {
+      /* not cached yet */
+    }
+  }
+
   const r = await fetch(url, { credentials: "omit" });
   if (!r.ok) {
     throw new Error(`anki: failed to fetch ${what} (${r.status}) from ${url}`);
   }
-  return new Uint8Array(await r.arrayBuffer());
+  const bytes = new Uint8Array(await r.arrayBuffer());
+
+  if (dir) {
+    try {
+      const h = await dir.getFileHandle(name, { create: true });
+      const w = await h.createWritable();
+      await w.write(bytes);
+      await w.close();
+    } catch {
+      /* best-effort cache; ignore write failures */
+    }
+  }
+  return bytes;
 }
 
 /**
@@ -240,17 +199,14 @@ export async function loadAnkiModel(
 }
 
 /**
- * Loads and initializes `sqlite3.wasm` (with sqlite-anki when the custom build
- * is present) and, if `opts.anki` is given, loads the embedding model.
+ * Boots the custom `sqlite3.wasm` (with the sqlite-anki extension) and, when
+ * `opts.anki` is given, loads the embedding model. This is the entry point apps
+ * should call.
  */
 export default async function initSqliteAnki(
   opts?: Sqlite3InitOptions
 ): Promise<Sqlite3Module> {
-  const custom = await loadCustomInit();
-  const sqlite3 = custom
-    ? await custom()
-    : await (await import("@sqlite.org/sqlite-wasm")).default();
-
+  const sqlite3 = (await sqlite3WasmInit()) as Sqlite3Module;
   if (opts?.anki) {
     await loadAnkiModel(sqlite3, opts.anki);
   }
@@ -259,5 +215,3 @@ export default async function initSqliteAnki(
 
 /** Alias matching the documented API name. */
 export const sqlite3Init = initSqliteAnki;
-
-export { default as sqlite3InitModule } from "@sqlite.org/sqlite-wasm";

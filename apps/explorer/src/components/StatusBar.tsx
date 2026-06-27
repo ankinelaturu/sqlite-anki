@@ -9,7 +9,7 @@ import {
   Timer,
 } from "lucide-react";
 import type { ReactNode } from "react";
-import type { Metrics } from "@sqlite-anki/db-client";
+import type { Metrics } from "@/db";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 

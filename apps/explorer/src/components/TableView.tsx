@@ -13,7 +13,7 @@ import type {
   Remote,
   SqlValue,
   TableInfo,
-} from "@sqlite-anki/db-client";
+} from "@/db";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {

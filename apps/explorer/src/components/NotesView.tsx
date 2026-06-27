@@ -4,7 +4,7 @@ import { markdown } from "@codemirror/lang-markdown";
 import MarkdownPreview from "@uiw/react-markdown-preview";
 import "@uiw/react-markdown-preview/markdown.css";
 import { Check, RefreshCw, Save } from "lucide-react";
-import type { AnkiWorkerApi, Remote } from "@sqlite-anki/db-client";
+import type { AnkiWorkerApi, Remote } from "@/db";
 import { Button } from "@/components/ui/button";
 import { useTheme } from "@/lib/theme";
 import { cn } from "@/lib/utils";

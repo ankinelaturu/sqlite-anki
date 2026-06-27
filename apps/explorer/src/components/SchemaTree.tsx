@@ -1,6 +1,6 @@
 import { useState, type ReactElement } from "react";
 import { ChevronRight, Columns3, KeyRound, Sparkles, Table2 } from "lucide-react";
-import type { TableInfo } from "@sqlite-anki/db-client";
+import type { TableInfo } from "@/db";
 import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";

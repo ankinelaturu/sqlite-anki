@@ -2,13 +2,10 @@
  * SQLite worker: runs the WASM engine + OPFS databases off the main thread,
  * loads the embedding model, and captures per-operation metrics.
  */
-// Statically import the Emscripten loader so the bundler (Vite) transforms it
-// and rewrites its sibling `.wasm` / OPFS-proxy URLs — identically in dev and
-// build. (Going through the package's dynamic import left those URLs unresolved
-// in Vite dev → 404s.) `loadAnkiModel` does the model fetch + registration.
-// @ts-expect-error untyped generated .mjs
-import sqlite3InitModule from "@sqlite-anki/wasm/loader";
-import { loadAnkiModel } from "@sqlite-anki/wasm";
+// The public entry point: boots the wasm + (given `anki`) loads the model. It
+// statically imports the loader internally, so the wasm URL is rewritten by the
+// bundler in Vite dev + build.
+import initSqliteAnki from "@sqlite-anki/wasm";
 import * as Comlink from "comlink";
 import DEMO_SQL from "./demo/demodb-schema.sql?raw";
 import {
@@ -78,11 +75,9 @@ class AnkiWorker implements AnkiWorkerApi {
   private dbs = new Map<string, Db>();
 
   async init(model: ModelSpec): Promise<InitResult> {
-    const s = await sqlite3InitModule();
+    const anki = model && (model.model || model.modelUrl) ? (model as any) : undefined;
+    const s = await initSqliteAnki(anki ? { anki } : undefined);
     this.sqlite3 = s;
-    if (model && (model.model || model.modelUrl)) {
-      await loadAnkiModel(s, model as any);
-    }
     this.opfsAvailable = "opfs" in s && Boolean(s.opfs);
     return {
       opfs: this.opfsAvailable,

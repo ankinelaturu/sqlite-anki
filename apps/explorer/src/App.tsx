@@ -17,7 +17,7 @@ import {
   Table2,
   X,
 } from "lucide-react";
-import { ANKI_MODEL_REGISTRY } from "@sqlite-anki/wasm";
+import { ANKI_MODEL_REGISTRY } from "@sqlite-anki/wasm/registry";
 import {
   getDbWorker,
   proxy,
@@ -25,7 +25,7 @@ import {
   type InitResult,
   type QueryResult,
   type TableInfo,
-} from "@sqlite-anki/db-client";
+} from "@/db";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";

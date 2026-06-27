@@ -8,7 +8,7 @@
   "types": "./src/index.ts",
   "exports": {
     ".": "./src/index.ts",
-    "./loader": "./dist/sqlite3-bundler-friendly.mjs"
+    "./registry": "./src/registry.ts"
   },
   "scripts": {
     "test": "node --test test/*.test.mjs"
