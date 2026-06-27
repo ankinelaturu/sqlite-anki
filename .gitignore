@@ -28,3 +28,7 @@ vendor/emsdk/
 .env
 .env.*
 
+# Claude Code — personal/machine-local settings + throwaway worktrees
+.claude/settings.local.json
+.claude/worktrees/
+
