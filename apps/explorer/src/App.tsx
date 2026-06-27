@@ -17,6 +17,7 @@ import {
   Table2,
   X,
 } from "lucide-react";
+import { track } from "@vercel/analytics";
 import { ANKI_MODEL_REGISTRY } from "@sqlite-anki/wasm/registry";
 import {
   getDbWorker,
@@ -132,6 +133,7 @@ export function App() {
       const res = await api.init({ model: modelChoice, modelId: modelChoice, dim: reg?.dim });
       setInfo(res);
       setDatabases(await api.listDatabases());
+      track("model_loaded", { model: modelChoice });
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -186,6 +188,7 @@ export function App() {
       setPopulating(null);
       setDatabases(await api.listDatabases());
       await openDb(DEMO_PATH);
+      track("demo_populated");
     } catch (e) {
       setPopulating(null);
       setError(e instanceof Error ? e.message : String(e));

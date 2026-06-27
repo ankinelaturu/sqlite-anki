@@ -7,6 +7,7 @@ import {
   type SetStateAction,
 } from "react";
 import { ChevronDown, ChevronUp, Plus, RefreshCw, Search, X } from "lucide-react";
+import { track } from "@vercel/analytics";
 import type {
   AnkiWorkerApi,
   QueryResult,
@@ -100,6 +101,7 @@ export function TableView({
       setResult(r);
       setSearching(true);
       onOp(`search ${table.name}`, r);
+      track("search", { mode });
     } catch (e) {
       onError(e instanceof Error ? e.message : String(e));
     }
