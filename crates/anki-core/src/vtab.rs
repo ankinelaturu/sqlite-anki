@@ -362,7 +362,7 @@ fn embed_text(text: &str) -> Option<Vec<f32>> {
             // Time the actual inference (the headline browser-ML metric).
             let t0 = metrics::now_ms();
             let r = e.lock().embed(t).ok();
-            metrics::record_embed(metrics::now_ms() - t0);
+            metrics::record_embed(t, metrics::now_ms() - t0);
             r
         }
         Err(_) => None,

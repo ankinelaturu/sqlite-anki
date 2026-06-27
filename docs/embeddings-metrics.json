@@ -1,0 +1,4802 @@
+[
+    {
+        "text": "The team is focused on a phased enterprise rollout across business units. They a",
+        "ms": 103.79
+    },
+    {
+        "text": "Customer is concerned about onboarding thousands of users in the next quarter. T",
+        "ms": 89.12
+    },
+    {
+        "text": "Book a follow-up demo for the wider team. Confirm the migration timeline with th",
+        "ms": 88.54
+    },
+    {
+        "text": "The team is focused on self-serve documentation and onboarding guides. They also",
+        "ms": 87.26
+    },
+    {
+        "text": "Customer is concerned about enablement workshops for the admin team. The team is",
+        "ms": 87.2
+    },
+    {
+        "text": "Set up a technical proof-of-concept environment. Prepare a SOC 2 summary for Inf",
+        "ms": 86.78
+    },
+    {
+        "text": "The team is focused on optimizing indexing for faster retrieval.",
+        "ms": 87.75
+    },
+    {
+        "text": "Customer is concerned about search latency spikes under heavy load. The team is ",
+        "ms": 87.59
+    },
+    {
+        "text": "Set up a technical proof-of-concept environment. Send the updated proposal and p",
+        "ms": 87.67
+    },
+    {
+        "text": "The team is focused on requests for deeper reporting and dashboards. They also m",
+        "ms": 87.2
+    },
+    {
+        "text": "Customer is concerned about requests for deeper reporting and dashboards. The te",
+        "ms": 87.64
+    },
+    {
+        "text": "Set up a technical proof-of-concept environment. Confirm the migration timeline ",
+        "ms": 87.37
+    },
+    {
+        "text": "The team is focused on meeting HIPAA and GDPR compliance obligations. They also ",
+        "ms": 87.61
+    },
+    {
+        "text": "Customer is concerned about retention policies for sensitive records. The team i",
+        "ms": 87.64
+    },
+    {
+        "text": "Prepare a SOC 2 summary for InfoSec.",
+        "ms": 87.18
+    },
+    {
+        "text": "The team is focused on a security review by the InfoSec team. They also mentione",
+        "ms": 87.38
+    },
+    {
+        "text": "Customer is concerned about passing a SOC 2 and penetration-testing audit. The t",
+        "ms": 87.4
+    },
+    {
+        "text": "Schedule an architecture review with the security team. Prepare a SOC 2 summary ",
+        "ms": 87.32
+    },
+    {
+        "text": "The team is focused on concerns about downtime during cloud migration.",
+        "ms": 87.38
+    },
+    {
+        "text": "Customer is concerned about migrating their workloads to the cloud. The team is ",
+        "ms": 87.49
+    },
+    {
+        "text": "Send the updated proposal and pricing to procurement.",
+        "ms": 86.95
+    },
+    {
+        "text": "The team is focused on executive sponsorship from the CTO is secured.",
+        "ms": 87.19
+    },
+    {
+        "text": "Customer is excited about the CFO is championing this initiative internally. The",
+        "ms": 87.36
+    },
+    {
+        "text": "Draft a rollout plan for the next quarter. Confirm the migration timeline with t",
+        "ms": 87.24
+    },
+    {
+        "text": "The team is focused on documenting controls for an upcoming audit. They also men",
+        "ms": 87.85
+    },
+    {
+        "text": "Customer is concerned about documenting controls for an upcoming audit. The team",
+        "ms": 87.27
+    },
+    {
+        "text": "Prepare a SOC 2 summary for InfoSec.",
+        "ms": 87.41
+    },
+    {
+        "text": "The team is focused on a lift-and-shift to a managed cloud environment.",
+        "ms": 87.38
+    },
+    {
+        "text": "Customer is concerned about a lift-and-shift to a managed cloud environment. The",
+        "ms": 88.74
+    },
+    {
+        "text": "Book a follow-up demo for the wider team. Schedule an architecture review with t",
+        "ms": 87.67
+    },
+    {
+        "text": "The team is focused on passing a SOC 2 and penetration-testing audit. They also ",
+        "ms": 87.74
+    },
+    {
+        "text": "Customer is concerned about passing a SOC 2 and penetration-testing audit. The t",
+        "ms": 87.11
+    },
+    {
+        "text": "Prepare a SOC 2 summary for InfoSec. Schedule an architecture review with the se",
+        "ms": 87.06
+    },
+    {
+        "text": "The team is focused on reducing support volume through training. They also menti",
+        "ms": 87.32
+    },
+    {
+        "text": "Customer is concerned about reducing support volume through training. The team i",
+        "ms": 87.19
+    },
+    {
+        "text": "Set up a technical proof-of-concept environment.",
+        "ms": 87.42
+    },
+    {
+        "text": "The team is focused on the sponsor is pushing for a faster timeline.",
+        "ms": 87.42
+    },
+    {
+        "text": "Customer is concerned about the CFO is championing this initiative internally. T",
+        "ms": 87.45
+    },
+    {
+        "text": "Confirm the migration timeline with their platform owners.",
+        "ms": 87.22
+    },
+    {
+        "text": "The team is focused on a phased enterprise rollout across business units. They a",
+        "ms": 87.77
+    },
+    {
+        "text": "Customer is concerned about onboarding thousands of users in the next quarter. T",
+        "ms": 87.14
+    },
+    {
+        "text": "Schedule an architecture review with the security team.",
+        "ms": 87.15
+    },
+    {
+        "text": "The team is focused on a phased enterprise rollout across business units. They a",
+        "ms": 87.78
+    },
+    {
+        "text": "Customer is excited about expanding the deployment to additional teams. The team",
+        "ms": 87.04
+    },
+    {
+        "text": "Loop in the executive sponsor for sign-off.",
+        "ms": 86.98
+    },
+    {
+        "text": "The team is focused on the customer is evaluating competitors before renewing. T",
+        "ms": 87.34
+    },
+    {
+        "text": "Customer is excited about renewal is at risk due to low usage. The team is focus",
+        "ms": 87.6
+    },
+    {
+        "text": "Book a follow-up demo for the wider team. Send the updated proposal and pricing ",
+        "ms": 87.39
+    },
+    {
+        "text": "The team is focused on rate limits affecting their integration. They also mentio",
+        "ms": 87.63
+    },
+    {
+        "text": "Customer is concerned about integrating through the public REST API. The team is",
+        "ms": 87.37
+    },
+    {
+        "text": "Schedule an architecture review with the security team.",
+        "ms": 86.82
+    },
+    {
+        "text": "The team is focused on migrating existing records from a legacy system. They als",
+        "ms": 87.61
+    },
+    {
+        "text": "Customer is concerned about a one-time bulk import of historical data. The team ",
+        "ms": 87.38
+    },
+    {
+        "text": "Schedule an architecture review with the security team.",
+        "ms": 87.02
+    },
+    {
+        "text": "The team is focused on search latency spikes under heavy load.",
+        "ms": 87.15
+    },
+    {
+        "text": "Customer is concerned about slow query times on a multi-gigabyte database. The t",
+        "ms": 87.2
+    },
+    {
+        "text": "Schedule an architecture review with the security team.",
+        "ms": 87.06
+    },
+    {
+        "text": "The team is focused on users could not sign in after the identity-provider switc",
+        "ms": 87.5
+    },
+    {
+        "text": "Customer is concerned about users could not sign in after the identity-provider ",
+        "ms": 87.27
+    },
+    {
+        "text": "Align on success metrics for the first 90 days.",
+        "ms": 87.14
+    },
+    {
+        "text": "The team is focused on rolling out single sign-on with their identity provider.",
+        "ms": 87.4
+    },
+    {
+        "text": "Customer is concerned about SSO configuration with SAML and SCIM. The team is fo",
+        "ms": 87.15
+    },
+    {
+        "text": "Draft a rollout plan for the next quarter.",
+        "ms": 87.27
+    },
+    {
+        "text": "The team is focused on search latency spikes under heavy load.",
+        "ms": 87.1
+    },
+    {
+        "text": "Customer is excited about optimizing indexing for faster retrieval. The team is ",
+        "ms": 87.35
+    },
+    {
+        "text": "Set up a technical proof-of-concept environment. Coordinate an SSO configuration",
+        "ms": 86.9
+    },
+    {
+        "text": "The team is focused on the sponsor is pushing for a faster timeline.",
+        "ms": 87.18
+    },
+    {
+        "text": "Customer is concerned about the CFO is championing this initiative internally. T",
+        "ms": 87.23
+    },
+    {
+        "text": "Confirm the migration timeline with their platform owners. Draft a rollout plan ",
+        "ms": 87.27
+    },
+    {
+        "text": "The team is focused on evaluating local, in-browser inference.",
+        "ms": 87.61
+    },
+    {
+        "text": "Customer is excited about evaluating local, in-browser inference. The team is fo",
+        "ms": 87.42
+    },
+    {
+        "text": "Confirm the migration timeline with their platform owners. Loop in the executive",
+        "ms": 87.57
+    },
+    {
+        "text": "The team is focused on a feature request around exporting data.",
+        "ms": 87.27
+    },
+    {
+        "text": "Customer is excited about a feature request around exporting data. The team is f",
+        "ms": 87.25
+    },
+    {
+        "text": "Align on success metrics for the first 90 days. Set up a technical proof-of-conc",
+        "ms": 87.81
+    },
+    {
+        "text": "The team is focused on a security review by the InfoSec team.",
+        "ms": 87.32
+    },
+    {
+        "text": "Customer is concerned about data residency and encryption requirements. The team",
+        "ms": 87.15
+    },
+    {
+        "text": "Draft a rollout plan for the next quarter.",
+        "ms": 86.89
+    },
+    {
+        "text": "The team is focused on self-serve documentation and onboarding guides.",
+        "ms": 87.14
+    },
+    {
+        "text": "Customer is concerned about scheduling end-user training sessions. The team is f",
+        "ms": 87.45
+    },
+    {
+        "text": "Schedule an architecture review with the security team. Set up a technical proof",
+        "ms": 87.5
+    },
+    {
+        "text": "The team is focused on a champion who advocates internally.",
+        "ms": 87.39
+    },
+    {
+        "text": "Customer is concerned about measuring time-to-value after launch. The team is fo",
+        "ms": 87.54
+    },
+    {
+        "text": "Schedule an architecture review with the security team. Confirm the migration ti",
+        "ms": 87.1
+    },
+    {
+        "text": "The team is focused on evaluating local, in-browser inference.",
+        "ms": 87.64
+    },
+    {
+        "text": "Customer is concerned about embedding-based retrieval over their documents. The ",
+        "ms": 87.43
+    },
+    {
+        "text": "Confirm the migration timeline with their platform owners.",
+        "ms": 86.91
+    },
+    {
+        "text": "The team is focused on scheduling end-user training sessions.",
+        "ms": 87.25
+    },
+    {
+        "text": "Customer is excited about enablement workshops for the admin team. The team is f",
+        "ms": 87.07
+    },
+    {
+        "text": "Set up a technical proof-of-concept environment. Draft a rollout plan for the ne",
+        "ms": 87.01
+    },
+    {
+        "text": "The team is focused on the deal is blocked on Q3 budget sign-off. They also ment",
+        "ms": 87.5
+    },
+    {
+        "text": "Customer is excited about budget approval is pending with finance. The team is f",
+        "ms": 87.62
+    },
+    {
+        "text": "Schedule an architecture review with the security team.",
+        "ms": 87.04
+    },
+    {
+        "text": "The team is focused on tuning performance for large datasets.",
+        "ms": 87.47
+    },
+    {
+        "text": "Customer is excited about optimizing indexing for faster retrieval. The team is ",
+        "ms": 87.39
+    },
+    {
+        "text": "Confirm the migration timeline with their platform owners.",
+        "ms": 87.13
+    },
+    {
+        "text": "The team is focused on measuring time-to-value after launch.",
+        "ms": 87.7
+    },
+    {
+        "text": "Customer is excited about a customer-success plan to drive adoption. The team is",
+        "ms": 87.32
+    },
+    {
+        "text": "Coordinate an SSO configuration session.",
+        "ms": 87.12
+    },
+    {
+        "text": "The team is focused on scheduling end-user training sessions. They also mentione",
+        "ms": 87.24
+    },
+    {
+        "text": "Customer is concerned about scheduling end-user training sessions. The team is f",
+        "ms": 87.03
+    },
+    {
+        "text": "Set up a technical proof-of-concept environment.",
+        "ms": 87.02
+    },
+    {
+        "text": "The team is focused on self-serve documentation and onboarding guides. They also",
+        "ms": 87.58
+    },
+    {
+        "text": "Customer is excited about scheduling end-user training sessions. The team is foc",
+        "ms": 87.57
+    },
+    {
+        "text": "Draft a rollout plan for the next quarter. Set up a technical proof-of-concept e",
+        "ms": 87.4
+    },
+    {
+        "text": "The team is focused on concerns about downtime during cloud migration. They also",
+        "ms": 87.71
+    },
+    {
+        "text": "Customer is excited about concerns about downtime during cloud migration. The te",
+        "ms": 87.34
+    },
+    {
+        "text": "Send the updated proposal and pricing to procurement.",
+        "ms": 87.12
+    },
+    {
+        "text": "The team is focused on a support escalation to the engineering team.",
+        "ms": 87.44
+    },
+    {
+        "text": "Customer is concerned about an outage that triggered a priority incident. The te",
+        "ms": 87.28
+    },
+    {
+        "text": "Send the updated proposal and pricing to procurement.",
+        "ms": 86.71
+    },
+    {
+        "text": "The team is focused on renewal conversation tied to a multi-year commitment.",
+        "ms": 87.24
+    },
+    {
+        "text": "Customer is concerned about renewal conversation tied to a multi-year commitment",
+        "ms": 87.41
+    },
+    {
+        "text": "Book a follow-up demo for the wider team. Coordinate an SSO configuration sessio",
+        "ms": 87.17
+    },
+    {
+        "text": "The team is focused on migrating their workloads to the cloud. They also mention",
+        "ms": 87.82
+    },
+    {
+        "text": "Customer is concerned about consolidating on-prem systems into the cloud. The te",
+        "ms": 87.34
+    },
+    {
+        "text": "Book a follow-up demo for the wider team. Prepare a SOC 2 summary for InfoSec.",
+        "ms": 87.23
+    },
+    {
+        "text": "The team is focused on SSO configuration with SAML and SCIM.",
+        "ms": 87.74
+    },
+    {
+        "text": "Customer is excited about rolling out single sign-on with their identity provide",
+        "ms": 89.91
+    },
+    {
+        "text": "Draft a rollout plan for the next quarter.",
+        "ms": 93.43
+    },
+    {
+        "text": "The team is focused on validating data integrity after the migration. They also ",
+        "ms": 92.19
+    },
+    {
+        "text": "Customer is concerned about migrating existing records from a legacy system. The",
+        "ms": 88.02
+    },
+    {
+        "text": "Loop in the executive sponsor for sign-off. Send the updated proposal and pricin",
+        "ms": 87.51
+    },
+    {
+        "text": "The team is focused on an outage that triggered a priority incident.",
+        "ms": 87.17
+    },
+    {
+        "text": "Customer is excited about a workaround was provided pending a permanent fix. The",
+        "ms": 87.27
+    },
+    {
+        "text": "Loop in the executive sponsor for sign-off. Prepare a SOC 2 summary for InfoSec.",
+        "ms": 87.46
+    },
+    {
+        "text": "The team is focused on embedding-based retrieval over their documents. They also",
+        "ms": 87.48
+    },
+    {
+        "text": "Customer is concerned about replacing keyword search with meaning-based search. ",
+        "ms": 87.53
+    },
+    {
+        "text": "Draft a rollout plan for the next quarter.",
+        "ms": 87.21
+    },
+    {
+        "text": "The team is focused on a one-time bulk import of historical data.",
+        "ms": 87.3
+    },
+    {
+        "text": "Customer is concerned about a one-time bulk import of historical data. The team ",
+        "ms": 87.21
+    },
+    {
+        "text": "Align on success metrics for the first 90 days.",
+        "ms": 87.25
+    },
+    {
+        "text": "The team is focused on users could not sign in after the identity-provider switc",
+        "ms": 87.18
+    },
+    {
+        "text": "Customer is concerned about SSO configuration with SAML and SCIM. The team is fo",
+        "ms": 86.97
+    },
+    {
+        "text": "Send the updated proposal and pricing to procurement. Book a follow-up demo for ",
+        "ms": 87.02
+    },
+    {
+        "text": "The team is focused on the customer is evaluating competitors before renewing. T",
+        "ms": 87.49
+    },
+    {
+        "text": "Customer is excited about an expansion opportunity around the renewal. The team ",
+        "ms": 87.54
+    },
+    {
+        "text": "Prepare a SOC 2 summary for InfoSec.",
+        "ms": 86.99
+    },
+    {
+        "text": "The team is focused on retention policies for sensitive records.",
+        "ms": 87.48
+    },
+    {
+        "text": "Customer is concerned about retention policies for sensitive records. The team i",
+        "ms": 87.26
+    },
+    {
+        "text": "Align on success metrics for the first 90 days.",
+        "ms": 87.51
+    },
+    {
+        "text": "The team is focused on renewal conversation tied to a multi-year commitment.",
+        "ms": 87.16
+    },
+    {
+        "text": "Customer is excited about renewal conversation tied to a multi-year commitment. ",
+        "ms": 87.31
+    },
+    {
+        "text": "Prepare a SOC 2 summary for InfoSec. Loop in the executive sponsor for sign-off.",
+        "ms": 86.93
+    },
+    {
+        "text": "The team is focused on concerns about downtime during cloud migration. They also",
+        "ms": 87.19
+    },
+    {
+        "text": "Customer is excited about consolidating on-prem systems into the cloud. The team",
+        "ms": 87.03
+    },
+    {
+        "text": "Schedule an architecture review with the security team. Align on success metrics",
+        "ms": 87.11
+    },
+    {
+        "text": "The team is focused on data residency and encryption requirements.",
+        "ms": 87.55
+    },
+    {
+        "text": "Customer is excited about passing a SOC 2 and penetration-testing audit. The tea",
+        "ms": 87.48
+    },
+    {
+        "text": "Book a follow-up demo for the wider team. Schedule an architecture review with t",
+        "ms": 87.33
+    },
+    {
+        "text": "The team is focused on consolidating on-prem systems into the cloud.",
+        "ms": 87.47
+    },
+    {
+        "text": "Customer is excited about a lift-and-shift to a managed cloud environment. The t",
+        "ms": 87.27
+    },
+    {
+        "text": "Loop in the executive sponsor for sign-off.",
+        "ms": 87.19
+    },
+    {
+        "text": "The team is focused on migrating existing records from a legacy system.",
+        "ms": 87.3
+    },
+    {
+        "text": "Customer is excited about mapping fields during the data migration. The team is ",
+        "ms": 87.1
+    },
+    {
+        "text": "Send the updated proposal and pricing to procurement.",
+        "ms": 86.69
+    },
+    {
+        "text": "The team is focused on positive product feedback from power users. They also men",
+        "ms": 87.59
+    },
+    {
+        "text": "Customer is excited about a feature request around exporting data. The team is f",
+        "ms": 87.12
+    },
+    {
+        "text": "Book a follow-up demo for the wider team.",
+        "ms": 87.43
+    },
+    {
+        "text": "The team is focused on rolling out single sign-on with their identity provider.",
+        "ms": 87.48
+    },
+    {
+        "text": "Customer is concerned about SSO configuration with SAML and SCIM. The team is fo",
+        "ms": 87.28
+    },
+    {
+        "text": "Draft a rollout plan for the next quarter. Send the updated proposal and pricing",
+        "ms": 87.15
+    },
+    {
+        "text": "The team is focused on the deal is blocked on Q3 budget sign-off. They also ment",
+        "ms": 87.46
+    },
+    {
+        "text": "Customer is excited about pricing was renegotiated to fit the annual budget. The",
+        "ms": 87.26
+    },
+    {
+        "text": "Prepare a SOC 2 summary for InfoSec.",
+        "ms": 86.97
+    },
+    {
+        "text": "The team is focused on API authentication with rotating tokens. They also mentio",
+        "ms": 88.75
+    },
+    {
+        "text": "Customer is excited about webhooks for near real-time synchronization. The team ",
+        "ms": 86.92
+    },
+    {
+        "text": "Coordinate an SSO configuration session. Loop in the executive sponsor for sign-",
+        "ms": 87
+    },
+    {
+        "text": "The team is focused on adopting AI-assisted semantic search.",
+        "ms": 87.04
+    },
+    {
+        "text": "Customer is concerned about replacing keyword search with meaning-based search. ",
+        "ms": 87.1
+    },
+    {
+        "text": "Send the updated proposal and pricing to procurement. Align on success metrics f",
+        "ms": 87.42
+    },
+    {
+        "text": "The team is focused on meeting HIPAA and GDPR compliance obligations. They also ",
+        "ms": 87.3
+    },
+    {
+        "text": "Customer is concerned about regulatory requirements in the finance vertical. The",
+        "ms": 87.31
+    },
+    {
+        "text": "Schedule an architecture review with the security team.",
+        "ms": 86.89
+    },
+    {
+        "text": "The team is focused on migrating existing records from a legacy system. They als",
+        "ms": 87.69
+    },
+    {
+        "text": "Customer is concerned about validating data integrity after the migration. The t",
+        "ms": 87.09
+    },
+    {
+        "text": "Coordinate an SSO configuration session.",
+        "ms": 87.11
+    },
+    {
+        "text": "The team is focused on embedding-based retrieval over their documents.",
+        "ms": 87.01
+    },
+    {
+        "text": "Customer is concerned about evaluating local, in-browser inference. The team is ",
+        "ms": 87.02
+    },
+    {
+        "text": "Schedule an architecture review with the security team.",
+        "ms": 86.83
+    },
+    {
+        "text": "The team is focused on slow query times on a multi-gigabyte database. They also ",
+        "ms": 87.38
+    },
+    {
+        "text": "Customer is excited about search latency spikes under heavy load. The team is fo",
+        "ms": 87.81
+    },
+    {
+        "text": "Draft a rollout plan for the next quarter. Align on success metrics for the firs",
+        "ms": 87.38
+    },
+    {
+        "text": "The team is focused on budget approval is pending with finance. They also mentio",
+        "ms": 87.72
+    },
+    {
+        "text": "Customer is excited about the deal is blocked on Q3 budget sign-off. The team is",
+        "ms": 87.23
+    },
+    {
+        "text": "Set up a technical proof-of-concept environment. Coordinate an SSO configuration",
+        "ms": 87.21
+    },
+    {
+        "text": "The team is focused on mapping fields during the data migration. They also menti",
+        "ms": 87.81
+    },
+    {
+        "text": "Customer is excited about a one-time bulk import of historical data. The team is",
+        "ms": 87.44
+    },
+    {
+        "text": "Set up a technical proof-of-concept environment.",
+        "ms": 86.91
+    },
+    {
+        "text": "The team is focused on a support escalation to the engineering team. They also m",
+        "ms": 87.03
+    },
+    {
+        "text": "Customer is concerned about an outage that triggered a priority incident. The te",
+        "ms": 87.22
+    },
+    {
+        "text": "Send the updated proposal and pricing to procurement. Confirm the migration time",
+        "ms": 87.14
+    },
+    {
+        "text": "The team is focused on enablement workshops for the admin team. They also mentio",
+        "ms": 87.49
+    },
+    {
+        "text": "Customer is excited about enablement workshops for the admin team. The team is f",
+        "ms": 87.17
+    },
+    {
+        "text": "Book a follow-up demo for the wider team. Draft a rollout plan for the next quar",
+        "ms": 87.28
+    },
+    {
+        "text": "The team is focused on self-serve documentation and onboarding guides. They also",
+        "ms": 87.39
+    },
+    {
+        "text": "Customer is concerned about reducing support volume through training. The team i",
+        "ms": 87.33
+    },
+    {
+        "text": "Send the updated proposal and pricing to procurement.",
+        "ms": 86.97
+    },
+    {
+        "text": "The team is focused on migrating existing records from a legacy system.",
+        "ms": 87.44
+    },
+    {
+        "text": "Customer is excited about validating data integrity after the migration. The tea",
+        "ms": 87.39
+    },
+    {
+        "text": "Loop in the executive sponsor for sign-off. Schedule an architecture review with",
+        "ms": 87.02
+    },
+    {
+        "text": "The team is focused on positive product feedback from power users. They also men",
+        "ms": 87.03
+    },
+    {
+        "text": "Customer is concerned about a feature request around exporting data. The team is",
+        "ms": 87.21
+    },
+    {
+        "text": "Prepare a SOC 2 summary for InfoSec.",
+        "ms": 87.31
+    },
+    {
+        "text": "The team is focused on adopting AI-assisted semantic search. They also mentioned",
+        "ms": 87.6
+    },
+    {
+        "text": "Customer is excited about replacing keyword search with meaning-based search. Th",
+        "ms": 87.53
+    },
+    {
+        "text": "Confirm the migration timeline with their platform owners. Send the updated prop",
+        "ms": 87.3
+    },
+    {
+        "text": "The team is focused on SSO configuration with SAML and SCIM.",
+        "ms": 88.1
+    },
+    {
+        "text": "Customer is excited about users could not sign in after the identity-provider sw",
+        "ms": 88.68
+    },
+    {
+        "text": "Coordinate an SSO configuration session. Prepare a SOC 2 summary for InfoSec.",
+        "ms": 87.08
+    },
+    {
+        "text": "The team is focused on validating data integrity after the migration.",
+        "ms": 87.37
+    },
+    {
+        "text": "Customer is excited about mapping fields during the data migration. The team is ",
+        "ms": 87.11
+    },
+    {
+        "text": "Confirm the migration timeline with their platform owners. Schedule an architect",
+        "ms": 86.93
+    },
+    {
+        "text": "The team is focused on renewal conversation tied to a multi-year commitment.",
+        "ms": 87.19
+    },
+    {
+        "text": "Customer is concerned about renewal conversation tied to a multi-year commitment",
+        "ms": 87.57
+    },
+    {
+        "text": "Coordinate an SSO configuration session. Send the updated proposal and pricing t",
+        "ms": 87.38
+    },
+    {
+        "text": "The team is focused on an outage that triggered a priority incident. They also m",
+        "ms": 87.5
+    },
+    {
+        "text": "Customer is concerned about a workaround was provided pending a permanent fix. T",
+        "ms": 87.26
+    },
+    {
+        "text": "Schedule an architecture review with the security team.",
+        "ms": 86.81
+    },
+    {
+        "text": "The team is focused on a security review by the InfoSec team. They also mentione",
+        "ms": 87.55
+    },
+    {
+        "text": "Customer is concerned about a security review by the InfoSec team. The team is f",
+        "ms": 87.33
+    },
+    {
+        "text": "Set up a technical proof-of-concept environment.",
+        "ms": 87.16
+    },
+    {
+        "text": "The team is focused on enforcing MFA through the corporate directory.",
+        "ms": 87.47
+    },
+    {
+        "text": "Customer is concerned about SSO configuration with SAML and SCIM. The team is fo",
+        "ms": 87.17
+    },
+    {
+        "text": "Coordinate an SSO configuration session.",
+        "ms": 86.75
+    },
+    {
+        "text": "The team is focused on expanding the deployment to additional teams.",
+        "ms": 87.11
+    },
+    {
+        "text": "Customer is concerned about onboarding thousands of users in the next quarter. T",
+        "ms": 87.58
+    },
+    {
+        "text": "Confirm the migration timeline with their platform owners. Loop in the executive",
+        "ms": 87.07
+    },
+    {
+        "text": "The team is focused on a feature request around exporting data. They also mentio",
+        "ms": 87.5
+    },
+    {
+        "text": "Customer is concerned about usability concerns raised during the trial. The team",
+        "ms": 87.17
+    },
+    {
+        "text": "Draft a rollout plan for the next quarter.",
+        "ms": 87.31
+    },
+    {
+        "text": "The team is focused on webhooks for near real-time synchronization. They also me",
+        "ms": 87.11
+    },
+    {
+        "text": "Customer is concerned about rate limits affecting their integration. The team is",
+        "ms": 87.29
+    },
+    {
+        "text": "Confirm the migration timeline with their platform owners. Set up a technical pr",
+        "ms": 86.88
+    },
+    {
+        "text": "The team is focused on a champion who advocates internally. They also mentioned ",
+        "ms": 87.18
+    },
+    {
+        "text": "Customer is concerned about a champion who advocates internally. The team is foc",
+        "ms": 87.1
+    },
+    {
+        "text": "Send the updated proposal and pricing to procurement.",
+        "ms": 86.99
+    },
+    {
+        "text": "The team is focused on a phased enterprise rollout across business units.",
+        "ms": 87.43
+    },
+    {
+        "text": "Customer is concerned about onboarding thousands of users in the next quarter. T",
+        "ms": 87.49
+    },
+    {
+        "text": "Coordinate an SSO configuration session. Send the updated proposal and pricing t",
+        "ms": 87.16
+    },
+    {
+        "text": "The team is focused on procurement needs an updated quote for approval. They als",
+        "ms": 87.43
+    },
+    {
+        "text": "Customer is concerned about budget approval is pending with finance. The team is",
+        "ms": 87.33
+    },
+    {
+        "text": "Set up a technical proof-of-concept environment.",
+        "ms": 87.25
+    },
+    {
+        "text": "The team is focused on self-serve documentation and onboarding guides. They also",
+        "ms": 87.41
+    },
+    {
+        "text": "Customer is excited about enablement workshops for the admin team. The team is f",
+        "ms": 87.25
+    },
+    {
+        "text": "Confirm the migration timeline with their platform owners. Coordinate an SSO con",
+        "ms": 86.82
+    },
+    {
+        "text": "The team is focused on tuning performance for large datasets. They also mentione",
+        "ms": 87.18
+    },
+    {
+        "text": "Customer is excited about search latency spikes under heavy load. The team is fo",
+        "ms": 87.23
+    },
+    {
+        "text": "Coordinate an SSO configuration session.",
+        "ms": 87.16
+    },
+    {
+        "text": "The team is focused on regulatory requirements in the finance vertical.",
+        "ms": 87.48
+    },
+    {
+        "text": "Customer is concerned about regulatory requirements in the finance vertical. The",
+        "ms": 87.67
+    },
+    {
+        "text": "Book a follow-up demo for the wider team.",
+        "ms": 87.15
+    },
+    {
+        "text": "The team is focused on a feature request around exporting data.",
+        "ms": 87.91
+    },
+    {
+        "text": "Customer is excited about requests for deeper reporting and dashboards. The team",
+        "ms": 87.1
+    },
+    {
+        "text": "Prepare a SOC 2 summary for InfoSec. Loop in the executive sponsor for sign-off.",
+        "ms": 87.01
+    },
+    {
+        "text": "The team is focused on a support escalation to the engineering team.",
+        "ms": 87.38
+    },
+    {
+        "text": "Customer is concerned about a support escalation to the engineering team. The te",
+        "ms": 86.84
+    },
+    {
+        "text": "Confirm the migration timeline with their platform owners.",
+        "ms": 86.74
+    },
+    {
+        "text": "The team is focused on concerns about downtime during cloud migration.",
+        "ms": 87.31
+    },
+    {
+        "text": "Customer is excited about consolidating on-prem systems into the cloud. The team",
+        "ms": 87.4
+    },
+    {
+        "text": "Loop in the executive sponsor for sign-off. Align on success metrics for the fir",
+        "ms": 87.59
+    },
+    {
+        "text": "The team is focused on optimizing indexing for faster retrieval. They also menti",
+        "ms": 87.36
+    },
+    {
+        "text": "Customer is concerned about slow query times on a multi-gigabyte database. The t",
+        "ms": 87.26
+    },
+    {
+        "text": "Book a follow-up demo for the wider team. Loop in the executive sponsor for sign",
+        "ms": 87.11
+    },
+    {
+        "text": "The team is focused on measuring time-to-value after launch. They also mentioned",
+        "ms": 87.58
+    },
+    {
+        "text": "Customer is excited about a champion who advocates internally. The team is focus",
+        "ms": 87.18
+    },
+    {
+        "text": "Draft a rollout plan for the next quarter.",
+        "ms": 87.21
+    },
+    {
+        "text": "The team is focused on a champion who advocates internally. They also mentioned ",
+        "ms": 87.13
+    },
+    {
+        "text": "Customer is excited about quarterly business reviews to track value. The team is",
+        "ms": 87.07
+    },
+    {
+        "text": "Book a follow-up demo for the wider team.",
+        "ms": 87.07
+    },
+    {
+        "text": "The team is focused on quarterly business reviews to track value.",
+        "ms": 87.7
+    },
+    {
+        "text": "Customer is excited about measuring time-to-value after launch. The team is focu",
+        "ms": 87.61
+    },
+    {
+        "text": "Prepare a SOC 2 summary for InfoSec.",
+        "ms": 87.25
+    },
+    {
+        "text": "The team is focused on evaluating local, in-browser inference.",
+        "ms": 87.26
+    },
+    {
+        "text": "Customer is excited about embedding-based retrieval over their documents. The te",
+        "ms": 87.32
+    },
+    {
+        "text": "Set up a technical proof-of-concept environment.",
+        "ms": 87.37
+    },
+    {
+        "text": "The team is focused on onboarding thousands of users in the next quarter.",
+        "ms": 87.4
+    },
+    {
+        "text": "Customer is concerned about scaling adoption company-wide after the pilot. The t",
+        "ms": 87.29
+    },
+    {
+        "text": "Align on success metrics for the first 90 days.",
+        "ms": 86.92
+    },
+    {
+        "text": "The team is focused on a customer-success plan to drive adoption. They also ment",
+        "ms": 87.15
+    },
+    {
+        "text": "Customer is excited about a customer-success plan to drive adoption. The team is",
+        "ms": 87.17
+    },
+    {
+        "text": "Book a follow-up demo for the wider team. Draft a rollout plan for the next quar",
+        "ms": 89.5
+    },
+    {
+        "text": "The team is focused on renewal conversation tied to a multi-year commitment. The",
+        "ms": 89.51
+    },
+    {
+        "text": "Customer is excited about renewal conversation tied to a multi-year commitment. ",
+        "ms": 88.88
+    },
+    {
+        "text": "Prepare a SOC 2 summary for InfoSec.",
+        "ms": 87.25
+    },
+    {
+        "text": "The team is focused on migrating their workloads to the cloud.",
+        "ms": 87.14
+    },
+    {
+        "text": "Customer is excited about consolidating on-prem systems into the cloud. The team",
+        "ms": 87.22
+    },
+    {
+        "text": "Coordinate an SSO configuration session. Set up a technical proof-of-concept env",
+        "ms": 86.98
+    },
+    {
+        "text": "The team is focused on API authentication with rotating tokens.",
+        "ms": 87.49
+    },
+    {
+        "text": "Customer is concerned about webhooks for near real-time synchronization. The tea",
+        "ms": 87.09
+    },
+    {
+        "text": "Coordinate an SSO configuration session. Schedule an architecture review with th",
+        "ms": 86.89
+    },
+    {
+        "text": "The team is focused on an outage that triggered a priority incident. They also m",
+        "ms": 87.1
+    },
+    {
+        "text": "Customer is excited about the issue recurred after the previous fix. The team is",
+        "ms": 87.1
+    },
+    {
+        "text": "Prepare a SOC 2 summary for InfoSec.",
+        "ms": 87.21
+    },
+    {
+        "text": "The team is focused on renewal conversation tied to a multi-year commitment.",
+        "ms": 87.59
+    },
+    {
+        "text": "Customer is concerned about an expansion opportunity around the renewal. The tea",
+        "ms": 87.32
+    },
+    {
+        "text": "Align on success metrics for the first 90 days.",
+        "ms": 87.18
+    },
+    {
+        "text": "The team is focused on hardening access controls and audit logging.",
+        "ms": 87.34
+    },
+    {
+        "text": "Customer is excited about hardening access controls and audit logging. The team ",
+        "ms": 87.31
+    },
+    {
+        "text": "Send the updated proposal and pricing to procurement. Loop in the executive spon",
+        "ms": 87.11
+    },
+    {
+        "text": "The team is focused on self-serve documentation and onboarding guides.",
+        "ms": 87.16
+    },
+    {
+        "text": "Customer is concerned about reducing support volume through training. The team i",
+        "ms": 86.95
+    },
+    {
+        "text": "Send the updated proposal and pricing to procurement.",
+        "ms": 86.77
+    },
+    {
+        "text": "The team is focused on embedding-based retrieval over their documents. They also",
+        "ms": 87.22
+    },
+    {
+        "text": "Customer is concerned about evaluating local, in-browser inference. The team is ",
+        "ms": 87.36
+    },
+    {
+        "text": "Coordinate an SSO configuration session. Align on success metrics for the first ",
+        "ms": 87.16
+    },
+    {
+        "text": "The team is focused on renewal is at risk due to low usage. They also mentioned ",
+        "ms": 87.5
+    },
+    {
+        "text": "Customer is excited about an expansion opportunity around the renewal. The team ",
+        "ms": 87.35
+    },
+    {
+        "text": "Prepare a SOC 2 summary for InfoSec.",
+        "ms": 87.1
+    },
+    {
+        "text": "The team is focused on meeting HIPAA and GDPR compliance obligations.",
+        "ms": 87.66
+    },
+    {
+        "text": "Customer is excited about meeting HIPAA and GDPR compliance obligations. The tea",
+        "ms": 87.06
+    },
+    {
+        "text": "Align on success metrics for the first 90 days. Schedule an architecture review ",
+        "ms": 87.25
+    },
+    {
+        "text": "The team is focused on an expansion opportunity around the renewal. They also me",
+        "ms": 87.21
+    },
+    {
+        "text": "Customer is excited about renewal is at risk due to low usage. The team is focus",
+        "ms": 87.02
+    },
+    {
+        "text": "Confirm the migration timeline with their platform owners. Set up a technical pr",
+        "ms": 87.08
+    },
+    {
+        "text": "The team is focused on a one-time bulk import of historical data.",
+        "ms": 87.12
+    },
+    {
+        "text": "Customer is excited about validating data integrity after the migration. The tea",
+        "ms": 87.57
+    },
+    {
+        "text": "Send the updated proposal and pricing to procurement.",
+        "ms": 86.83
+    },
+    {
+        "text": "The team is focused on reducing support volume through training. They also menti",
+        "ms": 87.33
+    },
+    {
+        "text": "Customer is concerned about reducing support volume through training. The team i",
+        "ms": 87.24
+    },
+    {
+        "text": "Align on success metrics for the first 90 days. Coordinate an SSO configuration ",
+        "ms": 87.37
+    },
+    {
+        "text": "The team is focused on positive product feedback from power users.",
+        "ms": 87.14
+    },
+    {
+        "text": "Customer is excited about a feature request around exporting data. The team is f",
+        "ms": 87.47
+    },
+    {
+        "text": "Prepare a SOC 2 summary for InfoSec.",
+        "ms": 86.88
+    },
+    {
+        "text": "The team is focused on passing a SOC 2 and penetration-testing audit.",
+        "ms": 87.12
+    },
+    {
+        "text": "Customer is concerned about passing a SOC 2 and penetration-testing audit. The t",
+        "ms": 87.08
+    },
+    {
+        "text": "Set up a technical proof-of-concept environment.",
+        "ms": 87.23
+    },
+    {
+        "text": "The team is focused on a phased enterprise rollout across business units.",
+        "ms": 87.38
+    },
+    {
+        "text": "Customer is excited about expanding the deployment to additional teams. The team",
+        "ms": 87.36
+    },
+    {
+        "text": "Prepare a SOC 2 summary for InfoSec.",
+        "ms": 87.23
+    },
+    {
+        "text": "The team is focused on usability concerns raised during the trial. They also men",
+        "ms": 87.44
+    },
+    {
+        "text": "Customer is concerned about requests for deeper reporting and dashboards. The te",
+        "ms": 87.65
+    },
+    {
+        "text": "Book a follow-up demo for the wider team. Set up a technical proof-of-concept en",
+        "ms": 87.25
+    },
+    {
+        "text": "The team is focused on renewal is at risk due to low usage. They also mentioned ",
+        "ms": 87.24
+    },
+    {
+        "text": "Customer is concerned about the customer is evaluating competitors before renewi",
+        "ms": 87.29
+    },
+    {
+        "text": "Draft a rollout plan for the next quarter.",
+        "ms": 86.93
+    },
+    {
+        "text": "The team is focused on users could not sign in after the identity-provider switc",
+        "ms": 87.28
+    },
+    {
+        "text": "Customer is concerned about enforcing MFA through the corporate directory. The t",
+        "ms": 87.47
+    },
+    {
+        "text": "Prepare a SOC 2 summary for InfoSec. Loop in the executive sponsor for sign-off.",
+        "ms": 87.66
+    },
+    {
+        "text": "The team is focused on enforcing MFA through the corporate directory.",
+        "ms": 87.73
+    },
+    {
+        "text": "Customer is excited about enforcing MFA through the corporate directory. The tea",
+        "ms": 87.52
+    },
+    {
+        "text": "Draft a rollout plan for the next quarter.",
+        "ms": 87.25
+    },
+    {
+        "text": "The team is focused on a security review by the InfoSec team.",
+        "ms": 87.61
+    },
+    {
+        "text": "Customer is excited about a security review by the InfoSec team. The team is foc",
+        "ms": 87.47
+    },
+    {
+        "text": "Align on success metrics for the first 90 days.",
+        "ms": 87.25
+    },
+    {
+        "text": "The team is focused on scheduling end-user training sessions.",
+        "ms": 87.18
+    },
+    {
+        "text": "Customer is concerned about self-serve documentation and onboarding guides. The ",
+        "ms": 87.09
+    },
+    {
+        "text": "Align on success metrics for the first 90 days. Book a follow-up demo for the wi",
+        "ms": 87.01
+    },
+    {
+        "text": "The team is focused on validating data integrity after the migration.",
+        "ms": 87.29
+    },
+    {
+        "text": "Customer is concerned about a one-time bulk import of historical data. The team ",
+        "ms": 87.71
+    },
+    {
+        "text": "Prepare a SOC 2 summary for InfoSec.",
+        "ms": 88.68
+    },
+    {
+        "text": "The team is focused on a feature request around exporting data. They also mentio",
+        "ms": 87.51
+    },
+    {
+        "text": "Customer is excited about usability concerns raised during the trial. The team i",
+        "ms": 87.06
+    },
+    {
+        "text": "Coordinate an SSO configuration session.",
+        "ms": 87.28
+    },
+    {
+        "text": "The team is focused on the deal is blocked on Q3 budget sign-off. They also ment",
+        "ms": 87.56
+    },
+    {
+        "text": "Customer is concerned about procurement needs an updated quote for approval. The",
+        "ms": 87.22
+    },
+    {
+        "text": "Loop in the executive sponsor for sign-off. Book a follow-up demo for the wider ",
+        "ms": 87.1
+    },
+    {
+        "text": "The team is focused on documenting controls for an upcoming audit.",
+        "ms": 87.1
+    },
+    {
+        "text": "Customer is excited about regulatory requirements in the finance vertical. The t",
+        "ms": 87.04
+    },
+    {
+        "text": "Draft a rollout plan for the next quarter.",
+        "ms": 87.12
+    },
+    {
+        "text": "The team is focused on scheduling end-user training sessions.",
+        "ms": 87.64
+    },
+    {
+        "text": "Customer is concerned about self-serve documentation and onboarding guides. The ",
+        "ms": 87.25
+    },
+    {
+        "text": "Loop in the executive sponsor for sign-off.",
+        "ms": 87.31
+    },
+    {
+        "text": "The team is focused on usability concerns raised during the trial.",
+        "ms": 87.33
+    },
+    {
+        "text": "Customer is excited about positive product feedback from power users. The team i",
+        "ms": 87.43
+    },
+    {
+        "text": "Loop in the executive sponsor for sign-off.",
+        "ms": 87.39
+    },
+    {
+        "text": "The team is focused on a support escalation to the engineering team.",
+        "ms": 87.43
+    },
+    {
+        "text": "Customer is excited about an outage that triggered a priority incident. The team",
+        "ms": 87.49
+    },
+    {
+        "text": "Coordinate an SSO configuration session.",
+        "ms": 86.86
+    },
+    {
+        "text": "The team is focused on self-serve documentation and onboarding guides.",
+        "ms": 87.29
+    },
+    {
+        "text": "Customer is excited about scheduling end-user training sessions. The team is foc",
+        "ms": 87.09
+    },
+    {
+        "text": "Prepare a SOC 2 summary for InfoSec. Send the updated proposal and pricing to pr",
+        "ms": 87.21
+    },
+    {
+        "text": "The team is focused on migrating existing records from a legacy system. They als",
+        "ms": 87.72
+    },
+    {
+        "text": "Customer is concerned about validating data integrity after the migration. The t",
+        "ms": 87.17
+    },
+    {
+        "text": "Coordinate an SSO configuration session. Send the updated proposal and pricing t",
+        "ms": 87.25
+    },
+    {
+        "text": "The team is focused on executive sponsorship from the CTO is secured.",
+        "ms": 87.17
+    },
+    {
+        "text": "Customer is excited about leadership wants a board-ready summary. The team is fo",
+        "ms": 87.46
+    },
+    {
+        "text": "Set up a technical proof-of-concept environment. Prepare a SOC 2 summary for Inf",
+        "ms": 87.29
+    },
+    {
+        "text": "The team is focused on a customer-success plan to drive adoption.",
+        "ms": 87.52
+    },
+    {
+        "text": "Customer is excited about a champion who advocates internally. The team is focus",
+        "ms": 87.07
+    },
+    {
+        "text": "Prepare a SOC 2 summary for InfoSec. Align on success metrics for the first 90 d",
+        "ms": 86.99
+    },
+    {
+        "text": "The team is focused on renewal conversation tied to a multi-year commitment.",
+        "ms": 87.21
+    },
+    {
+        "text": "Customer is excited about renewal conversation tied to a multi-year commitment. ",
+        "ms": 87.26
+    },
+    {
+        "text": "Confirm the migration timeline with their platform owners. Schedule an architect",
+        "ms": 87.19
+    },
+    {
+        "text": "The team is focused on SSO configuration with SAML and SCIM.",
+        "ms": 87.76
+    },
+    {
+        "text": "Customer is concerned about enforcing MFA through the corporate directory. The t",
+        "ms": 87.38
+    },
+    {
+        "text": "Book a follow-up demo for the wider team. Loop in the executive sponsor for sign",
+        "ms": 87.2
+    },
+    {
+        "text": "The team is focused on enablement workshops for the admin team.",
+        "ms": 87.33
+    },
+    {
+        "text": "Customer is excited about scheduling end-user training sessions. The team is foc",
+        "ms": 87.28
+    },
+    {
+        "text": "Loop in the executive sponsor for sign-off. Prepare a SOC 2 summary for InfoSec.",
+        "ms": 87.11
+    },
+    {
+        "text": "The team is focused on procurement needs an updated quote for approval. They als",
+        "ms": 87.22
+    },
+    {
+        "text": "Customer is excited about budget approval is pending with finance. The team is f",
+        "ms": 86.93
+    },
+    {
+        "text": "Book a follow-up demo for the wider team. Loop in the executive sponsor for sign",
+        "ms": 87.12
+    },
+    {
+        "text": "The team is focused on a workaround was provided pending a permanent fix.",
+        "ms": 87.18
+    },
+    {
+        "text": "Customer is excited about the issue recurred after the previous fix. The team is",
+        "ms": 87.61
+    },
+    {
+        "text": "Draft a rollout plan for the next quarter. Schedule an architecture review with ",
+        "ms": 87.14
+    },
+    {
+        "text": "The team is focused on enablement workshops for the admin team. They also mentio",
+        "ms": 87.65
+    },
+    {
+        "text": "Customer is excited about self-serve documentation and onboarding guides. The te",
+        "ms": 88.6
+    },
+    {
+        "text": "Draft a rollout plan for the next quarter. Loop in the executive sponsor for sig",
+        "ms": 87.88
+    },
+    {
+        "text": "The team is focused on measuring time-to-value after launch. They also mentioned",
+        "ms": 87.67
+    },
+    {
+        "text": "Customer is concerned about a customer-success plan to drive adoption. The team ",
+        "ms": 87.17
+    },
+    {
+        "text": "Send the updated proposal and pricing to procurement.",
+        "ms": 86.94
+    },
+    {
+        "text": "The team is focused on a customer-success plan to drive adoption.",
+        "ms": 86.97
+    },
+    {
+        "text": "Customer is concerned about a customer-success plan to drive adoption. The team ",
+        "ms": 87.07
+    },
+    {
+        "text": "Prepare a SOC 2 summary for InfoSec. Book a follow-up demo for the wider team.",
+        "ms": 87.21
+    },
+    {
+        "text": "The team is focused on SSO configuration with SAML and SCIM.",
+        "ms": 87.45
+    },
+    {
+        "text": "Customer is concerned about enforcing MFA through the corporate directory. The t",
+        "ms": 87.27
+    },
+    {
+        "text": "Align on success metrics for the first 90 days.",
+        "ms": 87.1
+    },
+    {
+        "text": "The team is focused on hardening access controls and audit logging. They also me",
+        "ms": 87.34
+    },
+    {
+        "text": "Customer is excited about a security review by the InfoSec team. The team is foc",
+        "ms": 87.22
+    },
+    {
+        "text": "Coordinate an SSO configuration session. Loop in the executive sponsor for sign-",
+        "ms": 87.23
+    },
+    {
+        "text": "The team is focused on usability concerns raised during the trial.",
+        "ms": 87.08
+    },
+    {
+        "text": "Customer is excited about usability concerns raised during the trial. The team i",
+        "ms": 87.19
+    },
+    {
+        "text": "Book a follow-up demo for the wider team. Confirm the migration timeline with th",
+        "ms": 86.93
+    },
+    {
+        "text": "The team is focused on executive sponsorship from the CTO is secured.",
+        "ms": 87.08
+    },
+    {
+        "text": "Customer is concerned about executive sponsorship from the CTO is secured. The t",
+        "ms": 87.18
+    },
+    {
+        "text": "Book a follow-up demo for the wider team.",
+        "ms": 87.16
+    },
+    {
+        "text": "The team is focused on a champion who advocates internally.",
+        "ms": 87.55
+    },
+    {
+        "text": "Customer is concerned about quarterly business reviews to track value. The team ",
+        "ms": 87.24
+    },
+    {
+        "text": "Book a follow-up demo for the wider team.",
+        "ms": 87.14
+    },
+    {
+        "text": "The team is focused on rolling out single sign-on with their identity provider.",
+        "ms": 87.27
+    },
+    {
+        "text": "Customer is concerned about rolling out single sign-on with their identity provi",
+        "ms": 87.31
+    },
+    {
+        "text": "Loop in the executive sponsor for sign-off.",
+        "ms": 87.01
+    },
+    {
+        "text": "The team is focused on requests for deeper reporting and dashboards. They also m",
+        "ms": 87.09
+    },
+    {
+        "text": "Customer is excited about requests for deeper reporting and dashboards. The team",
+        "ms": 86.88
+    },
+    {
+        "text": "Draft a rollout plan for the next quarter. Align on success metrics for the firs",
+        "ms": 86.98
+    },
+    {
+        "text": "The team is focused on a lift-and-shift to a managed cloud environment.",
+        "ms": 87.23
+    },
+    {
+        "text": "Customer is concerned about consolidating on-prem systems into the cloud. The te",
+        "ms": 87.29
+    },
+    {
+        "text": "Loop in the executive sponsor for sign-off.",
+        "ms": 87.33
+    },
+    {
+        "text": "The team is focused on positive product feedback from power users. They also men",
+        "ms": 87.26
+    },
+    {
+        "text": "Customer is concerned about requests for deeper reporting and dashboards. The te",
+        "ms": 87.34
+    },
+    {
+        "text": "Book a follow-up demo for the wider team. Set up a technical proof-of-concept en",
+        "ms": 87.34
+    },
+    {
+        "text": "The team is focused on a customer-success plan to drive adoption. They also ment",
+        "ms": 87.51
+    },
+    {
+        "text": "Customer is concerned about a customer-success plan to drive adoption. The team ",
+        "ms": 87.12
+    },
+    {
+        "text": "Loop in the executive sponsor for sign-off. Prepare a SOC 2 summary for InfoSec.",
+        "ms": 87.23
+    },
+    {
+        "text": "The team is focused on budget approval is pending with finance.",
+        "ms": 86.81
+    },
+    {
+        "text": "Customer is concerned about the deal is blocked on Q3 budget sign-off. The team ",
+        "ms": 86.92
+    },
+    {
+        "text": "Draft a rollout plan for the next quarter.",
+        "ms": 87.07
+    },
+    {
+        "text": "The team is focused on regulatory requirements in the finance vertical.",
+        "ms": 87.19
+    },
+    {
+        "text": "Customer is excited about retention policies for sensitive records. The team is ",
+        "ms": 87.36
+    },
+    {
+        "text": "Send the updated proposal and pricing to procurement.",
+        "ms": 87.16
+    },
+    {
+        "text": "The team is focused on slow query times on a multi-gigabyte database.",
+        "ms": 87.32
+    },
+    {
+        "text": "Customer is concerned about slow query times on a multi-gigabyte database. The t",
+        "ms": 87.2
+    },
+    {
+        "text": "Confirm the migration timeline with their platform owners. Set up a technical pr",
+        "ms": 87.38
+    },
+    {
+        "text": "The team is focused on search latency spikes under heavy load.",
+        "ms": 87.56
+    },
+    {
+        "text": "Customer is concerned about search latency spikes under heavy load. The team is ",
+        "ms": 87.47
+    },
+    {
+        "text": "Schedule an architecture review with the security team. Send the updated proposa",
+        "ms": 87.02
+    },
+    {
+        "text": "The team is focused on users could not sign in after the identity-provider switc",
+        "ms": 86.89
+    },
+    {
+        "text": "Customer is concerned about SSO configuration with SAML and SCIM. The team is fo",
+        "ms": 87.07
+    },
+    {
+        "text": "Schedule an architecture review with the security team.",
+        "ms": 86.99
+    },
+    {
+        "text": "Users report leadership wants a board-ready summary. The team is focused on exec",
+        "ms": 87.6
+    },
+    {
+        "text": "Resolved by addressing executive sponsorship from the CTO is secured.",
+        "ms": 87.25
+    },
+    {
+        "text": "Internal: similar to a prior case involving requests for deeper reporting and da",
+        "ms": 87.37
+    },
+    {
+        "text": "Users report the sponsor is pushing for a faster timeline. The team is focused o",
+        "ms": 87.08
+    },
+    {
+        "text": "Resolved by addressing embedding-based retrieval over their documents.",
+        "ms": 87.17
+    },
+    {
+        "text": "Internal: similar to a prior case involving SSO configuration with SAML and SCIM",
+        "ms": 87.33
+    },
+    {
+        "text": "The customer reports leadership wants a board-ready summary. The team is focused",
+        "ms": 87.19
+    },
+    {
+        "text": "Resolved by addressing optimizing indexing for faster retrieval.",
+        "ms": 86.97
+    },
+    {
+        "text": "Internal: similar to a prior case involving search latency spikes under heavy lo",
+        "ms": 86.88
+    },
+    {
+        "text": "The customer reports procurement needs an updated quote for approval. The team i",
+        "ms": 86.99
+    },
+    {
+        "text": "Resolved by addressing requests for deeper reporting and dashboards.",
+        "ms": 86.88
+    },
+    {
+        "text": "Internal: similar to a prior case involving positive product feedback from power",
+        "ms": 87.18
+    },
+    {
+        "text": "We observed a security review by the InfoSec team. The team is focused on harden",
+        "ms": 87.33
+    },
+    {
+        "text": "Investigation ongoing; a workaround was shared with the customer.",
+        "ms": 87.04
+    },
+    {
+        "text": "Internal: similar to a prior case involving a workaround was provided pending a ",
+        "ms": 87.44
+    },
+    {
+        "text": "We observed evaluating local, in-browser inference. The team is focused on adopt",
+        "ms": 87.26
+    },
+    {
+        "text": "Resolved by addressing adopting AI-assisted semantic search.",
+        "ms": 87.22
+    },
+    {
+        "text": "Internal: similar to a prior case involving SSO configuration with SAML and SCIM",
+        "ms": 87.16
+    },
+    {
+        "text": "The customer reports reducing support volume through training. The team is focus",
+        "ms": 87.29
+    },
+    {
+        "text": "Resolved by addressing enablement workshops for the admin team.",
+        "ms": 86.89
+    },
+    {
+        "text": "Internal: similar to a prior case involving slow query times on a multi-gigabyte",
+        "ms": 87.03
+    },
+    {
+        "text": "The customer reports replacing keyword search with meaning-based search. The tea",
+        "ms": 87.12
+    },
+    {
+        "text": "Investigation ongoing; a workaround was shared with the customer.",
+        "ms": 86.99
+    },
+    {
+        "text": "Internal: similar to a prior case involving a lift-and-shift to a managed cloud ",
+        "ms": 87.39
+    },
+    {
+        "text": "We observed requests for deeper reporting and dashboards. The team is focused on",
+        "ms": 87.49
+    },
+    {
+        "text": "Investigation ongoing; a workaround was shared with the customer.",
+        "ms": 87.14
+    },
+    {
+        "text": "Internal: similar to a prior case involving an outage that triggered a priority ",
+        "ms": 87.19
+    },
+    {
+        "text": "The customer reports requests for deeper reporting and dashboards. The team is f",
+        "ms": 87.14
+    },
+    {
+        "text": "Resolved by addressing an expansion opportunity around the renewal.",
+        "ms": 87.02
+    },
+    {
+        "text": "Internal: similar to a prior case involving hardening access controls and audit ",
+        "ms": 87.58
+    },
+    {
+        "text": "The customer reports validating data integrity after the migration. The team is ",
+        "ms": 86.91
+    },
+    {
+        "text": "Investigation ongoing; a workaround was shared with the customer.",
+        "ms": 86.89
+    },
+    {
+        "text": "Internal: similar to a prior case involving adopting AI-assisted semantic search",
+        "ms": 87.15
+    },
+    {
+        "text": "The customer reports a customer-success plan to drive adoption. The team is focu",
+        "ms": 87.35
+    },
+    {
+        "text": "Resolved by addressing documenting controls for an upcoming audit.",
+        "ms": 87.32
+    },
+    {
+        "text": "Internal: similar to a prior case involving retention policies for sensitive rec",
+        "ms": 87.01
+    },
+    {
+        "text": "The customer reports onboarding thousands of users in the next quarter. The team",
+        "ms": 87.41
+    },
+    {
+        "text": "Investigation ongoing; a workaround was shared with the customer.",
+        "ms": 87.08
+    },
+    {
+        "text": "Internal: similar to a prior case involving API authentication with rotating tok",
+        "ms": 87.38
+    },
+    {
+        "text": "Users report slow query times on a multi-gigabyte database. The team is focused ",
+        "ms": 87.18
+    },
+    {
+        "text": "Resolved by addressing search latency spikes under heavy load.",
+        "ms": 86.85
+    },
+    {
+        "text": "Internal: similar to a prior case involving consolidating on-prem systems into t",
+        "ms": 87.64
+    },
+    {
+        "text": "We observed an expansion opportunity around the renewal. The team is focused on ",
+        "ms": 87.97
+    },
+    {
+        "text": "Investigation ongoing; a workaround was shared with the customer.",
+        "ms": 87.46
+    },
+    {
+        "text": "Internal: similar to a prior case involving leadership wants a board-ready summa",
+        "ms": 87.3
+    },
+    {
+        "text": "We observed users could not sign in after the identity-provider switch. The team",
+        "ms": 87.72
+    },
+    {
+        "text": "Resolved by addressing scaling adoption company-wide after the pilot.",
+        "ms": 87.14
+    },
+    {
+        "text": "Internal: similar to a prior case involving budget approval is pending with fina",
+        "ms": 87.24
+    },
+    {
+        "text": "Users report the sponsor is pushing for a faster timeline. The team is focused o",
+        "ms": 87.29
+    },
+    {
+        "text": "Investigation ongoing; a workaround was shared with the customer.",
+        "ms": 87.23
+    },
+    {
+        "text": "Internal: similar to a prior case involving API authentication with rotating tok",
+        "ms": 87.26
+    },
+    {
+        "text": "The customer reports leadership wants a board-ready summary. The team is focused",
+        "ms": 87.12
+    },
+    {
+        "text": "Resolved by addressing executive sponsorship from the CTO is secured.",
+        "ms": 87.32
+    },
+    {
+        "text": "Internal: similar to a prior case involving users could not sign in after the id",
+        "ms": 86.91
+    },
+    {
+        "text": "Users report a phased enterprise rollout across business units. The team is focu",
+        "ms": 87.06
+    },
+    {
+        "text": "Resolved by addressing expanding the deployment to additional teams.",
+        "ms": 87.03
+    },
+    {
+        "text": "Internal: similar to a prior case involving a phased enterprise rollout across b",
+        "ms": 87.29
+    },
+    {
+        "text": "Users report evaluating local, in-browser inference. The team is focused on embe",
+        "ms": 87.26
+    },
+    {
+        "text": "Resolved by addressing evaluating local, in-browser inference.",
+        "ms": 87.13
+    },
+    {
+        "text": "Internal: similar to a prior case involving the deal is blocked on Q3 budget sig",
+        "ms": 87.3
+    },
+    {
+        "text": "Users report SSO configuration with SAML and SCIM. The team is focused on SSO co",
+        "ms": 87.61
+    },
+    {
+        "text": "Resolved by addressing requests for deeper reporting and dashboards.",
+        "ms": 87.48
+    },
+    {
+        "text": "Internal: similar to a prior case involving tuning performance for large dataset",
+        "ms": 87.24
+    },
+    {
+        "text": "Users report pricing was renegotiated to fit the annual budget. The team is focu",
+        "ms": 87.26
+    },
+    {
+        "text": "Resolved by addressing the deal is blocked on Q3 budget sign-off.",
+        "ms": 87.04
+    },
+    {
+        "text": "Internal: similar to a prior case involving optimizing indexing for faster retri",
+        "ms": 86.94
+    },
+    {
+        "text": "The customer reports a workaround was provided pending a permanent fix. The team",
+        "ms": 87.2
+    },
+    {
+        "text": "Resolved by addressing the issue recurred after the previous fix.",
+        "ms": 87.2
+    },
+    {
+        "text": "Internal: similar to a prior case involving rate limits affecting their integrat",
+        "ms": 87.65
+    },
+    {
+        "text": "Users report renewal is at risk due to low usage. The team is focused on renewal",
+        "ms": 87.38
+    },
+    {
+        "text": "Resolved by addressing the customer is evaluating competitors before renewing.",
+        "ms": 87.63
+    },
+    {
+        "text": "Internal: similar to a prior case involving requests for deeper reporting and da",
+        "ms": 87.22
+    },
+    {
+        "text": "We observed usability concerns raised during the trial. The team is focused on u",
+        "ms": 87.41
+    },
+    {
+        "text": "Investigation ongoing; a workaround was shared with the customer.",
+        "ms": 87.12
+    },
+    {
+        "text": "Internal: similar to a prior case involving the sponsor is pushing for a faster ",
+        "ms": 87.19
+    },
+    {
+        "text": "Users report rate limits affecting their integration. The team is focused on int",
+        "ms": 87.08
+    },
+    {
+        "text": "Resolved by addressing API authentication with rotating tokens.",
+        "ms": 86.94
+    },
+    {
+        "text": "Internal: similar to a prior case involving enablement workshops for the admin t",
+        "ms": 87.03
+    },
+    {
+        "text": "We observed slow query times on a multi-gigabyte database. The team is focused o",
+        "ms": 87.4
+    },
+    {
+        "text": "Resolved by addressing budget approval is pending with finance.",
+        "ms": 87.46
+    },
+    {
+        "text": "Internal: similar to a prior case involving API authentication with rotating tok",
+        "ms": 87.24
+    },
+    {
+        "text": "Users report a champion who advocates internally. The team is focused on a custo",
+        "ms": 87.31
+    },
+    {
+        "text": "Resolved by addressing a lift-and-shift to a managed cloud environment.",
+        "ms": 87.14
+    },
+    {
+        "text": "Internal: similar to a prior case involving enforcing MFA through the corporate ",
+        "ms": 87.28
+    },
+    {
+        "text": "We observed budget approval is pending with finance. The team is focused on proc",
+        "ms": 87.35
+    },
+    {
+        "text": "Resolved by addressing rolling out single sign-on with their identity provider.",
+        "ms": 87.26
+    },
+    {
+        "text": "Internal: similar to a prior case involving search latency spikes under heavy lo",
+        "ms": 87.11
+    },
+    {
+        "text": "We observed an expansion opportunity around the renewal. The team is focused on ",
+        "ms": 87
+    },
+    {
+        "text": "Resolved by addressing leadership wants a board-ready summary.",
+        "ms": 87.15
+    },
+    {
+        "text": "Internal: similar to a prior case involving expanding the deployment to addition",
+        "ms": 87.07
+    },
+    {
+        "text": "We observed expanding the deployment to additional teams. The team is focused on",
+        "ms": 88.09
+    },
+    {
+        "text": "Resolved by addressing expanding the deployment to additional teams.",
+        "ms": 87.22
+    },
+    {
+        "text": "Internal: similar to a prior case involving scheduling end-user training session",
+        "ms": 87.21
+    },
+    {
+        "text": "The customer reports passing a SOC 2 and penetration-testing audit. The team is ",
+        "ms": 87.21
+    },
+    {
+        "text": "Resolved by addressing onboarding thousands of users in the next quarter.",
+        "ms": 87.25
+    },
+    {
+        "text": "Internal: similar to a prior case involving a one-time bulk import of historical",
+        "ms": 87.37
+    },
+    {
+        "text": "Users report scheduling end-user training sessions. The team is focused on reduc",
+        "ms": 87.29
+    },
+    {
+        "text": "Resolved by addressing the CFO is championing this initiative internally.",
+        "ms": 87.32
+    },
+    {
+        "text": "Internal: similar to a prior case involving search latency spikes under heavy lo",
+        "ms": 86.92
+    },
+    {
+        "text": "The customer reports a workaround was provided pending a permanent fix. The team",
+        "ms": 87.04
+    },
+    {
+        "text": "Investigation ongoing; a workaround was shared with the customer.",
+        "ms": 87.19
+    },
+    {
+        "text": "Internal: similar to a prior case involving reducing support volume through trai",
+        "ms": 87.32
+    },
+    {
+        "text": "The customer reports usability concerns raised during the trial. The team is foc",
+        "ms": 87.56
+    },
+    {
+        "text": "Investigation ongoing; a workaround was shared with the customer.",
+        "ms": 87.31
+    },
+    {
+        "text": "Internal: similar to a prior case involving rolling out single sign-on with thei",
+        "ms": 87.1
+    },
+    {
+        "text": "We observed usability concerns raised during the trial. The team is focused on r",
+        "ms": 87.29
+    },
+    {
+        "text": "Investigation ongoing; a workaround was shared with the customer.",
+        "ms": 87.17
+    },
+    {
+        "text": "Internal: similar to a prior case involving migrating existing records from a le",
+        "ms": 87.33
+    },
+    {
+        "text": "Users report budget approval is pending with finance. The team is focused on pro",
+        "ms": 87.37
+    },
+    {
+        "text": "Resolved by addressing quarterly business reviews to track value.",
+        "ms": 87.38
+    },
+    {
+        "text": "Internal: similar to a prior case involving a workaround was provided pending a ",
+        "ms": 87.12
+    },
+    {
+        "text": "The customer reports renewal is at risk due to low usage. The team is focused on",
+        "ms": 87.17
+    },
+    {
+        "text": "Resolved by addressing a support escalation to the engineering team.",
+        "ms": 87.12
+    },
+    {
+        "text": "Internal: similar to a prior case involving integrating through the public REST ",
+        "ms": 87.51
+    },
+    {
+        "text": "The customer reports concerns about downtime during cloud migration. The team is",
+        "ms": 87.63
+    },
+    {
+        "text": "Resolved by addressing requests for deeper reporting and dashboards.",
+        "ms": 87.44
+    },
+    {
+        "text": "Internal: similar to a prior case involving a customer-success plan to drive ado",
+        "ms": 87.23
+    },
+    {
+        "text": "The customer reports slow query times on a multi-gigabyte database. The team is ",
+        "ms": 87.54
+    },
+    {
+        "text": "Investigation ongoing; a workaround was shared with the customer.",
+        "ms": 87.03
+    },
+    {
+        "text": "Internal: similar to a prior case involving budget approval is pending with fina",
+        "ms": 87.07
+    },
+    {
+        "text": "We observed documenting controls for an upcoming audit. The team is focused on r",
+        "ms": 87.14
+    },
+    {
+        "text": "Resolved by addressing documenting controls for an upcoming audit.",
+        "ms": 87.03
+    },
+    {
+        "text": "Internal: similar to a prior case involving consolidating on-prem systems into t",
+        "ms": 87.06
+    },
+    {
+        "text": "The customer reports a security review by the InfoSec team. The team is focused ",
+        "ms": 87.25
+    },
+    {
+        "text": "Investigation ongoing; a workaround was shared with the customer.",
+        "ms": 88.05
+    },
+    {
+        "text": "Internal: similar to a prior case involving webhooks for near real-time synchron",
+        "ms": 87.39
+    },
+    {
+        "text": "We observed executive sponsorship from the CTO is secured. The team is focused o",
+        "ms": 87.58
+    },
+    {
+        "text": "Resolved by addressing expanding the deployment to additional teams.",
+        "ms": 86.99
+    },
+    {
+        "text": "Internal: similar to a prior case involving integrating through the public REST ",
+        "ms": 87.19
+    },
+    {
+        "text": "Users report concerns about downtime during cloud migration. The team is focused",
+        "ms": 87.34
+    },
+    {
+        "text": "Investigation ongoing; a workaround was shared with the customer.",
+        "ms": 86.86
+    },
+    {
+        "text": "Internal: similar to a prior case involving regulatory requirements in the finan",
+        "ms": 86.81
+    },
+    {
+        "text": "Users report executive sponsorship from the CTO is secured. The team is focused ",
+        "ms": 87.26
+    },
+    {
+        "text": "Resolved by addressing adopting AI-assisted semantic search.",
+        "ms": 87.07
+    },
+    {
+        "text": "Internal: similar to a prior case involving expanding the deployment to addition",
+        "ms": 87.28
+    },
+    {
+        "text": "The customer reports API authentication with rotating tokens. The team is focuse",
+        "ms": 87.57
+    },
+    {
+        "text": "Resolved by addressing pricing was renegotiated to fit the annual budget.",
+        "ms": 87.09
+    },
+    {
+        "text": "Internal: similar to a prior case involving an expansion opportunity around the ",
+        "ms": 87.19
+    },
+    {
+        "text": "We observed search latency spikes under heavy load. The team is focused on slow ",
+        "ms": 87.3
+    },
+    {
+        "text": "Resolved by addressing a lift-and-shift to a managed cloud environment.",
+        "ms": 87.15
+    },
+    {
+        "text": "Internal: similar to a prior case involving migrating their workloads to the clo",
+        "ms": 87.22
+    },
+    {
+        "text": "We observed API authentication with rotating tokens. The team is focused on API ",
+        "ms": 87
+    },
+    {
+        "text": "Resolved by addressing API authentication with rotating tokens.",
+        "ms": 87.23
+    },
+    {
+        "text": "Internal: similar to a prior case involving a phased enterprise rollout across b",
+        "ms": 86.76
+    },
+    {
+        "text": "Users report API authentication with rotating tokens. The team is focused on web",
+        "ms": 87.25
+    },
+    {
+        "text": "Resolved by addressing webhooks for near real-time synchronization.",
+        "ms": 87.28
+    },
+    {
+        "text": "Internal: similar to a prior case involving an expansion opportunity around the ",
+        "ms": 87.42
+    },
+    {
+        "text": "We observed SSO configuration with SAML and SCIM. The team is focused on enforci",
+        "ms": 87.57
+    },
+    {
+        "text": "Resolved by addressing a lift-and-shift to a managed cloud environment.",
+        "ms": 87.28
+    },
+    {
+        "text": "Internal: similar to a prior case involving integrating through the public REST ",
+        "ms": 87.3
+    },
+    {
+        "text": "Users report the issue recurred after the previous fix. The team is focused on a",
+        "ms": 87.58
+    },
+    {
+        "text": "Investigation ongoing; a workaround was shared with the customer.",
+        "ms": 87.44
+    },
+    {
+        "text": "Internal: similar to a prior case involving enforcing MFA through the corporate ",
+        "ms": 87.23
+    },
+    {
+        "text": "The customer reports the issue recurred after the previous fix. The team is focu",
+        "ms": 88.02
+    },
+    {
+        "text": "Resolved by addressing a workaround was provided pending a permanent fix.",
+        "ms": 86.79
+    },
+    {
+        "text": "Internal: similar to a prior case involving slow query times on a multi-gigabyte",
+        "ms": 86.99
+    },
+    {
+        "text": "We observed data residency and encryption requirements. The team is focused on a",
+        "ms": 87.33
+    },
+    {
+        "text": "Resolved by addressing SSO configuration with SAML and SCIM.",
+        "ms": 87.23
+    },
+    {
+        "text": "Internal: similar to a prior case involving hardening access controls and audit ",
+        "ms": 87.59
+    },
+    {
+        "text": "Users report the deal is blocked on Q3 budget sign-off. The team is focused on p",
+        "ms": 87.42
+    },
+    {
+        "text": "Resolved by addressing leadership wants a board-ready summary.",
+        "ms": 87.17
+    },
+    {
+        "text": "Internal: similar to a prior case involving data residency and encryption requir",
+        "ms": 87.15
+    },
+    {
+        "text": "Users report evaluating local, in-browser inference. The team is focused on adop",
+        "ms": 87.5
+    },
+    {
+        "text": "Resolved by addressing a security review by the InfoSec team.",
+        "ms": 87.21
+    },
+    {
+        "text": "Internal: similar to a prior case involving quarterly business reviews to track ",
+        "ms": 87.26
+    },
+    {
+        "text": "The customer reports data residency and encryption requirements. The team is foc",
+        "ms": 87.07
+    },
+    {
+        "text": "Resolved by addressing a security review by the InfoSec team.",
+        "ms": 86.93
+    },
+    {
+        "text": "Internal: similar to a prior case involving concerns about downtime during cloud",
+        "ms": 86.96
+    },
+    {
+        "text": "The customer reports consolidating on-prem systems into the cloud. The team is f",
+        "ms": 87.44
+    },
+    {
+        "text": "Resolved by addressing usability concerns raised during the trial.",
+        "ms": 87.67
+    },
+    {
+        "text": "Internal: similar to a prior case involving positive product feedback from power",
+        "ms": 87.32
+    },
+    {
+        "text": "Users report pricing was renegotiated to fit the annual budget. The team is focu",
+        "ms": 87.39
+    },
+    {
+        "text": "Investigation ongoing; a workaround was shared with the customer.",
+        "ms": 87.42
+    },
+    {
+        "text": "Internal: similar to a prior case involving pricing was renegotiated to fit the ",
+        "ms": 87.19
+    },
+    {
+        "text": "We observed data residency and encryption requirements. The team is focused on a",
+        "ms": 87.4
+    },
+    {
+        "text": "Resolved by addressing data residency and encryption requirements.",
+        "ms": 86.99
+    },
+    {
+        "text": "Internal: similar to a prior case involving migrating existing records from a le",
+        "ms": 87.12
+    },
+    {
+        "text": "We observed enforcing MFA through the corporate directory. The team is focused o",
+        "ms": 86.98
+    },
+    {
+        "text": "Investigation ongoing; a workaround was shared with the customer.",
+        "ms": 86.91
+    },
+    {
+        "text": "Internal: similar to a prior case involving validating data integrity after the ",
+        "ms": 87.18
+    },
+    {
+        "text": "We observed regulatory requirements in the finance vertical. The team is focused",
+        "ms": 87.78
+    },
+    {
+        "text": "Resolved by addressing reducing support volume through training.",
+        "ms": 87.41
+    },
+    {
+        "text": "Internal: similar to a prior case involving retention policies for sensitive rec",
+        "ms": 87.28
+    },
+    {
+        "text": "We observed pricing was renegotiated to fit the annual budget. The team is focus",
+        "ms": 87.28
+    },
+    {
+        "text": "Investigation ongoing; a workaround was shared with the customer.",
+        "ms": 87.25
+    },
+    {
+        "text": "Internal: similar to a prior case involving users could not sign in after the id",
+        "ms": 87.32
+    },
+    {
+        "text": "Users report a lift-and-shift to a managed cloud environment. The team is focuse",
+        "ms": 87.38
+    },
+    {
+        "text": "Resolved by addressing the sponsor is pushing for a faster timeline.",
+        "ms": 87.05
+    },
+    {
+        "text": "Internal: similar to a prior case involving evaluating local, in-browser inferen",
+        "ms": 87
+    },
+    {
+        "text": "The customer reports migrating their workloads to the cloud. The team is focused",
+        "ms": 87.21
+    },
+    {
+        "text": "Resolved by addressing concerns about downtime during cloud migration.",
+        "ms": 87.14
+    },
+    {
+        "text": "Internal: similar to a prior case involving tuning performance for large dataset",
+        "ms": 87.26
+    },
+    {
+        "text": "Users report an expansion opportunity around the renewal. The team is focused on",
+        "ms": 88.02
+    },
+    {
+        "text": "Resolved by addressing hardening access controls and audit logging.",
+        "ms": 87.4
+    },
+    {
+        "text": "Internal: similar to a prior case involving usability concerns raised during the",
+        "ms": 87.17
+    },
+    {
+        "text": "We observed rate limits affecting their integration. The team is focused on inte",
+        "ms": 87.37
+    },
+    {
+        "text": "Resolved by addressing API authentication with rotating tokens.",
+        "ms": 87.14
+    },
+    {
+        "text": "Internal: similar to a prior case involving procurement needs an updated quote f",
+        "ms": 87.15
+    },
+    {
+        "text": "The customer reports replacing keyword search with meaning-based search. The tea",
+        "ms": 87.35
+    },
+    {
+        "text": "Investigation ongoing; a workaround was shared with the customer.",
+        "ms": 86.82
+    },
+    {
+        "text": "Internal: similar to a prior case involving optimizing indexing for faster retri",
+        "ms": 87.16
+    },
+    {
+        "text": "We observed tuning performance for large datasets. The team is focused on tuning",
+        "ms": 87.09
+    },
+    {
+        "text": "Resolved by addressing evaluating local, in-browser inference.",
+        "ms": 87.13
+    },
+    {
+        "text": "Internal: similar to a prior case involving meeting HIPAA and GDPR compliance ob",
+        "ms": 87.46
+    },
+    {
+        "text": "We observed usability concerns raised during the trial. The team is focused on a",
+        "ms": 87.68
+    },
+    {
+        "text": "Resolved by addressing a feature request around exporting data.",
+        "ms": 87.47
+    },
+    {
+        "text": "Internal: similar to a prior case involving a customer-success plan to drive ado",
+        "ms": 87.25
+    },
+    {
+        "text": "We observed scheduling end-user training sessions. The team is focused on schedu",
+        "ms": 87.42
+    },
+    {
+        "text": "Resolved by addressing enforcing MFA through the corporate directory.",
+        "ms": 86.84
+    },
+    {
+        "text": "Internal: similar to a prior case involving enforcing MFA through the corporate ",
+        "ms": 87.36
+    },
+    {
+        "text": "We observed requests for deeper reporting and dashboards. The team is focused on",
+        "ms": 87.15
+    },
+    {
+        "text": "Investigation ongoing; a workaround was shared with the customer.",
+        "ms": 86.74
+    },
+    {
+        "text": "Internal: similar to a prior case involving measuring time-to-value after launch",
+        "ms": 86.91
+    },
+    {
+        "text": "Users report an expansion opportunity around the renewal. The team is focused on",
+        "ms": 87.28
+    },
+    {
+        "text": "Resolved by addressing integrating through the public REST API.",
+        "ms": 87.37
+    },
+    {
+        "text": "Internal: similar to a prior case involving an outage that triggered a priority ",
+        "ms": 87.04
+    },
+    {
+        "text": "We observed self-serve documentation and onboarding guides. The team is focused ",
+        "ms": 87.33
+    },
+    {
+        "text": "Resolved by addressing reducing support volume through training.",
+        "ms": 87.05
+    },
+    {
+        "text": "Internal: similar to a prior case involving an outage that triggered a priority ",
+        "ms": 87.2
+    },
+    {
+        "text": "We observed the deal is blocked on Q3 budget sign-off. The team is focused on pr",
+        "ms": 87.33
+    },
+    {
+        "text": "Resolved by addressing the CFO is championing this initiative internally.",
+        "ms": 87.17
+    },
+    {
+        "text": "Internal: similar to a prior case involving search latency spikes under heavy lo",
+        "ms": 87.02
+    },
+    {
+        "text": "The customer reports reducing support volume through training. The team is focus",
+        "ms": 87.18
+    },
+    {
+        "text": "Investigation ongoing; a workaround was shared with the customer.",
+        "ms": 86.94
+    },
+    {
+        "text": "Internal: similar to a prior case involving a security review by the InfoSec tea",
+        "ms": 87.14
+    },
+    {
+        "text": "The customer reports a phased enterprise rollout across business units. The team",
+        "ms": 89.84
+    },
+    {
+        "text": "Resolved by addressing scaling adoption company-wide after the pilot.",
+        "ms": 87.25
+    },
+    {
+        "text": "Internal: similar to a prior case involving the issue recurred after the previou",
+        "ms": 87.47
+    },
+    {
+        "text": "Users report scaling adoption company-wide after the pilot. The team is focused ",
+        "ms": 87.62
+    },
+    {
+        "text": "Resolved by addressing documenting controls for an upcoming audit.",
+        "ms": 87.28
+    },
+    {
+        "text": "Internal: similar to a prior case involving regulatory requirements in the finan",
+        "ms": 87.13
+    },
+    {
+        "text": "The customer reports evaluating local, in-browser inference. The team is focused",
+        "ms": 87.03
+    },
+    {
+        "text": "Resolved by addressing API authentication with rotating tokens.",
+        "ms": 86.65
+    },
+    {
+        "text": "Internal: similar to a prior case involving pricing was renegotiated to fit the ",
+        "ms": 86.91
+    },
+    {
+        "text": "The customer reports slow query times on a multi-gigabyte database. The team is ",
+        "ms": 87.29
+    },
+    {
+        "text": "Investigation ongoing; a workaround was shared with the customer.",
+        "ms": 87.17
+    },
+    {
+        "text": "Internal: similar to a prior case involving users could not sign in after the id",
+        "ms": 87.61
+    },
+    {
+        "text": "The customer reports hardening access controls and audit logging. The team is fo",
+        "ms": 87.25
+    },
+    {
+        "text": "Investigation ongoing; a workaround was shared with the customer.",
+        "ms": 87.13
+    },
+    {
+        "text": "Internal: similar to a prior case involving procurement needs an updated quote f",
+        "ms": 87.17
+    },
+    {
+        "text": "Users report scheduling end-user training sessions. The team is focused on sched",
+        "ms": 87.34
+    },
+    {
+        "text": "Resolved by addressing reducing support volume through training.",
+        "ms": 87.17
+    },
+    {
+        "text": "Internal: similar to a prior case involving concerns about downtime during cloud",
+        "ms": 87.35
+    },
+    {
+        "text": "Users report renewal conversation tied to a multi-year commitment. The team is f",
+        "ms": 87.23
+    },
+    {
+        "text": "Resolved by addressing self-serve documentation and onboarding guides.",
+        "ms": 86.74
+    },
+    {
+        "text": "Internal: similar to a prior case involving the issue recurred after the previou",
+        "ms": 87.01
+    },
+    {
+        "text": "The customer reports data residency and encryption requirements. The team is foc",
+        "ms": 87.3
+    },
+    {
+        "text": "Resolved by addressing passing a SOC 2 and penetration-testing audit.",
+        "ms": 87.15
+    },
+    {
+        "text": "Internal: similar to a prior case involving consolidating on-prem systems into t",
+        "ms": 87.53
+    },
+    {
+        "text": "We observed adopting AI-assisted semantic search. The team is focused on replaci",
+        "ms": 87.31
+    },
+    {
+        "text": "Resolved by addressing positive product feedback from power users.",
+        "ms": 87.17
+    },
+    {
+        "text": "Internal: similar to a prior case involving the issue recurred after the previou",
+        "ms": 87.32
+    },
+    {
+        "text": "The customer reports the CFO is championing this initiative internally. The team",
+        "ms": 87.56
+    },
+    {
+        "text": "Investigation ongoing; a workaround was shared with the customer.",
+        "ms": 87.38
+    },
+    {
+        "text": "Internal: similar to a prior case involving meeting HIPAA and GDPR compliance ob",
+        "ms": 87.2
+    },
+    {
+        "text": "The customer reports a lift-and-shift to a managed cloud environment. The team i",
+        "ms": 87.02
+    },
+    {
+        "text": "Resolved by addressing regulatory requirements in the finance vertical.",
+        "ms": 86.95
+    },
+    {
+        "text": "Internal: similar to a prior case involving a customer-success plan to drive ado",
+        "ms": 87.04
+    },
+    {
+        "text": "We observed onboarding thousands of users in the next quarter. The team is focus",
+        "ms": 87.38
+    },
+    {
+        "text": "Resolved by addressing expanding the deployment to additional teams.",
+        "ms": 87.35
+    },
+    {
+        "text": "Internal: similar to a prior case involving the customer is evaluating competito",
+        "ms": 87.06
+    },
+    {
+        "text": "The customer reports evaluating local, in-browser inference. The team is focused",
+        "ms": 87.4
+    },
+    {
+        "text": "Resolved by addressing quarterly business reviews to track value.",
+        "ms": 87.03
+    },
+    {
+        "text": "Internal: similar to a prior case involving hardening access controls and audit ",
+        "ms": 87.36
+    },
+    {
+        "text": "We observed quarterly business reviews to track value. The team is focused on me",
+        "ms": 87.44
+    },
+    {
+        "text": "Investigation ongoing; a workaround was shared with the customer.",
+        "ms": 87.37
+    },
+    {
+        "text": "Internal: similar to a prior case involving scaling adoption company-wide after ",
+        "ms": 86.81
+    },
+    {
+        "text": "Users report SSO configuration with SAML and SCIM. The team is focused on enforc",
+        "ms": 86.94
+    },
+    {
+        "text": "Resolved by addressing rolling out single sign-on with their identity provider.",
+        "ms": 86.88
+    },
+    {
+        "text": "Internal: similar to a prior case involving optimizing indexing for faster retri",
+        "ms": 87.16
+    },
+    {
+        "text": "We observed leadership wants a board-ready summary. The team is focused on execu",
+        "ms": 87.41
+    },
+    {
+        "text": "Resolved by addressing the CFO is championing this initiative internally.",
+        "ms": 87.1
+    },
+    {
+        "text": "Internal: similar to a prior case involving the customer is evaluating competito",
+        "ms": 87.11
+    },
+    {
+        "text": "The customer reports reducing support volume through training. The team is focus",
+        "ms": 87.12
+    },
+    {
+        "text": "Resolved by addressing embedding-based retrieval over their documents.",
+        "ms": 87.38
+    },
+    {
+        "text": "Internal: similar to a prior case involving embedding-based retrieval over their",
+        "ms": 87.22
+    },
+    {
+        "text": "The customer reports meeting HIPAA and GDPR compliance obligations. The team is ",
+        "ms": 87.44
+    },
+    {
+        "text": "Resolved by addressing meeting HIPAA and GDPR compliance obligations.",
+        "ms": 87.21
+    },
+    {
+        "text": "Internal: similar to a prior case involving quarterly business reviews to track ",
+        "ms": 86.87
+    },
+    {
+        "text": "The customer reports renewal conversation tied to a multi-year commitment. The t",
+        "ms": 87.18
+    },
+    {
+        "text": "Resolved by addressing renewal is at risk due to low usage.",
+        "ms": 87.2
+    },
+    {
+        "text": "Internal: similar to a prior case involving the customer is evaluating competito",
+        "ms": 87.57
+    },
+    {
+        "text": "The customer reports quarterly business reviews to track value. The team is focu",
+        "ms": 87.43
+    },
+    {
+        "text": "Resolved by addressing concerns about downtime during cloud migration.",
+        "ms": 87.52
+    },
+    {
+        "text": "Internal: similar to a prior case involving tuning performance for large dataset",
+        "ms": 87.19
+    },
+    {
+        "text": "We observed positive product feedback from power users. The team is focused on a",
+        "ms": 87.32
+    },
+    {
+        "text": "Resolved by addressing positive product feedback from power users.",
+        "ms": 87.32
+    },
+    {
+        "text": "Internal: similar to a prior case involving renewal is at risk due to low usage.",
+        "ms": 87.18
+    },
+    {
+        "text": "Users report a phased enterprise rollout across business units. The team is focu",
+        "ms": 87.29
+    },
+    {
+        "text": "Resolved by addressing an outage that triggered a priority incident.",
+        "ms": 87.03
+    },
+    {
+        "text": "Internal: similar to a prior case involving meeting HIPAA and GDPR compliance ob",
+        "ms": 86.97
+    },
+    {
+        "text": "Users report a feature request around exporting data. The team is focused on usa",
+        "ms": 87.45
+    },
+    {
+        "text": "Resolved by addressing positive product feedback from power users.",
+        "ms": 87.26
+    },
+    {
+        "text": "Internal: similar to a prior case involving positive product feedback from power",
+        "ms": 87.5
+    },
+    {
+        "text": "The customer reports the customer is evaluating competitors before renewing. The",
+        "ms": 87.64
+    },
+    {
+        "text": "Resolved by addressing procurement needs an updated quote for approval.",
+        "ms": 88.27
+    },
+    {
+        "text": "Internal: similar to a prior case involving optimizing indexing for faster retri",
+        "ms": 87.27
+    },
+    {
+        "text": "The customer reports concerns about downtime during cloud migration. The team is",
+        "ms": 87.53
+    },
+    {
+        "text": "Resolved by addressing migrating their workloads to the cloud.",
+        "ms": 87.13
+    },
+    {
+        "text": "Internal: similar to a prior case involving measuring time-to-value after launch",
+        "ms": 87.18
+    },
+    {
+        "text": "The customer reports onboarding thousands of users in the next quarter. The team",
+        "ms": 87.24
+    },
+    {
+        "text": "Resolved by addressing self-serve documentation and onboarding guides.",
+        "ms": 86.97
+    },
+    {
+        "text": "Internal: similar to a prior case involving renewal is at risk due to low usage.",
+        "ms": 87.19
+    },
+    {
+        "text": "We observed rolling out single sign-on with their identity provider. The team is",
+        "ms": 87.24
+    },
+    {
+        "text": "Resolved by addressing users could not sign in after the identity-provider switc",
+        "ms": 87.35
+    },
+    {
+        "text": "Internal: similar to a prior case involving adopting AI-assisted semantic search",
+        "ms": 87.07
+    },
+    {
+        "text": "Users report budget approval is pending with finance. The team is focused on the",
+        "ms": 87.49
+    },
+    {
+        "text": "Investigation ongoing; a workaround was shared with the customer.",
+        "ms": 87.11
+    },
+    {
+        "text": "Internal: similar to a prior case involving evaluating local, in-browser inferen",
+        "ms": 87.14
+    },
+    {
+        "text": "Users report renewal is at risk due to low usage. The team is focused on the cus",
+        "ms": 87.31
+    },
+    {
+        "text": "Investigation ongoing; a workaround was shared with the customer.",
+        "ms": 87.14
+    },
+    {
+        "text": "Internal: similar to a prior case involving evaluating local, in-browser inferen",
+        "ms": 87.12
+    },
+    {
+        "text": "The customer reports evaluating local, in-browser inference. The team is focused",
+        "ms": 87.29
+    },
+    {
+        "text": "Investigation ongoing; a workaround was shared with the customer.",
+        "ms": 87.09
+    },
+    {
+        "text": "Internal: similar to a prior case involving rolling out single sign-on with thei",
+        "ms": 87.28
+    },
+    {
+        "text": "The customer reports a lift-and-shift to a managed cloud environment. The team i",
+        "ms": 87.58
+    },
+    {
+        "text": "Resolved by addressing meeting HIPAA and GDPR compliance obligations.",
+        "ms": 87.25
+    },
+    {
+        "text": "Internal: similar to a prior case involving retention policies for sensitive rec",
+        "ms": 87.29
+    },
+    {
+        "text": "Users report users could not sign in after the identity-provider switch. The tea",
+        "ms": 87.34
+    },
+    {
+        "text": "Resolved by addressing users could not sign in after the identity-provider switc",
+        "ms": 87.3
+    },
+    {
+        "text": "Internal: similar to a prior case involving scaling adoption company-wide after ",
+        "ms": 87.26
+    },
+    {
+        "text": "We observed positive product feedback from power users. The team is focused on p",
+        "ms": 87.35
+    },
+    {
+        "text": "Investigation ongoing; a workaround was shared with the customer.",
+        "ms": 86.95
+    },
+    {
+        "text": "Internal: similar to a prior case involving search latency spikes under heavy lo",
+        "ms": 86.9
+    },
+    {
+        "text": "The customer reports mapping fields during the data migration. The team is focus",
+        "ms": 87.72
+    },
+    {
+        "text": "Resolved by addressing validating data integrity after the migration.",
+        "ms": 87.17
+    },
+    {
+        "text": "Internal: similar to a prior case involving meeting HIPAA and GDPR compliance ob",
+        "ms": 87.39
+    },
+    {
+        "text": "We observed expanding the deployment to additional teams. The team is focused on",
+        "ms": 87.65
+    },
+    {
+        "text": "Investigation ongoing; a workaround was shared with the customer.",
+        "ms": 87.35
+    },
+    {
+        "text": "Internal: similar to a prior case involving consolidating on-prem systems into t",
+        "ms": 87.14
+    },
+    {
+        "text": "The customer reports validating data integrity after the migration. The team is ",
+        "ms": 87.94
+    },
+    {
+        "text": "Resolved by addressing API authentication with rotating tokens.",
+        "ms": 87.33
+    },
+    {
+        "text": "Internal: similar to a prior case involving a lift-and-shift to a managed cloud ",
+        "ms": 87.33
+    },
+    {
+        "text": "The customer reports documenting controls for an upcoming audit. The team is foc",
+        "ms": 87.32
+    },
+    {
+        "text": "Resolved by addressing an expansion opportunity around the renewal.",
+        "ms": 86.88
+    },
+    {
+        "text": "Internal: similar to a prior case involving embedding-based retrieval over their",
+        "ms": 86.98
+    },
+    {
+        "text": "Users report mapping fields during the data migration. The team is focused on va",
+        "ms": 87.45
+    },
+    {
+        "text": "Resolved by addressing mapping fields during the data migration.",
+        "ms": 87.22
+    },
+    {
+        "text": "Internal: similar to a prior case involving quarterly business reviews to track ",
+        "ms": 87.44
+    },
+    {
+        "text": "The customer reports self-serve documentation and onboarding guides. The team is",
+        "ms": 87.53
+    },
+    {
+        "text": "Resolved by addressing quarterly business reviews to track value.",
+        "ms": 87.27
+    },
+    {
+        "text": "Internal: similar to a prior case involving quarterly business reviews to track ",
+        "ms": 87.17
+    },
+    {
+        "text": "Users report data residency and encryption requirements. The team is focused on ",
+        "ms": 87.46
+    },
+    {
+        "text": "Resolved by addressing passing a SOC 2 and penetration-testing audit.",
+        "ms": 87.32
+    },
+    {
+        "text": "Internal: similar to a prior case involving API authentication with rotating tok",
+        "ms": 87.26
+    },
+    {
+        "text": "Users report an expansion opportunity around the renewal. The team is focused on",
+        "ms": 87
+    },
+    {
+        "text": "Resolved by addressing rate limits affecting their integration.",
+        "ms": 86.74
+    },
+    {
+        "text": "Internal: similar to a prior case involving requests for deeper reporting and da",
+        "ms": 86.96
+    },
+    {
+        "text": "We observed a phased enterprise rollout across business units. The team is focus",
+        "ms": 87.64
+    },
+    {
+        "text": "Investigation ongoing; a workaround was shared with the customer.",
+        "ms": 87.41
+    },
+    {
+        "text": "Internal: similar to a prior case involving enforcing MFA through the corporate ",
+        "ms": 87.15
+    },
+    {
+        "text": "Users report a customer-success plan to drive adoption. The team is focused on a",
+        "ms": 87.36
+    },
+    {
+        "text": "Investigation ongoing; a workaround was shared with the customer.",
+        "ms": 87.16
+    },
+    {
+        "text": "Internal: similar to a prior case involving a lift-and-shift to a managed cloud ",
+        "ms": 87.12
+    },
+    {
+        "text": "The customer reports tuning performance for large datasets. The team is focused ",
+        "ms": 87.42
+    },
+    {
+        "text": "Investigation ongoing; a workaround was shared with the customer.",
+        "ms": 87.09
+    },
+    {
+        "text": "Internal: similar to a prior case involving scaling adoption company-wide after ",
+        "ms": 86.83
+    },
+    {
+        "text": "Users report hardening access controls and audit logging. The team is focused on",
+        "ms": 87.07
+    },
+    {
+        "text": "Investigation ongoing; a workaround was shared with the customer.",
+        "ms": 87.21
+    },
+    {
+        "text": "Internal: similar to a prior case involving slow query times on a multi-gigabyte",
+        "ms": 87.05
+    },
+    {
+        "text": "Users report the CFO is championing this initiative internally. The team is focu",
+        "ms": 88.14
+    },
+    {
+        "text": "Resolved by addressing leadership wants a board-ready summary.",
+        "ms": 87.31
+    },
+    {
+        "text": "Internal: similar to a prior case involving quarterly business reviews to track ",
+        "ms": 87.22
+    },
+    {
+        "text": "The customer reports hardening access controls and audit logging. The team is fo",
+        "ms": 87.5
+    },
+    {
+        "text": "Resolved by addressing data residency and encryption requirements.",
+        "ms": 87.15
+    },
+    {
+        "text": "Internal: similar to a prior case involving passing a SOC 2 and penetration-test",
+        "ms": 87.18
+    },
+    {
+        "text": "We observed an expansion opportunity around the renewal. The team is focused on ",
+        "ms": 87.41
+    },
+    {
+        "text": "Investigation ongoing; a workaround was shared with the customer.",
+        "ms": 87.06
+    },
+    {
+        "text": "Internal: similar to a prior case involving slow query times on a multi-gigabyte",
+        "ms": 87.06
+    },
+    {
+        "text": "We observed regulatory requirements in the finance vertical. The team is focused",
+        "ms": 87.28
+    },
+    {
+        "text": "Resolved by addressing regulatory requirements in the finance vertical.",
+        "ms": 87.21
+    },
+    {
+        "text": "Internal: similar to a prior case involving pricing was renegotiated to fit the ",
+        "ms": 87.35
+    },
+    {
+        "text": "We observed adopting AI-assisted semantic search. The team is focused on evaluat",
+        "ms": 87.54
+    },
+    {
+        "text": "Resolved by addressing replacing keyword search with meaning-based search.",
+        "ms": 87.47
+    },
+    {
+        "text": "Internal: similar to a prior case involving SSO configuration with SAML and SCIM",
+        "ms": 87.26
+    },
+    {
+        "text": "The customer reports consolidating on-prem systems into the cloud. The team is f",
+        "ms": 87.38
+    },
+    {
+        "text": "Investigation ongoing; a workaround was shared with the customer.",
+        "ms": 87.38
+    },
+    {
+        "text": "Internal: similar to a prior case involving a workaround was provided pending a ",
+        "ms": 87.19
+    },
+    {
+        "text": "We observed measuring time-to-value after launch. The team is focused on a champ",
+        "ms": 87.35
+    },
+    {
+        "text": "Investigation ongoing; a workaround was shared with the customer.",
+        "ms": 86.84
+    },
+    {
+        "text": "Internal: similar to a prior case involving procurement needs an updated quote f",
+        "ms": 86.93
+    },
+    {
+        "text": "Users report an outage that triggered a priority incident. The team is focused o",
+        "ms": 87.32
+    },
+    {
+        "text": "Resolved by addressing expanding the deployment to additional teams.",
+        "ms": 87.14
+    },
+    {
+        "text": "Internal: similar to a prior case involving usability concerns raised during the",
+        "ms": 88.11
+    },
+    {
+        "text": "The customer reports scheduling end-user training sessions. The team is focused ",
+        "ms": 87.4
+    },
+    {
+        "text": "Resolved by addressing enablement workshops for the admin team.",
+        "ms": 87.25
+    },
+    {
+        "text": "Internal: similar to a prior case involving the CFO is championing this initiati",
+        "ms": 87.16
+    },
+    {
+        "text": "The customer reports the CFO is championing this initiative internally. The team",
+        "ms": 87.59
+    },
+    {
+        "text": "Investigation ongoing; a workaround was shared with the customer.",
+        "ms": 87.07
+    },
+    {
+        "text": "Internal: similar to a prior case involving positive product feedback from power",
+        "ms": 87.24
+    },
+    {
+        "text": "The customer reports requests for deeper reporting and dashboards. The team is f",
+        "ms": 87.21
+    },
+    {
+        "text": "Resolved by addressing positive product feedback from power users.",
+        "ms": 86.85
+    },
+    {
+        "text": "Internal: similar to a prior case involving pricing was renegotiated to fit the ",
+        "ms": 87
+    },
+    {
+        "text": "We observed hardening access controls and audit logging. The team is focused on ",
+        "ms": 87.49
+    },
+    {
+        "text": "Resolved by addressing reducing support volume through training.",
+        "ms": 87.6
+    },
+    {
+        "text": "Internal: similar to a prior case involving meeting HIPAA and GDPR compliance ob",
+        "ms": 87.35
+    },
+    {
+        "text": "Users report renewal is at risk due to low usage. The team is focused on renewal",
+        "ms": 87.35
+    },
+    {
+        "text": "Resolved by addressing passing a SOC 2 and penetration-testing audit.",
+        "ms": 87.11
+    },
+    {
+        "text": "Internal: similar to a prior case involving a support escalation to the engineer",
+        "ms": 87.3
+    },
+    {
+        "text": "We observed onboarding thousands of users in the next quarter. The team is focus",
+        "ms": 87.27
+    },
+    {
+        "text": "Resolved by addressing a phased enterprise rollout across business units.",
+        "ms": 87.15
+    },
+    {
+        "text": "Internal: similar to a prior case involving replacing keyword search with meanin",
+        "ms": 86.8
+    },
+    {
+        "text": "Users report a support escalation to the engineering team. The team is focused o",
+        "ms": 87.22
+    },
+    {
+        "text": "Investigation ongoing; a workaround was shared with the customer.",
+        "ms": 87.05
+    },
+    {
+        "text": "Internal: similar to a prior case involving validating data integrity after the ",
+        "ms": 87.25
+    },
+    {
+        "text": "The customer reports scaling adoption company-wide after the pilot. The team is ",
+        "ms": 87.47
+    },
+    {
+        "text": "Resolved by addressing API authentication with rotating tokens.",
+        "ms": 87.24
+    },
+    {
+        "text": "Internal: similar to a prior case involving rolling out single sign-on with thei",
+        "ms": 87.33
+    },
+    {
+        "text": "The customer reports leadership wants a board-ready summary. The team is focused",
+        "ms": 87.69
+    },
+    {
+        "text": "Resolved by addressing self-serve documentation and onboarding guides.",
+        "ms": 87.21
+    },
+    {
+        "text": "Internal: similar to a prior case involving passing a SOC 2 and penetration-test",
+        "ms": 87.22
+    },
+    {
+        "text": "We observed a support escalation to the engineering team. The team is focused on",
+        "ms": 87.24
+    },
+    {
+        "text": "Investigation ongoing; a workaround was shared with the customer.",
+        "ms": 87.02
+    },
+    {
+        "text": "Internal: similar to a prior case involving data residency and encryption requir",
+        "ms": 86.89
+    },
+    {
+        "text": "Users report a one-time bulk import of historical data. The team is focused on m",
+        "ms": 87.05
+    },
+    {
+        "text": "Investigation ongoing; a workaround was shared with the customer.",
+        "ms": 87.24
+    },
+    {
+        "text": "Internal: similar to a prior case involving executive sponsorship from the CTO i",
+        "ms": 87.08
+    },
+    {
+        "text": "We observed a champion who advocates internally. The team is focused on quarterl",
+        "ms": 87.39
+    },
+    {
+        "text": "Resolved by addressing renewal conversation tied to a multi-year commitment.",
+        "ms": 87.12
+    },
+    {
+        "text": "Internal: similar to a prior case involving the issue recurred after the previou",
+        "ms": 87.11
+    },
+    {
+        "text": "Users report integrating through the public REST API. The team is focused on rat",
+        "ms": 87.38
+    },
+    {
+        "text": "Resolved by addressing a support escalation to the engineering team.",
+        "ms": 87.23
+    },
+    {
+        "text": "Internal: similar to a prior case involving rate limits affecting their integrat",
+        "ms": 88.95
+    },
+    {
+        "text": "We observed replacing keyword search with meaning-based search. The team is focu",
+        "ms": 87.43
+    },
+    {
+        "text": "Investigation ongoing; a workaround was shared with the customer.",
+        "ms": 86.69
+    },
+    {
+        "text": "Internal: similar to a prior case involving scaling adoption company-wide after ",
+        "ms": 86.9
+    },
+    {
+        "text": "Users report self-serve documentation and onboarding guides. The team is focused",
+        "ms": 87.4
+    },
+    {
+        "text": "Resolved by addressing users could not sign in after the identity-provider switc",
+        "ms": 87.31
+    },
+    {
+        "text": "Internal: similar to a prior case involving passing a SOC 2 and penetration-test",
+        "ms": 87.15
+    },
+    {
+        "text": "The customer reports validating data integrity after the migration. The team is ",
+        "ms": 87.27
+    },
+    {
+        "text": "Resolved by addressing data residency and encryption requirements.",
+        "ms": 87.02
+    },
+    {
+        "text": "Internal: similar to a prior case involving the CFO is championing this initiati",
+        "ms": 87.13
+    },
+    {
+        "text": "Users report budget approval is pending with finance. The team is focused on pri",
+        "ms": 87.8
+    },
+    {
+        "text": "Resolved by addressing renewal is at risk due to low usage.",
+        "ms": 87.17
+    },
+    {
+        "text": "Internal: similar to a prior case involving a feature request around exporting d",
+        "ms": 87.15
+    },
+    {
+        "text": "The customer reports reducing support volume through training. The team is focus",
+        "ms": 87
+    },
+    {
+        "text": "Investigation ongoing; a workaround was shared with the customer.",
+        "ms": 86.82
+    },
+    {
+        "text": "Internal: similar to a prior case involving scheduling end-user training session",
+        "ms": 86.97
+    },
+    {
+        "text": "Users report passing a SOC 2 and penetration-testing audit. The team is focused ",
+        "ms": 87.41
+    },
+    {
+        "text": "Resolved by addressing a support escalation to the engineering team.",
+        "ms": 87.39
+    },
+    {
+        "text": "Internal: similar to a prior case involving measuring time-to-value after launch",
+        "ms": 87.28
+    },
+    {
+        "text": "The customer reports renewal conversation tied to a multi-year commitment. The t",
+        "ms": 87.62
+    },
+    {
+        "text": "Resolved by addressing a one-time bulk import of historical data.",
+        "ms": 87.21
+    },
+    {
+        "text": "Internal: similar to a prior case involving reducing support volume through trai",
+        "ms": 87.3
+    },
+    {
+        "text": "The customer reports concerns about downtime during cloud migration. The team is",
+        "ms": 87.54
+    },
+    {
+        "text": "Resolved by addressing rate limits affecting their integration.",
+        "ms": 86.78
+    },
+    {
+        "text": "Internal: similar to a prior case involving the customer is evaluating competito",
+        "ms": 87.13
+    },
+    {
+        "text": "Users report enablement workshops for the admin team. The team is focused on sel",
+        "ms": 87.05
+    },
+    {
+        "text": "Investigation ongoing; a workaround was shared with the customer.",
+        "ms": 86.85
+    },
+    {
+        "text": "Internal: similar to a prior case involving a customer-success plan to drive ado",
+        "ms": 87.25
+    },
+    {
+        "text": "The team is focused on users could not sign in after the identity-provider switc",
+        "ms": 87.62
+    },
+    {
+        "text": "The team is focused on enforcing MFA through the corporate directory. They also ",
+        "ms": 87.38
+    },
+    {
+        "text": "If you hit issues, check rolling out single sign-on with their identity provider",
+        "ms": 87.31
+    },
+    {
+        "text": "The team is focused on requests for deeper reporting and dashboards.",
+        "ms": 87.05
+    },
+    {
+        "text": "The team is focused on a feature request around exporting data. They also mentio",
+        "ms": 87.18
+    },
+    {
+        "text": "If you hit issues, check usability concerns raised during the trial and review t",
+        "ms": 87.11
+    },
+    {
+        "text": "The team is focused on concerns about downtime during cloud migration.",
+        "ms": 87.34
+    },
+    {
+        "text": "The team is focused on concerns about downtime during cloud migration. They also",
+        "ms": 87.28
+    },
+    {
+        "text": "If you hit issues, check migrating their workloads to the cloud and review the r",
+        "ms": 87.05
+    },
+    {
+        "text": "The team is focused on validating data integrity after the migration.",
+        "ms": 86.99
+    },
+    {
+        "text": "The team is focused on validating data integrity after the migration. They also ",
+        "ms": 87.3
+    },
+    {
+        "text": "If you hit issues, check mapping fields during the data migration and review the",
+        "ms": 87.42
+    },
+    {
+        "text": "The team is focused on validating data integrity after the migration.",
+        "ms": 87.27
+    },
+    {
+        "text": "The team is focused on validating data integrity after the migration. They also ",
+        "ms": 87.62
+    },
+    {
+        "text": "If you hit issues, check validating data integrity after the migration and revie",
+        "ms": 87.26
+    },
+    {
+        "text": "The team is focused on documenting controls for an upcoming audit.",
+        "ms": 87.08
+    },
+    {
+        "text": "The team is focused on retention policies for sensitive records. They also menti",
+        "ms": 87.2
+    },
+    {
+        "text": "If you hit issues, check retention policies for sensitive records and review the",
+        "ms": 87.14
+    },
+    {
+        "text": "The team is focused on users could not sign in after the identity-provider switc",
+        "ms": 87.13
+    },
+    {
+        "text": "The team is focused on enforcing MFA through the corporate directory. They also ",
+        "ms": 87.1
+    },
+    {
+        "text": "If you hit issues, check users could not sign in after the identity-provider swi",
+        "ms": 86.99
+    },
+    {
+        "text": "The team is focused on the customer is evaluating competitors before renewing.",
+        "ms": 87.11
+    },
+    {
+        "text": "The team is focused on the customer is evaluating competitors before renewing. T",
+        "ms": 87.35
+    },
+    {
+        "text": "If you hit issues, check the customer is evaluating competitors before renewing ",
+        "ms": 87.21
+    },
+    {
+        "text": "The team is focused on reducing support volume through training.",
+        "ms": 87.16
+    },
+    {
+        "text": "The team is focused on enablement workshops for the admin team. They also mentio",
+        "ms": 87.33
+    },
+    {
+        "text": "If you hit issues, check enablement workshops for the admin team and review the ",
+        "ms": 87.36
+    },
+    {
+        "text": "The team is focused on mapping fields during the data migration.",
+        "ms": 87.2
+    },
+    {
+        "text": "The team is focused on validating data integrity after the migration. They also ",
+        "ms": 87.44
+    },
+    {
+        "text": "If you hit issues, check validating data integrity after the migration and revie",
+        "ms": 87.12
+    },
+    {
+        "text": "The team is focused on the deal is blocked on Q3 budget sign-off.",
+        "ms": 87
+    },
+    {
+        "text": "The team is focused on pricing was renegotiated to fit the annual budget. They a",
+        "ms": 87.09
+    },
+    {
+        "text": "If you hit issues, check budget approval is pending with finance and review the ",
+        "ms": 87.16
+    },
+    {
+        "text": "The team is focused on expanding the deployment to additional teams.",
+        "ms": 87.1
+    },
+    {
+        "text": "The team is focused on expanding the deployment to additional teams. They also m",
+        "ms": 87.45
+    },
+    {
+        "text": "If you hit issues, check onboarding thousands of users in the next quarter and r",
+        "ms": 87.33
+    },
+    {
+        "text": "The team is focused on pricing was renegotiated to fit the annual budget.",
+        "ms": 87.31
+    },
+    {
+        "text": "The team is focused on budget approval is pending with finance. They also mentio",
+        "ms": 87.32
+    },
+    {
+        "text": "If you hit issues, check pricing was renegotiated to fit the annual budget and r",
+        "ms": 87.36
+    },
+    {
+        "text": "The team is focused on leadership wants a board-ready summary.",
+        "ms": 87.01
+    },
+    {
+        "text": "The team is focused on executive sponsorship from the CTO is secured. They also ",
+        "ms": 86.98
+    },
+    {
+        "text": "If you hit issues, check executive sponsorship from the CTO is secured and revie",
+        "ms": 87
+    },
+    {
+        "text": "The team is focused on expanding the deployment to additional teams.",
+        "ms": 87.04
+    },
+    {
+        "text": "The team is focused on scaling adoption company-wide after the pilot. They also ",
+        "ms": 87.22
+    },
+    {
+        "text": "If you hit issues, check a phased enterprise rollout across business units and r",
+        "ms": 87.25
+    },
+    {
+        "text": "The team is focused on integrating through the public REST API.",
+        "ms": 87.08
+    },
+    {
+        "text": "The team is focused on integrating through the public REST API. They also mentio",
+        "ms": 87.35
+    },
+    {
+        "text": "If you hit issues, check integrating through the public REST API and review the ",
+        "ms": 87.41
+    },
+    {
+        "text": "The team is focused on hardening access controls and audit logging.",
+        "ms": 87.16
+    },
+    {
+        "text": "The team is focused on passing a SOC 2 and penetration-testing audit. They also ",
+        "ms": 87.45
+    },
+    {
+        "text": "If you hit issues, check a security review by the InfoSec team and review the re",
+        "ms": 87.26
+    },
+    {
+        "text": "The team is focused on scaling adoption company-wide after the pilot.",
+        "ms": 87.07
+    },
+    {
+        "text": "The team is focused on a phased enterprise rollout across business units. They a",
+        "ms": 87.09
+    },
+    {
+        "text": "If you hit issues, check expanding the deployment to additional teams and review",
+        "ms": 86.88
+    },
+    {
+        "text": "The team is focused on consolidating on-prem systems into the cloud.",
+        "ms": 87.03
+    },
+    {
+        "text": "The team is focused on consolidating on-prem systems into the cloud. They also m",
+        "ms": 87.17
+    },
+    {
+        "text": "If you hit issues, check a lift-and-shift to a managed cloud environment and rev",
+        "ms": 87.7
+    },
+    {
+        "text": "The team is focused on enforcing MFA through the corporate directory.",
+        "ms": 87.16
+    },
+    {
+        "text": "The team is focused on users could not sign in after the identity-provider switc",
+        "ms": 87.38
+    },
+    {
+        "text": "If you hit issues, check users could not sign in after the identity-provider swi",
+        "ms": 87.1
+    },
+    {
+        "text": "The team is focused on procurement needs an updated quote for approval.",
+        "ms": 87.2
+    },
+    {
+        "text": "The team is focused on procurement needs an updated quote for approval. They als",
+        "ms": 87.53
+    },
+    {
+        "text": "If you hit issues, check pricing was renegotiated to fit the annual budget and r",
+        "ms": 87.24
+    },
+    {
+        "text": "The team is focused on tuning performance for large datasets.",
+        "ms": 86.97
+    },
+    {
+        "text": "The team is focused on optimizing indexing for faster retrieval. They also menti",
+        "ms": 87.23
+    },
+    {
+        "text": "If you hit issues, check optimizing indexing for faster retrieval and review the",
+        "ms": 87.04
+    },
+    {
+        "text": "The team is focused on self-serve documentation and onboarding guides.",
+        "ms": 87.24
+    },
+    {
+        "text": "The team is focused on scheduling end-user training sessions. They also mentione",
+        "ms": 87.69
+    },
+    {
+        "text": "If you hit issues, check enablement workshops for the admin team and review the ",
+        "ms": 87.29
+    },
+    {
+        "text": "The team is focused on tuning performance for large datasets.",
+        "ms": 87.23
+    },
+    {
+        "text": "The team is focused on search latency spikes under heavy load. They also mention",
+        "ms": 87.5
+    },
+    {
+        "text": "If you hit issues, check tuning performance for large datasets and review the re",
+        "ms": 87.24
+    },
+    {
+        "text": "The team is focused on users could not sign in after the identity-provider switc",
+        "ms": 87.46
+    },
+    {
+        "text": "The team is focused on enforcing MFA through the corporate directory. They also ",
+        "ms": 87.24
+    },
+    {
+        "text": "If you hit issues, check enforcing MFA through the corporate directory and revie",
+        "ms": 87.07
+    },
+    {
+        "text": "The team is focused on rolling out single sign-on with their identity provider.",
+        "ms": 87.14
+    },
+    {
+        "text": "The team is focused on rolling out single sign-on with their identity provider. ",
+        "ms": 88.31
+    },
+    {
+        "text": "If you hit issues, check SSO configuration with SAML and SCIM and review the rel",
+        "ms": 87.12
+    },
+    {
+        "text": "The team is focused on a phased enterprise rollout across business units.",
+        "ms": 87.33
+    },
+    {
+        "text": "The team is focused on a phased enterprise rollout across business units. They a",
+        "ms": 87.4
+    },
+    {
+        "text": "If you hit issues, check scaling adoption company-wide after the pilot and revie",
+        "ms": 87.14
+    },
+    {
+        "text": "The team is focused on evaluating local, in-browser inference.",
+        "ms": 87.34
+    },
+    {
+        "text": "The team is focused on adopting AI-assisted semantic search. They also mentioned",
+        "ms": 87.4
+    },
+    {
+        "text": "If you hit issues, check evaluating local, in-browser inference and review the r",
+        "ms": 87.02
+    },
+    {
+        "text": "The team is focused on requests for deeper reporting and dashboards.",
+        "ms": 87.45
+    },
+    {
+        "text": "The team is focused on requests for deeper reporting and dashboards. They also m",
+        "ms": 87.23
+    },
+    {
+        "text": "If you hit issues, check a feature request around exporting data and review the ",
+        "ms": 86.94
+    },
+    {
+        "text": "The team is focused on meeting HIPAA and GDPR compliance obligations.",
+        "ms": 86.94
+    },
+    {
+        "text": "The team is focused on documenting controls for an upcoming audit. They also men",
+        "ms": 87.08
+    },
+    {
+        "text": "If you hit issues, check meeting HIPAA and GDPR compliance obligations and revie",
+        "ms": 87.12
+    },
+    {
+        "text": "The team is focused on the customer is evaluating competitors before renewing.",
+        "ms": 87.66
+    },
+    {
+        "text": "The team is focused on renewal is at risk due to low usage. They also mentioned ",
+        "ms": 87.27
+    },
+    {
+        "text": "If you hit issues, check renewal is at risk due to low usage and review the rela",
+        "ms": 87.35
+    },
+    {
+        "text": "The team is focused on enablement workshops for the admin team.",
+        "ms": 87.71
+    },
+    {
+        "text": "The team is focused on scheduling end-user training sessions. They also mentione",
+        "ms": 87.5
+    },
+    {
+        "text": "If you hit issues, check reducing support volume through training and review the",
+        "ms": 87.05
+    },
+    {
+        "text": "The team is focused on leadership wants a board-ready summary.",
+        "ms": 87.4
+    },
+    {
+        "text": "The team is focused on the CFO is championing this initiative internally. They a",
+        "ms": 87.16
+    },
+    {
+        "text": "If you hit issues, check the CFO is championing this initiative internally and r",
+        "ms": 87.01
+    },
+    {
+        "text": "The team is focused on validating data integrity after the migration.",
+        "ms": 87.11
+    },
+    {
+        "text": "The team is focused on a one-time bulk import of historical data. They also ment",
+        "ms": 87.29
+    },
+    {
+        "text": "If you hit issues, check mapping fields during the data migration and review the",
+        "ms": 87.37
+    },
+    {
+        "text": "The team is focused on a security review by the InfoSec team.",
+        "ms": 87.57
+    },
+    {
+        "text": "The team is focused on a security review by the InfoSec team. They also mentione",
+        "ms": 87.48
+    },
+    {
+        "text": "If you hit issues, check hardening access controls and audit logging and review ",
+        "ms": 87.17
+    },
+    {
+        "text": "The team is focused on enablement workshops for the admin team.",
+        "ms": 87.37
+    },
+    {
+        "text": "The team is focused on scheduling end-user training sessions. They also mentione",
+        "ms": 87.25
+    },
+    {
+        "text": "If you hit issues, check enablement workshops for the admin team and review the ",
+        "ms": 87.15
+    },
+    {
+        "text": "The team is focused on a feature request around exporting data.",
+        "ms": 87.69
+    },
+    {
+        "text": "The team is focused on a feature request around exporting data. They also mentio",
+        "ms": 87.01
+    },
+    {
+        "text": "If you hit issues, check positive product feedback from power users and review t",
+        "ms": 86.67
+    },
+    {
+        "text": "The team is focused on consolidating on-prem systems into the cloud.",
+        "ms": 87.53
+    },
+    {
+        "text": "The team is focused on consolidating on-prem systems into the cloud. They also m",
+        "ms": 88.27
+    },
+    {
+        "text": "If you hit issues, check migrating their workloads to the cloud and review the r",
+        "ms": 87.06
+    },
+    {
+        "text": "The team is focused on passing a SOC 2 and penetration-testing audit.",
+        "ms": 87.19
+    },
+    {
+        "text": "The team is focused on data residency and encryption requirements. They also men",
+        "ms": 87.25
+    },
+    {
+        "text": "If you hit issues, check data residency and encryption requirements and review t",
+        "ms": 87.03
+    },
+    {
+        "text": "The team is focused on webhooks for near real-time synchronization.",
+        "ms": 87.15
+    },
+    {
+        "text": "The team is focused on integrating through the public REST API. They also mentio",
+        "ms": 88.7
+    },
+    {
+        "text": "If you hit issues, check webhooks for near real-time synchronization and review ",
+        "ms": 87.05
+    },
+    {
+        "text": "The team is focused on the customer is evaluating competitors before renewing.",
+        "ms": 86.7
+    },
+    {
+        "text": "The team is focused on an expansion opportunity around the renewal. They also me",
+        "ms": 87.09
+    },
+    {
+        "text": "If you hit issues, check the customer is evaluating competitors before renewing ",
+        "ms": 86.96
+    },
+    {
+        "text": "The team is focused on the customer is evaluating competitors before renewing.",
+        "ms": 87.16
+    },
+    {
+        "text": "The team is focused on the customer is evaluating competitors before renewing. T",
+        "ms": 87.29
+    },
+    {
+        "text": "If you hit issues, check an expansion opportunity around the renewal and review ",
+        "ms": 86.76
+    },
+    {
+        "text": "The team is focused on positive product feedback from power users.",
+        "ms": 87.02
+    },
+    {
+        "text": "The team is focused on requests for deeper reporting and dashboards. They also m",
+        "ms": 87.05
+    },
+    {
+        "text": "If you hit issues, check a feature request around exporting data and review the ",
+        "ms": 87.36
+    },
+    {
+        "text": "The team is focused on expanding the deployment to additional teams.",
+        "ms": 87.08
+    },
+    {
+        "text": "The team is focused on expanding the deployment to additional teams. They also m",
+        "ms": 87.27
+    },
+    {
+        "text": "If you hit issues, check onboarding thousands of users in the next quarter and r",
+        "ms": 86.81
+    },
+    {
+        "text": "The team is focused on mapping fields during the data migration.",
+        "ms": 87
+    },
+    {
+        "text": "The team is focused on mapping fields during the data migration. They also menti",
+        "ms": 87.08
+    },
+    {
+        "text": "If you hit issues, check mapping fields during the data migration and review the",
+        "ms": 87.23
+    },
+    {
+        "text": "The team is focused on the issue recurred after the previous fix.",
+        "ms": 87.12
+    },
+    {
+        "text": "The team is focused on the issue recurred after the previous fix. They also ment",
+        "ms": 87.38
+    },
+    {
+        "text": "If you hit issues, check an outage that triggered a priority incident and review",
+        "ms": 87.21
+    },
+    {
+        "text": "The team is focused on adopting AI-assisted semantic search.",
+        "ms": 87.26
+    },
+    {
+        "text": "The team is focused on embedding-based retrieval over their documents. They also",
+        "ms": 87.5
+    },
+    {
+        "text": "If you hit issues, check adopting AI-assisted semantic search and review the rel",
+        "ms": 87.43
+    },
+    {
+        "text": "The team is focused on onboarding thousands of users in the next quarter.",
+        "ms": 87.4
+    },
+    {
+        "text": "The team is focused on a phased enterprise rollout across business units. They a",
+        "ms": 87.05
+    },
+    {
+        "text": "If you hit issues, check expanding the deployment to additional teams and review",
+        "ms": 86.88
+    },
+    {
+        "text": "The team is focused on search latency spikes under heavy load.",
+        "ms": 87.18
+    },
+    {
+        "text": "The team is focused on tuning performance for large datasets. They also mentione",
+        "ms": 87.25
+    },
+    {
+        "text": "If you hit issues, check slow query times on a multi-gigabyte database and revie",
+        "ms": 87.81
+    },
+    {
+        "text": "The team is focused on mapping fields during the data migration.",
+        "ms": 87.39
+    },
+    {
+        "text": "The team is focused on mapping fields during the data migration. They also menti",
+        "ms": 87.34
+    },
+    {
+        "text": "If you hit issues, check a one-time bulk import of historical data and review th",
+        "ms": 87.19
+    },
+    {
+        "text": "The team is focused on requests for deeper reporting and dashboards.",
+        "ms": 87.46
+    },
+    {
+        "text": "The team is focused on positive product feedback from power users. They also men",
+        "ms": 87.23
+    },
+    {
+        "text": "If you hit issues, check requests for deeper reporting and dashboards and review",
+        "ms": 87.17
+    },
+    {
+        "text": "The team is focused on expanding the deployment to additional teams.",
+        "ms": 86.92
+    },
+    {
+        "text": "The team is focused on onboarding thousands of users in the next quarter. They a",
+        "ms": 87
+    },
+    {
+        "text": "If you hit issues, check a phased enterprise rollout across business units and r",
+        "ms": 86.94
+    },
+    {
+        "text": "The team is focused on hardening access controls and audit logging.",
+        "ms": 87.21
+    },
+    {
+        "text": "The team is focused on hardening access controls and audit logging. They also me",
+        "ms": 87.46
+    },
+    {
+        "text": "If you hit issues, check hardening access controls and audit logging and review ",
+        "ms": 87.17
+    },
+    {
+        "text": "The team is focused on embedding-based retrieval over their documents.",
+        "ms": 87.31
+    },
+    {
+        "text": "The team is focused on embedding-based retrieval over their documents. They also",
+        "ms": 87.2
+    },
+    {
+        "text": "If you hit issues, check replacing keyword search with meaning-based search and ",
+        "ms": 87.46
+    },
+    {
+        "text": "The team is focused on enablement workshops for the admin team.",
+        "ms": 87.34
+    },
+    {
+        "text": "The team is focused on reducing support volume through training. They also menti",
+        "ms": 87.31
+    },
+    {
+        "text": "If you hit issues, check enablement workshops for the admin team and review the ",
+        "ms": 87.03
+    },
+    {
+        "text": "The team is focused on a lift-and-shift to a managed cloud environment.",
+        "ms": 87
+    },
+    {
+        "text": "The team is focused on consolidating on-prem systems into the cloud. They also m",
+        "ms": 86.98
+    },
+    {
+        "text": "If you hit issues, check consolidating on-prem systems into the cloud and review",
+        "ms": 87.25
+    },
+    {
+        "text": "The team is focused on rate limits affecting their integration.",
+        "ms": 87.4
+    },
+    {
+        "text": "The team is focused on webhooks for near real-time synchronization. They also me",
+        "ms": 87.64
+    },
+    {
+        "text": "If you hit issues, check webhooks for near real-time synchronization and review ",
+        "ms": 87.25
+    },
+    {
+        "text": "The team is focused on documenting controls for an upcoming audit.",
+        "ms": 89.01
+    },
+    {
+        "text": "The team is focused on meeting HIPAA and GDPR compliance obligations. They also ",
+        "ms": 89.46
+    },
+    {
+        "text": "If you hit issues, check meeting HIPAA and GDPR compliance obligations and revie",
+        "ms": 87.47
+    },
+    {
+        "text": "The team is focused on retention policies for sensitive records.",
+        "ms": 87.51
+    },
+    {
+        "text": "The team is focused on documenting controls for an upcoming audit. They also men",
+        "ms": 91.19
+    },
+    {
+        "text": "If you hit issues, check retention policies for sensitive records and review the",
+        "ms": 87.53
+    },
+    {
+        "text": "The team is focused on consolidating on-prem systems into the cloud.",
+        "ms": 87.29
+    },
+    {
+        "text": "The team is focused on migrating their workloads to the cloud. They also mention",
+        "ms": 87.09
+    },
+    {
+        "text": "If you hit issues, check a lift-and-shift to a managed cloud environment and rev",
+        "ms": 87.36
+    },
+    {
+        "text": "The team is focused on a workaround was provided pending a permanent fix.",
+        "ms": 89.3
+    },
+    {
+        "text": "The team is focused on a support escalation to the engineering team. They also m",
+        "ms": 87.64
+    },
+    {
+        "text": "If you hit issues, check a support escalation to the engineering team and review",
+        "ms": 87.59
+    },
+    {
+        "text": "The team is focused on slow query times on a multi-gigabyte database.",
+        "ms": 87.13
+    },
+    {
+        "text": "The team is focused on optimizing indexing for faster retrieval. They also menti",
+        "ms": 87.27
+    },
+    {
+        "text": "If you hit issues, check slow query times on a multi-gigabyte database and revie",
+        "ms": 86.9
+    },
+    {
+        "text": "The team is focused on scheduling end-user training sessions.",
+        "ms": 87.53
+    },
+    {
+        "text": "The team is focused on scheduling end-user training sessions. They also mentione",
+        "ms": 87.17
+    },
+    {
+        "text": "If you hit issues, check self-serve documentation and onboarding guides and revi",
+        "ms": 86.93
+    },
+    {
+        "text": "The team is focused on webhooks for near real-time synchronization.",
+        "ms": 87.11
+    },
+    {
+        "text": "The team is focused on rate limits affecting their integration. They also mentio",
+        "ms": 87.16
+    },
+    {
+        "text": "If you hit issues, check integrating through the public REST API and review the ",
+        "ms": 87.36
+    },
+    {
+        "text": "The team is focused on search latency spikes under heavy load.",
+        "ms": 87.24
+    },
+    {
+        "text": "The team is focused on tuning performance for large datasets. They also mentione",
+        "ms": 87.51
+    },
+    {
+        "text": "If you hit issues, check slow query times on a multi-gigabyte database and revie",
+        "ms": 87.12
+    },
+    {
+        "text": "The team is focused on executive sponsorship from the CTO is secured.",
+        "ms": 87.24
+    },
+    {
+        "text": "The team is focused on executive sponsorship from the CTO is secured. They also ",
+        "ms": 87.21
+    },
+    {
+        "text": "If you hit issues, check executive sponsorship from the CTO is secured and revie",
+        "ms": 87.11
+    },
+    {
+        "text": "The team is focused on a feature request around exporting data.",
+        "ms": 87.78
+    },
+    {
+        "text": "The team is focused on a feature request around exporting data. They also mentio",
+        "ms": 87.11
+    },
+    {
+        "text": "If you hit issues, check a feature request around exporting data and review the ",
+        "ms": 87.05
+    },
+    {
+        "text": "The team is focused on concerns about downtime during cloud migration.",
+        "ms": 87.23
+    },
+    {
+        "text": "The team is focused on concerns about downtime during cloud migration. They also",
+        "ms": 87.55
+    },
+    {
+        "text": "If you hit issues, check a lift-and-shift to a managed cloud environment and rev",
+        "ms": 87.33
+    },
+    {
+        "text": "The team is focused on tuning performance for large datasets.",
+        "ms": 87.35
+    },
+    {
+        "text": "The team is focused on tuning performance for large datasets. They also mentione",
+        "ms": 87.51
+    },
+    {
+        "text": "If you hit issues, check search latency spikes under heavy load and review the r",
+        "ms": 87.27
+    },
+    {
+        "text": "The team is focused on the sponsor is pushing for a faster timeline.",
+        "ms": 87.4
+    },
+    {
+        "text": "The team is focused on the sponsor is pushing for a faster timeline. They also m",
+        "ms": 87.26
+    },
+    {
+        "text": "If you hit issues, check leadership wants a board-ready summary and review the r",
+        "ms": 86.99
+    },
+    {
+        "text": "The team is focused on pricing was renegotiated to fit the annual budget.",
+        "ms": 87.13
+    },
+    {
+        "text": "The team is focused on procurement needs an updated quote for approval. They als",
+        "ms": 87.3
+    },
+    {
+        "text": "If you hit issues, check pricing was renegotiated to fit the annual budget and r",
+        "ms": 87.26
+    },
+    {
+        "text": "The team is focused on hardening access controls and audit logging.",
+        "ms": 87.18
+    },
+    {
+        "text": "The team is focused on a security review by the InfoSec team. They also mentione",
+        "ms": 87.75
+    },
+    {
+        "text": "If you hit issues, check hardening access controls and audit logging and review ",
+        "ms": 87.2
+    },
+    {
+        "text": "The team is focused on a lift-and-shift to a managed cloud environment.",
+        "ms": 87.26
+    },
+    {
+        "text": "The team is focused on consolidating on-prem systems into the cloud. They also m",
+        "ms": 87.33
+    },
+    {
+        "text": "If you hit issues, check consolidating on-prem systems into the cloud and review",
+        "ms": 87.35
+    },
+    {
+        "text": "The team is focused on slow query times on a multi-gigabyte database.",
+        "ms": 87.23
+    },
+    {
+        "text": "The team is focused on slow query times on a multi-gigabyte database. They also ",
+        "ms": 87.32
+    },
+    {
+        "text": "If you hit issues, check search latency spikes under heavy load and review the r",
+        "ms": 86.87
+    },
+    {
+        "text": "The team is focused on search latency spikes under heavy load.",
+        "ms": 87.01
+    },
+    {
+        "text": "The team is focused on search latency spikes under heavy load. They also mention",
+        "ms": 87.29
+    },
+    {
+        "text": "If you hit issues, check slow query times on a multi-gigabyte database and revie",
+        "ms": 87.36
+    },
+    {
+        "text": "The team is focused on passing a SOC 2 and penetration-testing audit.",
+        "ms": 87.47
+    },
+    {
+        "text": "The team is focused on data residency and encryption requirements. They also men",
+        "ms": 87.18
+    },
+    {
+        "text": "If you hit issues, check a security review by the InfoSec team and review the re",
+        "ms": 87.46
+    },
+    {
+        "text": "The team is focused on renewal is at risk due to low usage.",
+        "ms": 87.29
+    },
+    {
+        "text": "The team is focused on renewal is at risk due to low usage. They also mentioned ",
+        "ms": 87.45
+    },
+    {
+        "text": "If you hit issues, check the customer is evaluating competitors before renewing ",
+        "ms": 87.06
+    },
+    {
+        "text": "The team is focused on slow query times on a multi-gigabyte database.",
+        "ms": 87.2
+    },
+    {
+        "text": "The team is focused on search latency spikes under heavy load. They also mention",
+        "ms": 88.44
+    },
+    {
+        "text": "If you hit issues, check slow query times on a multi-gigabyte database and revie",
+        "ms": 86.88
+    },
+    {
+        "text": "The team is focused on consolidating on-prem systems into the cloud.",
+        "ms": 87.17
+    },
+    {
+        "text": "The team is focused on a lift-and-shift to a managed cloud environment. They als",
+        "ms": 87.36
+    },
+    {
+        "text": "If you hit issues, check migrating their workloads to the cloud and review the r",
+        "ms": 87.27
+    },
+    {
+        "text": "The team is focused on renewal is at risk due to low usage.",
+        "ms": 87.21
+    },
+    {
+        "text": "The team is focused on the customer is evaluating competitors before renewing. T",
+        "ms": 87.47
+    },
+    {
+        "text": "If you hit issues, check renewal conversation tied to a multi-year commitment an",
+        "ms": 87.12
+    },
+    {
+        "text": "The team is focused on migrating their workloads to the cloud.",
+        "ms": 87.31
+    },
+    {
+        "text": "The team is focused on consolidating on-prem systems into the cloud. They also m",
+        "ms": 87.27
+    },
+    {
+        "text": "If you hit issues, check concerns about downtime during cloud migration and revi",
+        "ms": 87.22
+    },
+    {
+        "text": "The team is focused on an outage that triggered a priority incident.",
+        "ms": 87
+    },
+    {
+        "text": "The team is focused on a workaround was provided pending a permanent fix. They a",
+        "ms": 87.06
+    },
+    {
+        "text": "If you hit issues, check a support escalation to the engineering team and review",
+        "ms": 86.94
+    },
+    {
+        "text": "The team is focused on retention policies for sensitive records.",
+        "ms": 87.17
+    },
+    {
+        "text": "The team is focused on documenting controls for an upcoming audit. They also men",
+        "ms": 87.55
+    },
+    {
+        "text": "If you hit issues, check documenting controls for an upcoming audit and review t",
+        "ms": 87.26
+    },
+    {
+        "text": "The team is focused on a customer-success plan to drive adoption.",
+        "ms": 87.47
+    },
+    {
+        "text": "The team is focused on quarterly business reviews to track value. They also ment",
+        "ms": 87.2
+    },
+    {
+        "text": "If you hit issues, check a champion who advocates internally and review the rela",
+        "ms": 87.39
+    },
+    {
+        "text": "The team is focused on renewal conversation tied to a multi-year commitment.",
+        "ms": 87.25
+    },
+    {
+        "text": "The team is focused on the customer is evaluating competitors before renewing. T",
+        "ms": 87.29
+    },
+    {
+        "text": "If you hit issues, check an expansion opportunity around the renewal and review ",
+        "ms": 87.04
+    },
+    {
+        "text": "The team is focused on replacing keyword search with meaning-based search.",
+        "ms": 86.84
+    },
+    {
+        "text": "The team is focused on evaluating local, in-browser inference. They also mention",
+        "ms": 87.13
+    },
+    {
+        "text": "If you hit issues, check adopting AI-assisted semantic search and review the rel",
+        "ms": 87.01
+    },
+    {
+        "text": "The team is focused on measuring time-to-value after launch.",
+        "ms": 87.52
+    },
+    {
+        "text": "The team is focused on quarterly business reviews to track value. They also ment",
+        "ms": 87.5
+    },
+    {
+        "text": "If you hit issues, check a champion who advocates internally and review the rela",
+        "ms": 87.27
+    },
+    {
+        "text": "The team is focused on webhooks for near real-time synchronization.",
+        "ms": 87.18
+    },
+    {
+        "text": "The team is focused on webhooks for near real-time synchronization. They also me",
+        "ms": 87.29
+    },
+    {
+        "text": "If you hit issues, check rate limits affecting their integration and review the ",
+        "ms": 87.2
+    },
+    {
+        "text": "The team is focused on reducing support volume through training.",
+        "ms": 87.23
+    },
+    {
+        "text": "The team is focused on scheduling end-user training sessions. They also mentione",
+        "ms": 87.26
+    },
+    {
+        "text": "If you hit issues, check self-serve documentation and onboarding guides and revi",
+        "ms": 86.88
+    },
+    {
+        "text": "The team is focused on integrating through the public REST API.",
+        "ms": 86.88
+    },
+    {
+        "text": "The team is focused on integrating through the public REST API. They also mentio",
+        "ms": 87.14
+    },
+    {
+        "text": "If you hit issues, check webhooks for near real-time synchronization and review ",
+        "ms": 87.1
+    },
+    {
+        "text": "The team is focused on expanding the deployment to additional teams.",
+        "ms": 87.38
+    },
+    {
+        "text": "The team is focused on onboarding thousands of users in the next quarter. They a",
+        "ms": 87.35
+    },
+    {
+        "text": "If you hit issues, check a phased enterprise rollout across business units and r",
+        "ms": 87.2
+    },
+    {
+        "text": "The team is focused on hardening access controls and audit logging.",
+        "ms": 87.04
+    },
+    {
+        "text": "The team is focused on passing a SOC 2 and penetration-testing audit. They also ",
+        "ms": 87.45
+    },
+    {
+        "text": "If you hit issues, check passing a SOC 2 and penetration-testing audit and revie",
+        "ms": 87.23
+    },
+    {
+        "text": "The team is focused on rolling out single sign-on with their identity provider.",
+        "ms": 87.31
+    },
+    {
+        "text": "The team is focused on SSO configuration with SAML and SCIM. They also mentioned",
+        "ms": 86.98
+    },
+    {
+        "text": "If you hit issues, check rolling out single sign-on with their identity provider",
+        "ms": 86.92
+    },
+    {
+        "text": "The team is focused on a phased enterprise rollout across business units.",
+        "ms": 87.04
+    },
+    {
+        "text": "The team is focused on scaling adoption company-wide after the pilot. They also ",
+        "ms": 87.07
+    },
+    {
+        "text": "If you hit issues, check onboarding thousands of users in the next quarter and r",
+        "ms": 87.54
+    },
+    {
+        "text": "The team is focused on retention policies for sensitive records.",
+        "ms": 89.84
+    },
+    {
+        "text": "The team is focused on documenting controls for an upcoming audit. They also men",
+        "ms": 87.47
+    },
+    {
+        "text": "If you hit issues, check documenting controls for an upcoming audit and review t",
+        "ms": 87.11
+    },
+    {
+        "text": "The team is focused on pricing was renegotiated to fit the annual budget.",
+        "ms": 87.5
+    },
+    {
+        "text": "The team is focused on budget approval is pending with finance. They also mentio",
+        "ms": 87.3
+    },
+    {
+        "text": "If you hit issues, check the deal is blocked on Q3 budget sign-off and review th",
+        "ms": 87.19
+    },
+    {
+        "text": "The team is focused on renewal is at risk due to low usage.",
+        "ms": 87.17
+    },
+    {
+        "text": "The team is focused on renewal conversation tied to a multi-year commitment. The",
+        "ms": 86.98
+    },
+    {
+        "text": "If you hit issues, check the customer is evaluating competitors before renewing ",
+        "ms": 87.1
+    },
+    {
+        "text": "The team is focused on the deal is blocked on Q3 budget sign-off.",
+        "ms": 87.27
+    },
+    {
+        "text": "The team is focused on budget approval is pending with finance. They also mentio",
+        "ms": 87.48
+    },
+    {
+        "text": "If you hit issues, check the deal is blocked on Q3 budget sign-off and review th",
+        "ms": 87.26
+    },
+    {
+        "text": "The team is focused on executive sponsorship from the CTO is secured.",
+        "ms": 87.65
+    },
+    {
+        "text": "The team is focused on leadership wants a board-ready summary. They also mention",
+        "ms": 87.25
+    },
+    {
+        "text": "If you hit issues, check executive sponsorship from the CTO is secured and revie",
+        "ms": 87.4
+    },
+    {
+        "text": "The team is focused on an expansion opportunity around the renewal.",
+        "ms": 87.44
+    },
+    {
+        "text": "The team is focused on an expansion opportunity around the renewal. They also me",
+        "ms": 87.28
+    },
+    {
+        "text": "If you hit issues, check renewal conversation tied to a multi-year commitment an",
+        "ms": 86.89
+    }
+]

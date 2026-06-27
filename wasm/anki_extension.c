@@ -44,6 +44,16 @@ extern const char *anki_metrics_json(void);
 EMSCRIPTEN_KEEPALIVE
 const char *anki_metrics(void) { return anki_metrics_json(); }
 
+/* Rust: per-embedding profiling log ([{text, ms}, ...]) + reset. */
+extern const char *anki_embed_log_json(void);
+extern void anki_embed_log_clear(void);
+
+EMSCRIPTEN_KEEPALIVE
+const char *anki_embed_log(void) { return anki_embed_log_json(); }
+
+EMSCRIPTEN_KEEPALIVE
+void anki_embed_log_reset(void) { anki_embed_log_clear(); }
+
 static const char ANKI_VERSION[] = "0.1.0";
 
 static void anki_version_fn(sqlite3_context *ctx, int argc, sqlite3_value **argv) {

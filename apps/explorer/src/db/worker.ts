@@ -131,6 +131,7 @@ class AnkiWorker implements AnkiWorkerApi {
   ): Promise<TableInfo[]> {
     // Overwrite: close + delete any existing database and its sidecars.
     await this.dropDatabase(path);
+    this.sqlite3?.wasm?.exports?.anki_embed_log_reset?.(); // profile just this run
 
     const s = this.require();
     const db = this.opfsAvailable
@@ -154,7 +155,34 @@ class AnkiWorker implements AnkiWorkerApi {
 
     await writeSidecar(notesName(path), demoNotes());
     await writeSidecar(queryName(path), demoQuery());
+    this.dumpEmbedLog();
     return this.schema(path);
+  }
+
+  /** Reads the per-embedding profiling log from the wasm. */
+  private embedLog(): Array<{ text: string; ms: number }> {
+    try {
+      const wasm = this.sqlite3?.wasm;
+      const fn = wasm?.exports?.anki_embed_log;
+      return fn ? JSON.parse(wasm.cstrToJs(fn())) : [];
+    } catch {
+      return [];
+    }
+  }
+
+  /** Prints the per-embedding timings + a summary to the console. */
+  private dumpEmbedLog(): void {
+    const log = this.embedLog();
+    if (log.length === 0) return;
+    const ms = log.map((e) => e.ms).sort((a, b) => a - b);
+    const sum = ms.reduce((a, b) => a + b, 0);
+    const pct = (p: number) => ms[Math.min(ms.length - 1, Math.floor((p / 100) * ms.length))];
+    console.log(
+      `[anki] embeddings: ${log.length} | avg ${(sum / log.length).toFixed(1)}ms | ` +
+        `min ${ms[0].toFixed(1)} | p50 ${pct(50).toFixed(1)} | p95 ${pct(95).toFixed(1)} | ` +
+        `max ${ms[ms.length - 1].toFixed(1)} | total ${(sum / 1000).toFixed(1)}s`,
+    );
+    console.log(JSON.stringify(log));
   }
 
   async readNotes(path: string): Promise<string> {
