@@ -22,9 +22,10 @@ only), and **measured** vs **estimated**.
   embeddings** and **~equal latency** — Candle is a tiny interpreter vs Tract's
   optimizing compiler.
 - The single biggest latency lever is **not the engine**: the tokenizer pads
-  every input to a **fixed 128 tokens**. Removing that (pad to actual length)
-  takes a short embed from **96 ms → 10.7 ms (~9×)** in wasm — and also fixes a
-  latent **mean-pooling correctness bug**.
+  every input to a **fixed 128 tokens**. In the demo, **82% of every forward
+  pass is wasted on padding** (avg 22.5 real tokens out of 128). Removing that
+  (pad to actual length) takes a short embed from **96 ms → 10.7 ms (~9×)** in
+  wasm — and also fixes a latent **mean-pooling correctness bug**.
 
 ---
 
@@ -178,6 +179,27 @@ truncation: max_length 128
 so **every input is processed at exactly 128 tokens** — short text padded *up*,
 long text truncated *down*. That explains the flatness, the tiny variance in §3,
 and why "longer text = slower" never happens.
+
+### What the real demo data shows
+
+Per-embed token counts from the 1,200-embedding demo run (saved as
+`docs/embeddings-metrics-{tract,candle}-st-padding128.json`):
+
+| | tract-st | candle-st |
+| --- | ---: | ---: |
+| total | 107.7 s | 116.1 s |
+| avg per embed | 89.7 ms | 96.8 ms |
+| avg real tokens | 22.5 | 22.5 |
+| avg pad tokens | 105.5 | 105.5 |
+| real-token range | 9–60 | 9–60 |
+
+**82% of every forward pass is spent on `[PAD]` tokens.** The longest real text
+in the whole demo is **60 tokens** — nothing approaches 128, so truncation never
+even fires; it's pure padding waste. Projected effect of the fix: ~90 ms →
+**~20–30 ms** average (the demo's real texts average ~22 tokens), i.e. the full
+build drops from ~105 s to **~25–35 s**.
+
+### The fix, measured on a single short text
 
 Removing the fixed padding (pad to the input's **actual** length) on a short
 text:
