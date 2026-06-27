@@ -60,7 +60,11 @@ function vectorColumns(sql: string): Set<string> {
   const out = new Set<string>();
   const m = /using\s+anki\s*\(([\s\S]*)\)/i.exec(sql);
   if (!m) return out;
-  for (const part of m[1].split(",")) {
+  // Strip `--` line comments first: the demo schema annotates columns inline,
+  // and a trailing comment would otherwise bleed into the next comma-split part
+  // and steal its column name.
+  const body = m[1].replace(/--[^\n]*/g, "");
+  for (const part of body.split(",")) {
     const tokens = part.trim().split(/\s+/);
     if (tokens.length === 0) continue;
     const name = tokens[0].replace(/["`[\]]/g, "");

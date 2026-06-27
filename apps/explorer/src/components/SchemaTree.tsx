@@ -92,21 +92,17 @@ export function SchemaTree({ tables, activeTable, onOpenTable }: SchemaTreeProps
                 {t.columns.map((c) => (
                   <Described key={c.name} desc={c.description}>
                     <div className="flex items-center gap-1.5 px-2 py-0.5 text-xs text-muted-foreground">
-                      {/* left: type */}
                       {typeIcon(c.type)}
-                      <span className="truncate text-foreground/80">{c.name}</span>
-                      {/* right: type name + qualifier icons */}
-                      <span className="ml-auto flex shrink-0 items-center gap-1">
-                        {c.type && (
-                          <span className="text-[10px] uppercase text-muted-foreground/50">
-                            {c.type}
-                          </span>
-                        )}
-                        {c.pk && <KeyRound className="h-3 w-3 text-amber-400" />}
-                        {c.isVector && <Sparkles className="h-3 w-3 text-violet-400" />}
-                        {c.notnull && !c.pk && <Asterisk className="h-3 w-3 text-rose-400" />}
-                        {c.hasDefault && <Equal className="h-3 w-3 text-muted-foreground/60" />}
-                      </span>
+                      <span className="text-foreground/80">{c.name}</span>
+                      {c.type && (
+                        <span className="text-[10px] uppercase text-muted-foreground/50">
+                          {c.type}
+                        </span>
+                      )}
+                      {c.pk && <KeyRound className="h-3 w-3 text-amber-400" />}
+                      {c.isVector && <Sparkles className="h-3 w-3 text-violet-400" />}
+                      {c.notnull && !c.pk && <Asterisk className="h-3 w-3 text-rose-400" />}
+                      {c.hasDefault && <Equal className="h-3 w-3 text-muted-foreground/60" />}
                     </div>
                   </Described>
                 ))}
