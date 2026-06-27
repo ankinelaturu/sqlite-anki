@@ -19,13 +19,14 @@ only), and **measured** vs **estimated**.
   optimization, and tokenizer init all happen **once**; per-row cost is purely
   the transformer forward pass.
 - Swapping Tract → **Candle** cuts the wasm to **~5 MB (–65%)** with **identical
-  embeddings** and **~equal latency** — Candle is a tiny interpreter vs Tract's
-  optimizing compiler.
-- The single biggest latency lever is **not the engine**: the tokenizer pads
-  every input to a **fixed 128 tokens**. In the demo, **82% of every forward
-  pass is wasted on padding** (avg 22.5 real tokens out of 128). Removing that
-  (pad to actual length) takes a short embed from **96 ms → 10.7 ms (~9×)** in
-  wasm — and also fixes a latent **mean-pooling correctness bug**.
+  embeddings** — Candle is a tiny interpreter vs Tract's optimizing compiler.
+  Latency looked equal under padding, but once padding is removed **Tract is
+  ~34% faster** — so it's a real **size vs speed** tradeoff.
+- The single biggest latency lever is **not the engine**: the tokenizer padded
+  every input to a **fixed 128 tokens** — **82% of every forward pass wasted on
+  `[PAD]`** (avg 22.5 real tokens of 128). Padding to actual length cut a short
+  embed **96 ms → 10.7 ms (~9×)**, the **full demo build ~105 s → 19 s (Tract) /
+  25 s (Candle)**, and fixed a latent **mean-pooling correctness bug**.
 
 ---
 
@@ -114,15 +115,19 @@ Same model, same API (`Embedder`), engine selected by a build flag
 | --- | ---: | ---: |
 | wasm size | **14.4 MB** | **5.0 MB** |
 | wasm size (gzip) | ~3.64 MB | ~1.3 MB |
-| per-embed (wasm, short) | ~87 ms | ~95 ms |
+| per-embed, padded-128 (wasm) | ~89.7 ms | ~96.8 ms |
+| per-embed, pad-to-actual (wasm) | **15.7 ms** | **21.0 ms** |
 | per-embed (host, native) | ~62 ms | ~48 ms |
 | correctness | reference | **identical to Tract** (≈6 sig-figs) |
 | integration suite | 34/34 | **34/34** |
 
-- **Latency is a wash** in wasm (the ~8 ms is run-to-run noise; see §5 where
-  matched-length runs are within ~1 ms). On the host Candle is faster because it
-  gets AVX + `rayon` threads that single-threaded wasm doesn't.
-- **Size is the real difference: –65%.**
+- **Latency:** padded to 128, the engines are a **wash** (~8%). But after the
+  padding fix (§5) the gap **widens to ~34%** (Tract 15.7 vs Candle 21.0 ms) —
+  with the real matmuls now small, Candle's per-node interpreter overhead is a
+  bigger fraction. (On the host Candle is *faster*, because it gets AVX +
+  `rayon` threads that single-threaded wasm doesn't.)
+- **Size is the real difference: –65%.** So it's a genuine **size (Candle) vs
+  speed (Tract)** tradeoff — see §8.
 
 ### Why Candle is so much smaller
 
@@ -195,9 +200,8 @@ Per-embed token counts from the 1,200-embedding demo run (saved as
 
 **82% of every forward pass is spent on `[PAD]` tokens.** The longest real text
 in the whole demo is **60 tokens** — nothing approaches 128, so truncation never
-even fires; it's pure padding waste. Projected effect of the fix: ~90 ms →
-**~20–30 ms** average (the demo's real texts average ~22 tokens), i.e. the full
-build drops from ~105 s to **~25–35 s**.
+even fires; it's pure padding waste. Effect of the fix (measured below): the
+full build drops from ~105 s to **~19 s** (Tract).
 
 ### The fix, measured on a single short text
 
@@ -211,6 +215,31 @@ text:
 
 **~9× faster in wasm** for typical short fields (titles, notes), and
 **engine-independent**.
+
+### After the fix: the full demo, both engines
+
+Re-running the 1,200-embedding demo with `with_padding(None)`
+(`docs/embeddings-metrics-{tract,candle}-st-paddingNONE.json`):
+
+| | tract-st | candle-st |
+| --- | ---: | ---: |
+| before — Fixed(128) | 107.7 s / 89.7 ms | 116.1 s / 96.8 ms |
+| **after — pad-to-actual** | **18.9 s / 15.7 ms** | **25.2 s / 21.0 ms** |
+| **speedup** | **5.7×** | **4.6×** |
+| p50 / p95 | 15.4 / 28.7 ms | 20.1 / 34.2 ms |
+| min / max | 7.6 / 40.2 ms | 11.5 / 47.4 ms |
+| pad tokens | 105.5 → **0** | 105.5 → **0** |
+
+Per-embed now **scales with real length** (9–60 tokens) instead of being pinned
+at 128 — note the p95 (28.7 ms) is well above the p50 (15.4 ms), which never
+happened when every input was 128 tokens.
+
+And a consequence worth flagging: **with padding gone, the engine gap widens**.
+Padded to 128, Tract and Candle were within ~8%; now Tract is **~34% faster**
+(15.7 vs 21.0 ms). The real matmuls are now small, so Candle's fixed per-node
+interpreter overhead is a larger fraction — exactly where Tract's pre-optimized
+plan pays off. The padding fix didn't just speed both up; it **changed the engine
+tradeoff** (see §4, §8).
 
 ### Bonus: a pooling correctness bug
 
@@ -261,16 +290,18 @@ passing vectors in — the workflow this project exists to replace.
 
 ## 8. Decisions / recommendations
 
-1. **Fix tokenizer padding first** (engine-independent): `with_padding(None)` so
-   short text isn't padded to 128. ~9× on the common case, plus the masked-mean
-   correctness fix. This changes the per-embed floor, so re-benchmark everything
-   on top of it.
-2. **Candle is a strong default for size** (–65% download) at parity latency;
-   revisit once `candle-mt` and the padding fix are in.
-3. **Threads only matter for Candle** (`gemm`); skip `tract-mt`.
-4. **True single-digit-ms** embedding requires a **native** build — out of scope
-   for the browser deliverable, but the path if a desktop extension is ever
-   shipped.
+1. **Padding fix — done.** `with_padding(None)` (pad to actual length) gave
+   **5.7× (Tract) / 4.6× (Candle)** on the demo and corrected the masked-mean
+   pooling. The biggest, cheapest, engine-independent win. (Requires re-embedding
+   DBs built before it — old vectors aren't comparable.)
+2. **Engine choice is now a real size-vs-speed tradeoff** — *not* the wash it
+   looked like under padding. Post-fix: **Tract 15.7 ms / 14.4 MB** vs
+   **Candle 21.0 ms / 5.0 MB**. Tract for latency, Candle for download size.
+3. **`candle-mt` is the deciding experiment** — Candle's `gemm` parallelizes, so
+   threads could shrink (or erase) the 34% latency gap while keeping the –65%
+   size win. Skip `tract-mt` (not viable).
+4. **True single-digit-ms** embedding needs a **native** build — out of scope for
+   the browser deliverable, but the path for a desktop extension.
 
 ---
 
