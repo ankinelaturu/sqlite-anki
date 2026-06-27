@@ -11,13 +11,13 @@
  *
  * `sqlite3Init` is THE public entry point: it boots the custom `dist/` build and
  * (given `opts.anki`) loads the model. The loader is imported statically so the
- * bundler rewrites its sibling `sqlite3.wasm` / OPFS-proxy URLs (works in Vite
+ * bundler rewrites its sibling `sqlite-anki.wasm` / OPFS-proxy URLs (works in Vite
  * dev + build); it's pulled in only here, not by the model registry, so a main
  * thread that only reads `@sqlite-anki/wasm/registry` stays free of the wasm.
  */
 import type { default as UpstreamInit } from "@sqlite.org/sqlite-wasm";
 // @ts-ignore untyped generated .mjs
-import sqlite3WasmInit from "../dist/sqlite3-bundler-friendly.mjs";
+import sqlite3WasmInit from "../dist/sqlite-anki_bundler-friendly.mjs";
 import { ANKI_MODEL_REGISTRY, type AnkiModelSpec } from "./registry";
 
 export type Sqlite3Module = Awaited<ReturnType<typeof UpstreamInit>>;
@@ -199,7 +199,7 @@ export async function loadAnkiModel(
 }
 
 /**
- * Boots the custom `sqlite3.wasm` (with the sqlite-anki extension) and, when
+ * Boots the custom `sqlite-anki.wasm` (with the sqlite-anki extension) and, when
  * `opts.anki` is given, loads the embedding model. This is the entry point apps
  * should call.
  */

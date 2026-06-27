@@ -187,10 +187,15 @@ for w in "$WASM_DIR"/jswasm/sqlite3*.wasm; do
   [[ -f "$w" ]] && { wasm-strip "$w" || echo "    (wasm-strip failed on $(basename "$w"), continuing)"; }
 done
 
-# --- Publish to packages/wasm/dist ---------------------------------------------
-
-echo "==> Copying artifacts to $DIST"
+# --- Publish to packages/wasm/dist (renamed sqlite3* -> sqlite-anki*) ----------
+#
+# Artifacts are renamed so it's clear this is the sqlite-anki build, not stock
+# SQLite. Only the *file names* change (and the quoted runtime references the
+# loaders use to fetch the .wasm / OPFS proxy by name); the JS API namespace
+# (`sqlite3`, `sqlite3InitModule`) is upstream's and stays as-is.
+echo "==> Publishing artifacts to $DIST (sqlite3* -> sqlite-anki*)"
 mkdir -p "$DIST"
+rm -f "$DIST"/sqlite3* "$DIST"/sqlite-anki*   # drop stale artifacts from prior builds
 shopt -s nullglob
 for f in \
   "$WASM_DIR/jswasm/sqlite3.mjs" \
@@ -203,9 +208,24 @@ for f in \
   "$WASM_DIR/jswasm/sqlite3-api.mjs" \
   "$WASM_DIR/jswasm/sqlite3-api-bundler-friendly.mjs"
 do
-  [[ -f "$f" ]] && cp -p "$f" "$DIST/"
+  [[ -f "$f" ]] || continue
+  # `_` marks the product/descriptor boundary (the name itself has a hyphen):
+  # sqlite3.wasm -> sqlite-anki.wasm, sqlite3-node.mjs -> sqlite-anki_node.mjs
+  cp -p "$f" "$DIST/$(basename "$f" | sed 's/^sqlite3-/sqlite-anki_/; s/^sqlite3\./sqlite-anki./')"
 done
 shopt -u nullglob
+
+# Rewrite the loaders' quoted runtime references to the renamed files. Only
+# quoted filename literals are touched — never the bare `sqlite3.wasm` JS
+# property (which is the SQLite API and must stay).
+for f in "$DIST"/*.mjs "$DIST"/*.js; do
+  [[ -f "$f" ]] || continue
+  perl -i -pe '
+    s/(["\x27])sqlite3\.wasm\1/${1}sqlite-anki.wasm${1}/g;
+    s/(["\x27])sqlite3-opfs-async-proxy\.js\1/${1}sqlite-anki_opfs-async-proxy.js${1}/g;
+    s/(["\x27])sqlite3-bundler-friendly\.mjs\1/${1}sqlite-anki_bundler-friendly.mjs${1}/g;
+  ' "$f"
+done
 
 cat >"$DIST/BUILD_INFO.txt" <<EOF
 sqlite-anki custom WASM build

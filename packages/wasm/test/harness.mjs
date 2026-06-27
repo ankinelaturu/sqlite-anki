@@ -28,9 +28,9 @@ function requireFile(path, hint) {
 
 /** Initializes a fresh wasm module instance (no model loaded). */
 export async function loadModule() {
-  const wasmPath = requireFile(join(dist, "sqlite3.wasm"), "run: pnpm build:wasm");
+  const wasmPath = requireFile(join(dist, "sqlite-anki.wasm"), "run: pnpm build:wasm");
   const loaderPath = requireFile(
-    join(dist, "sqlite3-node.mjs"),
+    join(dist, "sqlite-anki_node.mjs"),
     "run: pnpm build:wasm"
   );
   const wasmBinary = readFileSync(wasmPath);
