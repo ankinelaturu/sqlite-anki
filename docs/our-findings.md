@@ -127,7 +127,7 @@ Same model, same API (`Embedder`), engine selected by a build flag
   bigger fraction. (On the host Candle is *faster*, because it gets AVX +
   `rayon` threads that single-threaded wasm doesn't.)
 - **Size is the real difference: –65%.** So it's a genuine **size (Candle) vs
-  speed (Tract)** tradeoff — see §8.
+  speed (Tract)** tradeoff — see §9.
 
 ### Why Candle is so much smaller
 
@@ -239,7 +239,7 @@ Padded to 128, Tract and Candle were within ~8%; now Tract is **~34% faster**
 (15.7 vs 21.0 ms). The real matmuls are now small, so Candle's fixed per-node
 interpreter overhead is a larger fraction — exactly where Tract's pre-optimized
 plan pays off. The padding fix didn't just speed both up; it **changed the engine
-tradeoff** (see §4, §8).
+tradeoff** (see §4, §9).
 
 ### Bonus: a pooling correctness bug
 
@@ -285,7 +285,42 @@ real throughput lever.
 
 ---
 
-## 7. The ceiling: wasm vs native
+## 7. Per-embed cost vs sequence length (after the padding fix)
+
+With padding off, per-embed time finally **scales with the real token count**.
+Swept across all three builds up to the model's **512-token limit** (BERT's
+position-embedding table — longer input can't run at all, so 600–1000 tokens
+aren't testable on this model):
+
+| real tokens | tract-st | candle-st | candle-mt |
+| ---: | ---: | ---: | ---: |
+| 79  | **61.2** | 76.0 | 80.9 |
+| 155 | **120.5** | 124.0 | 127.5 |
+| 307 | 277.3 | **270.7** | 272.6 |
+| 459 | 454.2 | **441.2** | 446.9 |
+| 512 | 525.0 | **505.8** | 511.2 |
+
+(avg ms/embed; **bold** = fastest)
+
+- **~Linear in tokens** (~1 ms/token at the top end): a 512-token embed is ~40× a
+  short one. This is the "longer text is slower" intuition — it was just hidden
+  before by the Fixed(128) padding/truncation.
+- **Engine crossover at ~200–250 tokens.** Short text → **Tract** wins (and wins
+  big at very short: 79 tok = 61 vs 76 ms, ~24%). Long text → **Candle** edges
+  ahead (~3%), its `gemm` kernels scaling better on the larger matmuls.
+- **`candle-mt` ≈ `candle-st` at *every* length, including 512** — threads never
+  engage usefully, even on big matmuls (candle-mt is a hair *slower* from
+  overhead). Conclusive: wasm threads don't help this model on this runtime, at
+  any size.
+
+Practical read: real embedding text (titles, notes, sentences) is short — the
+regime where **Tract wins** — and the tokenizer truncates at 128 anyway. So
+`tract-st` stays the default; Candle's edge only appears for long-document
+embedding (where it's also the smaller binary).
+
+---
+
+## 8. The ceiling: wasm vs native
 
 ~87 ms is mostly the **wasm tax**, not Tract:
 
@@ -306,7 +341,7 @@ passing vectors in — the workflow this project exists to replace.
 
 ---
 
-## 8. Decisions / recommendations
+## 9. Decisions / recommendations
 
 1. **Padding fix — done.** `with_padding(None)` (pad to actual length) gave
    **5.7× (Tract) / 4.6× (Candle)** on the demo and corrected the masked-mean
