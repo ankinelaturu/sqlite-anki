@@ -102,15 +102,15 @@ In-browser embedding was profiled in depth — full data in
 
   | build | typical text | long (512 tok) | wasm |
   |-------|-------------:|---------------:|-----:|
-  | `tract-st` (default) | ~16 ms | 525 ms | 14.4 MB |
-  | `candle-st` | ~21 ms | 506 ms | 5.0 MB |
+  | `tract-onnx-st` (default) | ~16 ms | 525 ms | 14.4 MB |
+  | `candle-onnx-st` | ~21 ms | 506 ms | 5.0 MB |
 
   Per-embed time scales ~linearly with tokens (BERT caps at 512). wasm threads
-  (`candle-mt`) gave **no** measurable gain at any length — the per-sentence
+  (`candle-onnx-mt`) gave **no** measurable gain at any length — the per-sentence
   matmuls are too small. Native (non-wasm) ONNX would be ~single-digit ms, but
   that's a different deliverable.
 
-Default is **`tract-st`** (fastest, stable toolchain, no nightly).
+Default is **`tract-onnx-st`** (fastest, stable toolchain, no nightly).
 
 ## Monorepo layout
 

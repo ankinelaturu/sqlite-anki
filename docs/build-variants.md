@@ -1,7 +1,7 @@
 # WASM build variants (embedding-engine benchmarks)
 
-**Status:** implemented — `tract-st` (default), `candle-st`, `candle-mt` build and
-pass the suite; `tract-mt` is a tombstone (see below). Results in
+**Status:** implemented — `tract-onnx-st` (default), `candle-onnx-st`, `candle-onnx-mt` build and
+pass the suite; `tract-onnx-mt` is a tombstone (see below). Results in
 `docs/our-findings.md`.
 **Last updated:** 2026-06-27
 
@@ -16,25 +16,32 @@ The bottleneck is the in-wasm transformer forward pass (see
 `docs/metrics.md` / the `anki_embed_log` instrumentation). These variants exist
 to answer "is the engine or the single-threading the limiter?" empirically.
 
-## Two orthogonal axes
+## Naming: `[engine]-[format]-[threads]`
 
 | axis | values | meaning |
 | --- | --- | --- |
-| **engine** | `tract` \| `candle` | which Rust inference crate runs the ONNX model |
+| **engine** | `tract` \| `candle` | which Rust inference crate runs the model |
+| **format** | `onnx` \| `native` | ONNX graph (interpreted/optimized) vs native weights (safetensors via `candle-transformers`) |
 | **threads** | `st` \| `mt` | single-threaded vs wasm threads (emscripten `-pthread`) |
 
-Threading is a **wasm build concern**, not an engine feature — the same emscripten
-plumbing applies to either engine. So it's two flags, not four bespoke builds.
+Not every combination exists: **Tract is ONNX-only** (no `native`), and the `-mt`
+axis is a documented dead end (threads show no gain — see Results), so the real set
+is small. `build:wasm` aliases `build:wasm:tract-onnx-st`; a format target with no
+thread suffix (e.g. `build:wasm:candle-onnx`) aliases its `-st` form.
 
 ## Scripts
 
-| script | engine | threads | notes |
+| script | format | threads | status |
 | --- | --- | --- | --- |
-| `build:wasm` | tract | st | **alias of `build:wasm:tract-st`** — the default, stable toolchain |
-| `build:wasm:tract-st` | tract | st | fastest (see findings) |
-| `build:wasm:tract-mt` | tract | mt | tombstone — fails with an explanation (Tract doesn't parallelize a single pass) |
-| `build:wasm:candle-st` | candle | st | smallest wasm; `gemm` kernels |
-| `build:wasm:candle-mt` | candle | mt | Candle + wasm threads — **needs nightly** |
+| `build:wasm` → `tract-onnx-st` | onnx | st | ✅ **default**, stable toolchain |
+| `build:wasm:tract-onnx[-st]` | onnx | st | ✅ fastest (see Results) |
+| `build:wasm:tract-onnx-mt` | onnx | mt | ⚰️ tombstone — no gain; would need nightly |
+| `build:wasm:candle-onnx[-st]` | onnx | st | ✅ smallest wasm; `gemm` kernels |
+| `build:wasm:candle-onnx-mt` | onnx | mt | ✅ built, no gain — **needs nightly** |
+| `build:wasm:candle-native[-st]` | native | st | 🔮 not implemented — safetensors → quantized |
+| `build:wasm:candle-native-mt` | native | mt | 🔮 not implemented |
+
+(`tract-native` / `*-dual` don't exist — Tract can't read safetensors.)
 
 Each script sets env and calls `scripts/build-wasm.sh`; all variants **overwrite
 `packages/wasm/dist/`** (build one → benchmark → build the next). They are not
@@ -66,13 +73,13 @@ co-installed.
     (`-pthread`, `-sPTHREAD_POOL_SIZE=<ncpu>`, shared memory) and the matching
     `RUSTFLAGS` (`-C target-feature=+atomics,+bulk-memory,+simd128`).
 - **pnpm scripts** are thin wrappers, e.g.
-  `"build:wasm:candle-mt": "ANKI_ENGINE=candle ANKI_THREADS=1 bash scripts/build-wasm.sh"`.
+  `"build:wasm:candle-onnx-mt": "ANKI_ENGINE=candle ANKI_THREADS=1 bash scripts/build-wasm.sh"`.
 
 ## Benchmarking
 
 Each variant keeps the `anki_embed_log` instrumentation. To compare:
 
-1. Build a variant (e.g. `pnpm build:wasm:candle-st`).
+1. Build a variant (e.g. `pnpm build:wasm:candle-onnx-st`).
 2. Run a node bench against `packages/wasm/dist` (load model → embed a fixed set of
    texts → read `anki_embed_log()` → report count / avg / p50 / p95).
 3. Repeat per variant; compare averages.
@@ -84,14 +91,14 @@ Report: engine, threads, avg ms/embed, p50/p95, wasm size.
 All produce **identical embeddings** and pass the 34-test integration suite. Speeds
 below are post the tokenizer **padding fix** (pad to actual length), n=400 node bench.
 
-- **`tract-st`** — **fastest, ~12.7 ms**, 14.4 MB wasm. The default.
-- **`candle-st`** — ~17.8 ms (~40% slower), but **5.0 MB** (−65%). Pick for size.
-- **`candle-mt`** — **~17.6 ms — no gain over `candle-st`.** `gemm`'s `rayon` *is*
+- **`tract-onnx-st`** — **fastest, ~12.7 ms**, 14.4 MB wasm. The default.
+- **`candle-onnx-st`** — ~17.8 ms (~40% slower), but **5.0 MB** (−65%). Pick for size.
+- **`candle-onnx-mt`** — **~17.6 ms — no gain over `candle-onnx-st`.** `gemm`'s `rayon` *is*
   enabled, but on this runtime (node, 10-core M-series) it measured identical to
   st: rayon likely saw 1 thread, or `gemm` kept the small per-sentence matmuls
   (9–60 tokens) single-threaded by heuristic. Kept as a reproducible experiment —
   it may behave differently on another runtime/core-count/browser.
-- **`tract-mt`** — tombstone. Same nightly cost as `candle-mt` and Tract doesn't
+- **`tract-onnx-mt`** — tombstone. Same nightly cost as `candle-onnx-mt` and Tract doesn't
   parallelize a single pass, so the script fails with an explanation instead.
 
 **Shared caveats:**
@@ -101,7 +108,7 @@ below are post the tokenizer **padding fix** (pad to actual length), n=400 node 
 
 ## Decision
 
-**Default = `tract-st`** (fastest, stable toolchain). `candle-st` is the
+**Default = `tract-onnx-st`** (fastest, stable toolchain). `candle-onnx-st` is the
 size-optimized alternative (−65%). Neither `-mt` variant helps — the post-padding
 matmuls are too small for threads to pay off. The remaining lever for big gains is
 a **smaller/quantized model** (engine-agnostic) or a **native** (non-wasm)

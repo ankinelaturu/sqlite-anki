@@ -109,7 +109,7 @@ clue — see §5.
 ## 4. Engine comparison — Tract vs Candle
 
 Same model, same API (`Embedder`), engine selected by a build flag
-(`build:wasm:tract-st` / `build:wasm:candle-st`; see `docs/build-variants.md`).
+(`build:wasm:tract-onnx-st` / `build:wasm:candle-onnx-st`; see `docs/build-variants.md`).
 
 | | **Tract (default)** | **Candle** |
 | --- | ---: | ---: |
@@ -190,7 +190,7 @@ and why "longer text = slower" never happens.
 Per-embed token counts from the 1,200-embedding demo run (saved as
 `docs/embeddings-metrics-{tract,candle}-st-padding128.json`):
 
-| | tract-st | candle-st |
+| | tract-onnx-st | candle-onnx-st |
 | --- | ---: | ---: |
 | total | 107.7 s | 116.1 s |
 | avg per embed | 89.7 ms | 96.8 ms |
@@ -221,7 +221,7 @@ text:
 Re-running the 1,200-embedding demo with `with_padding(None)`
 (`docs/embeddings-metrics-{tract,candle}-st-paddingNONE.json`):
 
-| | tract-st | candle-st |
+| | tract-onnx-st | candle-onnx-st |
 | --- | ---: | ---: |
 | before — Fixed(128) | 107.7 s / 89.7 ms | 116.1 s / 96.8 ms |
 | **after — pad-to-actual** | **18.9 s / 15.7 ms** | **25.2 s / 21.0 ms** |
@@ -262,20 +262,20 @@ Both `-mt` variants need the **same** toolchain: wasm threads on
 `-Z build-std`** (the prebuilt `std` is single-threaded) + emscripten `-pthread`.
 That cost is engine-agnostic.
 
-- **`candle-mt` — built, runs, but no speedup.** On an n=400 node bench it measured
-  **~17.6 ms, identical to `candle-st` (~17.8 ms)** — and all 34 integration tests
+- **`candle-onnx-mt` — built, runs, but no speedup.** On an n=400 node bench it measured
+  **~17.6 ms, identical to `candle-onnx-st` (~17.8 ms)** — and all 34 integration tests
   pass (correct under threads). `gemm`'s `rayon` *is* enabled, so it *should* be
   able to parallelize; on this runtime (node, 10-core M-series) it didn't help —
   rayon likely saw 1 thread, or `gemm` kept the small per-sentence matmuls (9–60
   tokens) single-threaded by heuristic. **Kept as a reproducible experiment**
-  (`build:wasm:candle-mt`): it may differ on another runtime/core-count/browser.
-- **`tract-mt` — deliberately not built (tombstone).** It would take the *same*
-  toolchain as `candle-mt` — nightly + `-Z build-std` (`+atomics`/`+bulk-memory`)
+  (`build:wasm:candle-onnx-mt`): it may differ on another runtime/core-count/browser.
+- **`tract-onnx-mt` — deliberately not built (tombstone).** It would take the *same*
+  toolchain as `candle-onnx-mt` — nightly + `-Z build-std` (`+atomics`/`+bulk-memory`)
   + emscripten `-pthread`, and a COOP/COEP-isolated host to load. We skipped it
-  because: (1) `candle-mt` already showed wasm threads give **no gain** on these
+  because: (1) `candle-onnx-mt` already showed wasm threads give **no gain** on these
   small matmuls, and (2) Tract doesn't parallelize a single forward pass anyway —
   so it's the same nightly dependency for an expected null result. The
-  `build:wasm:tract-mt` script therefore **fails with this explanation** instead
+  `build:wasm:tract-onnx-mt` script therefore **fails with this explanation** instead
   of carrying a nightly toolchain we don't benefit from.
 
 **Why threads don't help here:** after the padding fix the matmuls are tiny (avg
@@ -292,7 +292,7 @@ Swept across all three builds up to the model's **512-token limit** (BERT's
 position-embedding table — longer input can't run at all, so 600–1000 tokens
 aren't testable on this model):
 
-| real tokens | tract-st | candle-st | candle-mt |
+| real tokens | tract-onnx-st | candle-onnx-st | candle-onnx-mt |
 | ---: | ---: | ---: | ---: |
 | 79  | **61.2** | 76.0 | 80.9 |
 | 155 | **120.5** | 124.0 | 127.5 |
@@ -308,14 +308,14 @@ aren't testable on this model):
 - **Engine crossover at ~200–250 tokens.** Short text → **Tract** wins (and wins
   big at very short: 79 tok = 61 vs 76 ms, ~24%). Long text → **Candle** edges
   ahead (~3%), its `gemm` kernels scaling better on the larger matmuls.
-- **`candle-mt` ≈ `candle-st` at *every* length, including 512** — threads never
-  engage usefully, even on big matmuls (candle-mt is a hair *slower* from
+- **`candle-onnx-mt` ≈ `candle-onnx-st` at *every* length, including 512** — threads never
+  engage usefully, even on big matmuls (candle-onnx-mt is a hair *slower* from
   overhead). Conclusive: wasm threads don't help this model on this runtime, at
   any size.
 
 Practical read: real embedding text (titles, notes, sentences) is short — the
 regime where **Tract wins** — and the tokenizer truncates at 128 anyway. So
-`tract-st` stays the default; Candle's edge only appears for long-document
+`tract-onnx-st` stays the default; Candle's edge only appears for long-document
 embedding (where it's also the smaller binary).
 
 ---
@@ -350,9 +350,9 @@ passing vectors in — the workflow this project exists to replace.
 2. **Engine choice is now a real size-vs-speed tradeoff** — *not* the wash it
    looked like under padding. Post-fix: **Tract 15.7 ms / 14.4 MB** vs
    **Candle 21.0 ms / 5.0 MB**. Tract for latency, Candle for download size.
-3. **`candle-mt` is the deciding experiment** — Candle's `gemm` parallelizes, so
+3. **`candle-onnx-mt` is the deciding experiment** — Candle's `gemm` parallelizes, so
    threads could shrink (or erase) the 34% latency gap while keeping the –65%
-   size win. Skip `tract-mt` (not viable).
+   size win. Skip `tract-onnx-mt` (not viable).
 4. **True single-digit-ms** embedding needs a **native** build — out of scope for
    the browser deliverable, but the path for a desktop extension.
 
