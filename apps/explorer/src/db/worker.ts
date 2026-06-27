@@ -228,12 +228,19 @@ class AnkiWorker implements AnkiWorkerApi {
       const desc = parseSqlDescriptions(t.sql ?? "");
       const cols = db.selectObjects(
         `PRAGMA table_info(${quote(t.name)})`,
-      ) as Array<{ name: string; type: string; notnull: number; pk: number }>;
+      ) as Array<{
+        name: string;
+        type: string;
+        notnull: number;
+        pk: number;
+        dflt_value: unknown;
+      }>;
       const columns: ColumnInfo[] = cols.map((c) => ({
         name: c.name,
         type: c.type || (vec.has(c.name) ? "TEXT VECTOR" : ""),
         notnull: c.notnull === 1,
         pk: c.pk === 1,
+        hasDefault: c.dflt_value != null,
         isVector: vec.has(c.name),
         description: desc.cols.get(c.name),
       }));

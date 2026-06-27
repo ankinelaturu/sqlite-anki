@@ -10,6 +10,8 @@ export interface ColumnInfo {
   type: string;
   notnull: boolean;
   pk: boolean;
+  /** Column has a DEFAULT value (`dflt_value` in `PRAGMA table_info`). */
+  hasDefault: boolean;
   isVector: boolean;
   /** Human description from the `_meta_columns` table, if present. */
   description?: string;

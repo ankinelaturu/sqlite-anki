@@ -1,9 +1,32 @@
 import { useState, type ReactElement } from "react";
-import { ChevronRight, Columns3, KeyRound, Sparkles, Table2 } from "lucide-react";
+import {
+  Asterisk,
+  Binary,
+  Calendar,
+  ChevronRight,
+  Columns3,
+  Equal,
+  Hash,
+  KeyRound,
+  Sparkles,
+  Table2,
+  Type,
+} from "lucide-react";
 import type { TableInfo } from "@/db";
-import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+
+/** Left-side icon from the column's SQLite type affinity. */
+function typeIcon(type: string | undefined): ReactElement {
+  const cls = "h-3 w-3 shrink-0";
+  const t = (type ?? "").toUpperCase();
+  if (/INT/.test(t)) return <Hash className={cn(cls, "text-sky-400")} />;
+  if (/CHAR|TEXT|CLOB/.test(t)) return <Type className={cn(cls, "text-emerald-400")} />;
+  if (/REAL|FLOA|DOUB|NUM|DEC/.test(t)) return <Hash className={cn(cls, "text-sky-400")} />;
+  if (/BLOB/.test(t)) return <Binary className={cn(cls, "text-orange-400")} />;
+  if (/DATE|TIME/.test(t)) return <Calendar className={cn(cls, "text-pink-400")} />;
+  return <Columns3 className={cls} />;
+}
 
 /** Wraps an element in a shadcn tooltip when there's a description. */
 function Described({ desc, children }: { desc?: string; children: ReactElement }) {
@@ -69,17 +92,21 @@ export function SchemaTree({ tables, activeTable, onOpenTable }: SchemaTreeProps
                 {t.columns.map((c) => (
                   <Described key={c.name} desc={c.description}>
                     <div className="flex items-center gap-1.5 px-2 py-0.5 text-xs text-muted-foreground">
-                      {c.pk ? (
-                        <KeyRound className="h-3 w-3 text-amber-400" />
-                      ) : (
-                        <Columns3 className="h-3 w-3" />
-                      )}
+                      {/* left: type */}
+                      {typeIcon(c.type)}
                       <span className="truncate text-foreground/80">{c.name}</span>
-                      {c.isVector ? (
-                        <Badge variant="vector">vector</Badge>
-                      ) : (
-                        c.type && <span className="text-muted-foreground/70">{c.type}</span>
-                      )}
+                      {/* right: type name + qualifier icons */}
+                      <span className="ml-auto flex shrink-0 items-center gap-1">
+                        {c.type && (
+                          <span className="text-[10px] uppercase text-muted-foreground/50">
+                            {c.type}
+                          </span>
+                        )}
+                        {c.pk && <KeyRound className="h-3 w-3 text-amber-400" />}
+                        {c.isVector && <Sparkles className="h-3 w-3 text-violet-400" />}
+                        {c.notnull && !c.pk && <Asterisk className="h-3 w-3 text-rose-400" />}
+                        {c.hasDefault && <Equal className="h-3 w-3 text-muted-foreground/60" />}
+                      </span>
                     </div>
                   </Described>
                 ))}
