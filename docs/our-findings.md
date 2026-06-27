@@ -257,13 +257,31 @@ the correct ones).
 
 ## 6. Threading
 
-- **`tract-mt` — not viable.** wasm threads on `wasm32-unknown-emscripten` need
-  `+atomics`/`+bulk-memory`, i.e. a nightly `-Z build-std`; and Tract doesn't
-  parallelize a single small forward pass anyway. Heavy plumbing, ~no gain. The
-  `build:wasm:tract-mt` script intentionally fails with this explanation.
-- **`candle-mt` — pending.** Candle's `gemm` *does* parallelize, so this is the
-  one threading variant worth measuring (after the padding fix changes the
-  per-embed floor).
+Both `-mt` variants need the **same** toolchain: wasm threads on
+`wasm32-unknown-emscripten` require `+atomics`/`+bulk-memory`, i.e. a **nightly
+`-Z build-std`** (the prebuilt `std` is single-threaded) + emscripten `-pthread`.
+That cost is engine-agnostic.
+
+- **`candle-mt` — built, runs, but no speedup.** On an n=400 node bench it measured
+  **~17.6 ms, identical to `candle-st` (~17.8 ms)** — and all 34 integration tests
+  pass (correct under threads). `gemm`'s `rayon` *is* enabled, so it *should* be
+  able to parallelize; on this runtime (node, 10-core M-series) it didn't help —
+  rayon likely saw 1 thread, or `gemm` kept the small per-sentence matmuls (9–60
+  tokens) single-threaded by heuristic. **Kept as a reproducible experiment**
+  (`build:wasm:candle-mt`): it may differ on another runtime/core-count/browser.
+- **`tract-mt` — deliberately not built (tombstone).** It would take the *same*
+  toolchain as `candle-mt` — nightly + `-Z build-std` (`+atomics`/`+bulk-memory`)
+  + emscripten `-pthread`, and a COOP/COEP-isolated host to load. We skipped it
+  because: (1) `candle-mt` already showed wasm threads give **no gain** on these
+  small matmuls, and (2) Tract doesn't parallelize a single forward pass anyway —
+  so it's the same nightly dependency for an expected null result. The
+  `build:wasm:tract-mt` script therefore **fails with this explanation** instead
+  of carrying a nightly toolchain we don't benefit from.
+
+**Why threads don't help here:** after the padding fix the matmuls are tiny (avg
+~22 real tokens, 384 hidden, 6 layers). At that size, thread dispatch overhead
+cancels any parallelism gain — the same reason batching, not threading, is the
+real throughput lever.
 
 ---
 

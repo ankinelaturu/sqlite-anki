@@ -1,6 +1,8 @@
 # WASM build variants (embedding-engine benchmarks)
 
-**Status:** planned — not yet implemented.
+**Status:** implemented — `tract-st` (default), `candle-st`, `candle-mt` build and
+pass the suite; `tract-mt` is a tombstone (see below). Results in
+`docs/our-findings.md`.
 **Last updated:** 2026-06-27
 
 ## Goal
@@ -28,15 +30,26 @@ plumbing applies to either engine. So it's two flags, not four bespoke builds.
 
 | script | engine | threads | notes |
 | --- | --- | --- | --- |
-| `build:wasm` | tract | st | **alias of `build:wasm:tract-st`** — the default, unchanged |
-| `build:wasm:tract-st` | tract | st | today's baseline |
-| `build:wasm:tract-mt` | tract | mt | Tract + wasm threads |
-| `build:wasm:candle-st` | candle | st | Candle (uses the `gemm` matmul kernels) |
-| `build:wasm:candle-mt` | candle | mt | Candle + wasm threads |
+| `build:wasm` | tract | st | **alias of `build:wasm:tract-st`** — the default, stable toolchain |
+| `build:wasm:tract-st` | tract | st | fastest (see findings) |
+| `build:wasm:tract-mt` | tract | mt | tombstone — fails with an explanation (Tract doesn't parallelize a single pass) |
+| `build:wasm:candle-st` | candle | st | smallest wasm; `gemm` kernels |
+| `build:wasm:candle-mt` | candle | mt | Candle + wasm threads — **needs nightly** |
 
 Each script sets env and calls `scripts/build-wasm.sh`; all variants **overwrite
 `packages/wasm/dist/`** (build one → benchmark → build the next). They are not
 co-installed.
+
+### Prerequisites
+
+- **All variants:** `protoc` is needed only for the Candle engine
+  (`brew install protobuf`).
+- **`-mt` variants:** a **nightly** toolchain + `rust-src`
+  (`rustup toolchain install nightly && rustup component add rust-src --toolchain nightly`)
+  — wasm threads need `-Z build-std` with `+atomics` (the prebuilt emscripten
+  `std` is single-threaded). The resulting wasm uses `SharedArrayBuffer`, so it
+  only **loads in a browser under COOP/COEP** (cross-origin isolation). The
+  default `build:wasm` needs none of this.
 
 ## How it works (implementation plan)
 
@@ -66,29 +79,30 @@ Each variant keeps the `anki_embed_log` instrumentation. To compare:
 
 Report: engine, threads, avg ms/embed, p50/p95, wasm size.
 
-## Expectations & caveats (hypotheses to test, not conclusions)
+## Results (measured — full numbers in `docs/our-findings.md`)
 
-- **`tract-st`** — baseline (~87 ms).
-- **`tract-mt`** — *likely little gain.* Tract doesn't obviously parallelize a single
-  short-sentence forward pass; small matmuls + thread overhead may wash out. The
-  plumbing is real but the payoff is doubtful — treat as a quick spike.
-- **`candle-st`** — *possibly faster than `tract-st`*: Candle's matmul uses the
-  `gemm` crate (well SIMD-tuned). Unknowns: does `candle-onnx` run MiniLM correctly
-  in wasm, and do the pooled embeddings match Tract's?
-- **`candle-mt`** — *the most likely to show a threading win*, since `gemm`
-  parallelizes. This is the headline experiment.
-- **Shared caveats:**
-  - All variants pay the **wasm SIMD tax** (128-bit lanes, no AVX) — none will
-    approach native ORT (~single-digit ms).
-  - `mt` builds need **`SharedArrayBuffer`** → COOP/COEP headers (the explorer
-    already sets them) and spawn worker threads; growable shared memory has
-    emscripten constraints to watch.
-  - `candle` adds heavy deps → larger wasm + slower build.
-  - Output correctness must be verified per engine (cosine of a known pair, and
-    that `MATCH` results are sane), not just speed.
+All produce **identical embeddings** and pass the 34-test integration suite. Speeds
+below are post the tokenizer **padding fix** (pad to actual length), n=400 node bench.
+
+- **`tract-st`** — **fastest, ~12.7 ms**, 14.4 MB wasm. The default.
+- **`candle-st`** — ~17.8 ms (~40% slower), but **5.0 MB** (−65%). Pick for size.
+- **`candle-mt`** — **~17.6 ms — no gain over `candle-st`.** `gemm`'s `rayon` *is*
+  enabled, but on this runtime (node, 10-core M-series) it measured identical to
+  st: rayon likely saw 1 thread, or `gemm` kept the small per-sentence matmuls
+  (9–60 tokens) single-threaded by heuristic. Kept as a reproducible experiment —
+  it may behave differently on another runtime/core-count/browser.
+- **`tract-mt`** — tombstone. Same nightly cost as `candle-mt` and Tract doesn't
+  parallelize a single pass, so the script fails with an explanation instead.
+
+**Shared caveats:**
+- All variants pay the **wasm SIMD tax** (128-bit lanes, no AVX) — none approach
+  native ORT (~single-digit ms).
+- `candle` adds heavy deps → smaller wasm but slower build (and needs `protoc`).
 
 ## Decision
 
-After benchmarking, pick one default. If no in-wasm variant beats the baseline
-meaningfully, the real lever remains a **smaller/quantized model** (engine-agnostic)
-or a **native** (non-wasm) deployment — see `docs/embeddings-metrics.json` analysis.
+**Default = `tract-st`** (fastest, stable toolchain). `candle-st` is the
+size-optimized alternative (−65%). Neither `-mt` variant helps — the post-padding
+matmuls are too small for threads to pay off. The remaining lever for big gains is
+a **smaller/quantized model** (engine-agnostic) or a **native** (non-wasm)
+deployment — see `docs/our-findings.md`.

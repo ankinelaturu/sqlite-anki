@@ -68,12 +68,25 @@ case "$ANKI_ENGINE" in
   *) die "ANKI_ENGINE must be 'tract' or 'candle' (got '$ANKI_ENGINE')" ;;
 esac
 
-echo "==> Building anki-wasm ($WASM_TARGET, staticlib, +simd128, engine=$ANKI_ENGINE)"
+# Threads: 0 (default, single-threaded) or 1 (wasm pthreads). MT requires a
+# nightly toolchain + build-std with +atomics (the prebuilt emscripten std is
+# single-threaded). See docs/build-variants.md.
+ANKI_THREADS="${ANKI_THREADS:-0}"
+
+echo "==> Building anki-wasm ($WASM_TARGET, staticlib, +simd128, engine=$ANKI_ENGINE, threads=$ANKI_THREADS)"
 # wasm SIMD (simd128) lets LLVM vectorize the matmuls — the dominant cost of
 # embedding. Big speedup; requires a SIMD-capable browser (all modern ones).
-RUSTFLAGS="${RUSTFLAGS:-} -C target-feature=+simd128" \
-  cargo build -p anki-wasm --target "$WASM_TARGET" --release \
-  --no-default-features --features "engine-$ANKI_ENGINE"
+if [[ "$ANKI_THREADS" == "1" ]]; then
+  command -v rustup >/dev/null 2>&1 && rustup component add rust-src --toolchain nightly >/dev/null 2>&1 || true
+  RUSTFLAGS="${RUSTFLAGS:-} -C target-feature=+simd128,+atomics,+bulk-memory -C link-args=-pthread" \
+    cargo +nightly build -p anki-wasm --target "$WASM_TARGET" --release \
+    -Z build-std=std,panic_abort \
+    --no-default-features --features "engine-$ANKI_ENGINE"
+else
+  RUSTFLAGS="${RUSTFLAGS:-} -C target-feature=+simd128" \
+    cargo build -p anki-wasm --target "$WASM_TARGET" --release \
+    --no-default-features --features "engine-$ANKI_ENGINE"
+fi
 
 ANKI_LIB="$CARGO_TARGET/libanki_wasm.a"
 [[ -f "$ANKI_LIB" ]] || die "missing staticlib $ANKI_LIB (cargo build failed?)"
@@ -134,6 +147,14 @@ done
 # HEAPU8 is needed so the JS glue can copy model/tokenizer bytes into the wasm
 # heap before calling anki_load_model.
 ANKI_LINK="$ANKI_LIB -msimd128 -sEXPORTED_RUNTIME_METHODS=wasmMemory,HEAPU64,HEAP64,HEAPU8"
+
+# wasm threads: shared memory + a worker pool so Candle's gemm/rayon can run
+# matmuls in parallel. Growable shared memory needs an explicit MAXIMUM_MEMORY.
+if [[ "$ANKI_THREADS" == "1" ]]; then
+  NCPU="$(sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 8)"
+  ANKI_LINK="$ANKI_LINK -pthread -sPTHREAD_POOL_SIZE=$NCPU -sMAXIMUM_MEMORY=2GB"
+  echo "==> wasm threads ON (pool=$NCPU)"
+fi
 
 # Headroom for the runtime-loaded ONNX model (copied into the heap at load) +
 # inference arenas. ALLOW_MEMORY_GROWTH covers larger models.

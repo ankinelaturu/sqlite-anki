@@ -6,6 +6,7 @@
     "build:wasm:tract-st": "bash scripts/build-wasm.sh",
     "build:wasm:tract-mt": "echo 'build:wasm:tract-mt is intentionally unsupported: Tract does not multi-thread a single embedding forward pass, and wasm threads on wasm32-unknown-emscripten need a nightly build-std (+atomics) toolchain — heavy plumbing for no expected speedup. Use build:wasm:candle-mt instead (its gemm kernels parallelize). See docs/build-variants.md.' && exit 1",
     "build:wasm:candle-st": "ANKI_ENGINE=candle bash scripts/build-wasm.sh",
+    "build:wasm:candle-mt": "ANKI_ENGINE=candle ANKI_THREADS=1 bash scripts/build-wasm.sh",
     "dev": "pnpm --filter @sqlite-anki/explorer dev",
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck"
