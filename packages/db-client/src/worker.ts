@@ -439,10 +439,62 @@ Standard SQLite tables alongside **anki virtual tables** with multiple
 | \`knowledge_articles\` | anki | abstract, body, troubleshooting |
 | \`pipeline\` | view | accounts ⋈ opportunities |
 
-Open the **SQL** tab for ready-to-run examples — semantic search, hybrid
-relational + \`MATCH\` filters, the MATCH DSL (\`/exact\`, \`/hnsw:N\`), JOINs, and
-multi-column \`similarity()\`. Tip: select one statement and use **Run selection**.
-Watch the **status bar** for embedding / search timings on every query.
+The same examples are pre-loaded in the **SQL** tab — tip: select one statement
+and use **Run selection**. Watch the **status bar** for embedding / search
+timings on every query.
+
+## Example queries
+
+Semantic search, ranked by similarity:
+
+\`\`\`sql
+SELECT title, round(similarity(customer_notes), 3) AS score
+FROM opportunities
+WHERE customer_notes MATCH 'enterprise rollout'
+ORDER BY score DESC LIMIT 10;
+\`\`\`
+
+Pick the strategy with the **MATCH DSL** — exact vs approximate:
+
+\`\`\`sql
+SELECT title FROM opportunities WHERE customer_notes MATCH 'budget approval/exact';
+SELECT title FROM opportunities WHERE customer_notes MATCH 'budget approval/hnsw:512';
+\`\`\`
+
+Hybrid — relational filter **and** semantic match, with a JOIN:
+
+\`\`\`sql
+SELECT a.name, o.title, o.stage
+FROM opportunities o JOIN accounts a ON a.id = o.account_id
+WHERE o.stage = 'Negotiation' AND o.customer_notes MATCH 'budget approved';
+\`\`\`
+
+Support tickets — meaning beats keywords:
+
+\`\`\`sql
+SELECT subject, resolution
+FROM support_tickets
+WHERE problem MATCH 'users cannot login after sso migration';
+\`\`\`
+
+Knowledge base:
+
+\`\`\`sql
+SELECT title, category FROM knowledge_articles
+WHERE body MATCH 'how to migrate enterprise customers to the cloud';
+\`\`\`
+
+Multiple semantic columns in one query:
+
+\`\`\`sql
+SELECT title,
+       round(similarity(summary), 3)        AS summary_score,
+       round(similarity(customer_notes), 3) AS notes_score
+FROM opportunities
+WHERE summary MATCH 'manufacturing expansion'
+  AND customer_notes MATCH 'budget approved'
+ORDER BY summary_score DESC;
+\`\`\`
 `;
 }
 
