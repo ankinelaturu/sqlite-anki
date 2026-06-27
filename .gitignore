@@ -11,7 +11,7 @@ dist/
 models/**/*.onnx
 models/**/*.onnx.data
 
-# WASM build output
+# WASM build output (built from source in CI — see .github/workflows/deploy.yml)
 packages/wasm/dist/
 
 # Vendored SQLite + Emscripten (fetched by scripts/build-wasm.sh)

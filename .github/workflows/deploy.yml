@@ -1,0 +1,88 @@
+name: Deploy explorer (Vercel)
+
+# Builds the wasm from source in CI (Vercel's build image can't — no Rust /
+# Emscripten / wabt), then deploys the prebuilt explorer to Vercel. This is the
+# alternative to committing the ~14 MB wasm into git.
+#
+# Required repo secrets (Settings → Secrets and variables → Actions):
+#   VERCEL_TOKEN       — a Vercel access token
+#   VERCEL_ORG_ID      — from `vercel link` (.vercel/project.json) or the dashboard
+#   VERCEL_PROJECT_ID  — same source
+#
+# Also set `git.deploymentEnabled.main: false` in vercel.json so Vercel's own
+# git integration doesn't try (and fail) to build on push — this workflow owns
+# the deploy.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-explorer
+  cancel-in-progress: true
+
+env:
+  VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+  VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Rust toolchain (+ wasm target)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-emscripten
+
+      # Speeds up the Tract compile (the slow part) across runs.
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Emscripten SDK
+        uses: mymindstorm/setup-emsdk@v14
+
+      - name: wabt (provides wasm-strip)
+        run: sudo apt-get update && sudo apt-get install -y wabt
+
+      # Cache the vendored SQLite checkout + generated sqlite3.c (build-wasm.sh
+      # clones + configures it; this avoids redoing that every run).
+      - name: Cache vendored SQLite
+        uses: actions/cache@v4
+        with:
+          path: vendor/sqlite
+          key: sqlite-${{ hashFiles('scripts/build-wasm.sh') }}
+
+      - name: Install deps
+        run: pnpm install --frozen-lockfile
+
+      - name: Build wasm (default tract-onnx-st)
+        run: pnpm build:wasm
+
+      - name: Install Vercel CLI
+        run: npm i -g vercel@latest
+
+      - name: Vercel pull (project settings + env)
+        run: vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+
+      # Runs vercel.json buildCommand (pnpm --filter explorer build). The wasm
+      # artifacts from the step above are already in packages/wasm/dist.
+      - name: Vercel build
+        run: vercel build --prod --token="$VERCEL_TOKEN"
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+
+      - name: Vercel deploy (prebuilt)
+        run: vercel deploy --prebuilt --prod --token="$VERCEL_TOKEN"
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
