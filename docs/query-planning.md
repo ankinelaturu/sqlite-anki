@@ -54,6 +54,34 @@ separate vtab scan per OR branch and unions the rowids. MATCH and the branch's
 filter are pushed into each scan (e.g. `m2;f0,2` with `'active'`, then with
 `'trial'`). So OR + MATCH is handled correctly, pre-filtered per branch.
 
+### Multiple `MATCH` columns: AND = one scan, OR = union of scans
+
+The vtab is a **conjunctive engine** — `xFilter` only ever executes a set of
+AND-ed constraints. SQLite decomposes OR *above* the vtab, so the two cases are
+fundamentally different:
+
+- **`a MATCH x AND b MATCH y [AND rel]`** → one `xBestIndex` claims *every*
+  vector-column MATCH (plus pushable filters) into a single `idxStr` (e.g.
+  `m2;m3;f1,2`); one `xFilter` embeds all the queries and does a **single pass**,
+  keeping a row only if it clears the threshold on **every** matched column,
+  storing a **per-column score**. So multi-column MATCH is one intersecting scan,
+  and `similarity(summary)` vs `similarity(customer_notes)` return different
+  numbers. (Cost ≈ O(rows × matches) — the general/exact path; a lone MATCH with
+  no filter still uses the HNSW fast path.)
+
+- **`a MATCH x OR b MATCH y`** → MULTI-INDEX OR: `xFilter` runs **once per
+  branch**, each a *single*-MATCH scan (so each can use HNSW), and SQLite unions
+  the rowids. Scores are per-branch: a row from the `a` branch has a score for
+  `a`; `similarity(b)` on it is `NULL`.
+
+- **`(a MATCH x OR b MATCH y) AND status='open'`** → the OR expands to a union and
+  the AND'd filter is distributed into each branch (`a MATCH x AND status='open'`,
+  then `b MATCH y AND status='open'`), each scanned and unioned.
+
+The mechanism: `xBestIndex` claims all MATCH constraints it is offered in a single
+plan (it used to take only the first, which made a second MATCH error with
+*"unable to use function MATCH in the requested context"*).
+
 ### Functions on a column are the genuine post-filter case
 
 `lower(status)='active'` is not `column OP value`, so it is **never offered** to

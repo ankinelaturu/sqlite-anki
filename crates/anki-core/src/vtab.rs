@@ -331,7 +331,9 @@ struct AnkiVtab {
 
 struct MatchRow {
     rowid: i64,
-    sim: Option<f32>,
+    /// One cosine score per matched column, aligned to `AnkiCursor::match_cols`.
+    /// Empty when the scan has no `MATCH`.
+    sims: Vec<f32>,
 }
 
 #[repr(C)]
@@ -340,8 +342,9 @@ struct AnkiCursor {
     vtab: *mut AnkiVtab,
     results: Vec<MatchRow>,
     pos: usize,
-    /// Active `MATCH` column index, or -1 when scanning without `MATCH`.
-    match_col: i32,
+    /// Columns with an active `MATCH` (in plan order); empty when none.
+    /// `similarity(col)` maps its argument back to one of these.
+    match_cols: Vec<usize>,
 }
 
 // Single-threaded WASM: the in-flight cursor for `similarity()` resolution.
@@ -422,7 +425,8 @@ struct Filter {
 /// The plan `xBestIndex` encodes into `idxStr` and `xFilter` parses back:
 /// the optional `MATCH` (vector column + argv slot) and the pushed filters.
 struct Plan {
-    match_: Option<(usize, usize)>,
+    /// All `MATCH`es, as (vector column, argv slot), in plan order.
+    matches: Vec<(usize, usize)>,
     filters: Vec<Filter>,
 }
 
@@ -443,7 +447,7 @@ unsafe fn set_idx_str(info: &mut sqlite3_index_info, s: &str) {
 /// argv order: `m<col>` (MATCH on vector column) or `f<col>,<op>` (filter).
 unsafe fn parse_idx_str(idx_str: *const c_char) -> Plan {
     let mut plan = Plan {
-        match_: None,
+        matches: Vec::new(),
         filters: Vec::new(),
     };
     if idx_str.is_null() {
@@ -461,7 +465,7 @@ unsafe fn parse_idx_str(idx_str: *const c_char) -> Plan {
         match kind {
             "m" => {
                 if let Ok(col) = rest.parse::<usize>() {
-                    plan.match_ = Some((col, slot));
+                    plan.matches.push((col, slot));
                 }
             }
             "f" => {
@@ -979,7 +983,7 @@ fn exact_scan(
             if sim >= DEFAULT_SIMILARITY_THRESHOLD {
                 results.push(MatchRow {
                     rowid: *rowid,
-                    sim: Some(sim),
+                    sims: vec![sim],
                 });
             }
         }
@@ -1192,11 +1196,10 @@ unsafe extern "C" fn x_best_index(vtab: *mut sqlite3_vtab, info: *mut sqlite3_in
         }
         // aConstraintUsage[i] is our reply slot for constraint i.
         let u = &mut *info.aConstraintUsage.offset(i);
-        if !has_match
-            && c.op == SQLITE_INDEX_CONSTRAINT_MATCH
-            && st.columns[col as usize].is_vector
-        {
-            // Semantic search on a TEXT VECTOR column. Take the first one.
+        if c.op == SQLITE_INDEX_CONSTRAINT_MATCH && st.columns[col as usize].is_vector {
+            // Semantic search on a TEXT VECTOR column. Claim *every* MATCH so
+            // `a MATCH x AND b MATCH y` works (SQLite errors if any is left
+            // unclaimed); xFilter ANDs them.
             argv_n += 1;
             u.argvIndex = argv_n; // its RHS arrives as xFilter argv[argv_n-1]
             u.omit = 1; // MATCH is fully handled here
@@ -1242,7 +1245,7 @@ unsafe extern "C" fn x_open(vtab: *mut sqlite3_vtab, pp: *mut *mut sqlite3_vtab_
         vtab: vtab as *mut AnkiVtab,
         results: Vec::new(),
         pos: 0,
-        match_col: -1,
+        match_cols: Vec::new(),
     }));
     *pp = cur as *mut sqlite3_vtab_cursor;
     SQLITE_OK
@@ -1284,7 +1287,7 @@ unsafe extern "C" fn x_filter(
     // Reset the cursor for a fresh scan.
     c.results.clear();
     c.pos = 0;
-    c.match_col = -1;
+    c.match_cols.clear();
 
     // Decode the plan x_best_index chose (which argv slots are MATCH vs filters).
     let plan = parse_idx_str(idx_str);
@@ -1304,82 +1307,128 @@ unsafe extern "C" fn x_filter(
         })
     };
 
-    match plan.match_ {
-        // --- has a semantic MATCH ---
-        Some((col, slot)) => {
-            c.match_col = col as i32; // remember it so similarity() can read scores
-
-            // Parse the MATCH DSL ("query[/mode[:candidates]]"). A parse error
-            // (bad directive) sets the vtab error and aborts the scan.
-            let raw = value_to_string(*argv.offset(slot as isize));
+    if plan.matches.is_empty() {
+        // No MATCH: a (possibly filtered) scan. `similarity()` stays NULL.
+        for (rowid, row) in st.rows.iter() {
+            if row_passes(row) {
+                c.results.push(MatchRow { rowid: *rowid, sims: Vec::new() });
+            }
+        }
+    } else {
+        // One or more semantic MATCHes. Parse the DSL + embed each query; a NULL
+        // or empty query means the (AND'd) result set is empty.
+        struct MatchQ {
+            col: usize,
+            q: Vec<f32>,
+            mode: Mode,
+            candidates: Option<usize>,
+        }
+        let mut queries: Vec<MatchQ> = Vec::with_capacity(plan.matches.len());
+        for (col, slot) in &plan.matches {
+            let raw = value_to_string(*argv.offset(*slot as isize));
             let mq = match raw.as_deref() {
                 Some(s) => match parse_match(s) {
-                    Ok(mq) => Some(mq),
+                    Ok(mq) => mq,
                     Err(e) => {
                         set_err(&mut (*c.vtab).base.zErrMsg, &format!("anki: {e}"));
                         return SQLITE_ERROR;
                     }
                 },
-                None => None, // NULL match value => no results
-            };
-
-            // Embed the query text once; empty/None query => no results.
-            if let Some(q) = mq.as_ref().and_then(|m| embed_text(&m.query)) {
-                let mq = mq.unwrap();
-                let t_search = metrics::now_ms();
-                let mut candidates = 0usize;
-                if preds.is_empty() {
-                    // No relational filter. `mode` chooses the strategy here.
-                    match mq.mode {
-                        Mode::Hnsw => {
-                            if st.index_dirty {
-                                rebuild_indexes(st);
-                            }
-                            let cap = mq.candidates.unwrap_or(HNSW_CANDIDATE_CAP);
-                            match st.indexes.get(col).and_then(|o| o.as_ref()) {
-                                Some(idx) => {
-                                    let k = cap.min(st.rows.len());
-                                    for (rowid, sim) in idx.search(&q, k, cap) {
-                                        candidates += 1;
-                                        if sim >= DEFAULT_SIMILARITY_THRESHOLD {
-                                            c.results.push(MatchRow { rowid, sim: Some(sim) });
-                                        }
-                                    }
-                                }
-                                None => {
-                                    candidates = exact_scan(&mut c.results, &st.rows, col, &q, None)
-                                }
-                            }
-                        }
-                        // exact: brute-force over all rows, no candidate cap.
-                        Mode::Exact => {
-                            candidates = exact_scan(&mut c.results, &st.rows, col, &q, None)
-                        }
-                    }
-                } else {
-                    // Relational filter present: rank only the rows passing it.
-                    // Brute-force over that subset (no cap → no recall cliff);
-                    // this path is already exact regardless of `mode`.
-                    candidates = exact_scan(
-                        &mut c.results,
-                        &st.rows,
-                        col,
-                        &q,
-                        Some(&row_passes as &dyn Fn(&Row) -> bool),
-                    );
+                None => {
+                    queries.clear();
+                    break;
                 }
-                metrics::record_search(metrics::now_ms() - t_search, candidates, c.results.len());
-                c.results
-                    .sort_by(|a, b| b.sim.partial_cmp(&a.sim).unwrap_or(Ordering::Equal));
+            };
+            match embed_text(&mq.query) {
+                Some(q) => queries.push(MatchQ {
+                    col: *col,
+                    q,
+                    mode: mq.mode,
+                    candidates: mq.candidates,
+                }),
+                None => {
+                    queries.clear();
+                    break;
+                }
             }
         }
-        None => {
-            // No MATCH: a (possibly filtered) scan. `similarity()` stays NULL.
-            for (rowid, row) in st.rows.iter() {
-                if row_passes(row) {
-                    c.results.push(MatchRow { rowid: *rowid, sim: None });
+        c.match_cols = queries.iter().map(|m| m.col).collect();
+
+        if !queries.is_empty() {
+            let t_search = metrics::now_ms();
+            let mut candidates = 0usize;
+
+            if queries.len() == 1 && preds.is_empty() {
+                // Fast path: a single MATCH with no relational filter. `mode`
+                // chooses HNSW (approximate) vs exact.
+                let m = &queries[0];
+                match m.mode {
+                    Mode::Hnsw => {
+                        if st.index_dirty {
+                            rebuild_indexes(st);
+                        }
+                        let cap = m.candidates.unwrap_or(HNSW_CANDIDATE_CAP);
+                        match st.indexes.get(m.col).and_then(|o| o.as_ref()) {
+                            Some(idx) => {
+                                let k = cap.min(st.rows.len());
+                                for (rowid, sim) in idx.search(&m.q, k, cap) {
+                                    candidates += 1;
+                                    if sim >= DEFAULT_SIMILARITY_THRESHOLD {
+                                        c.results.push(MatchRow { rowid, sims: vec![sim] });
+                                    }
+                                }
+                            }
+                            None => {
+                                candidates = exact_scan(&mut c.results, &st.rows, m.col, &m.q, None)
+                            }
+                        }
+                    }
+                    Mode::Exact => {
+                        candidates = exact_scan(&mut c.results, &st.rows, m.col, &m.q, None)
+                    }
+                }
+            } else {
+                // General path: AND of several MATCHes (and/or a relational
+                // filter). Exact-scan the pre-filtered rows; a row qualifies only
+                // if EVERY matched column clears the threshold. Keep per-column
+                // scores so `similarity(col)` can return each one.
+                for (rowid, row) in st.rows.iter() {
+                    if !preds.is_empty() && !row_passes(row) {
+                        continue;
+                    }
+                    let mut sims = Vec::with_capacity(queries.len());
+                    let mut all = true;
+                    for m in &queries {
+                        candidates += 1;
+                        match row.embeddings.get(m.col).and_then(|e| e.as_ref()) {
+                            Some(emb) => {
+                                let s = cosine(&m.q, emb);
+                                if s < DEFAULT_SIMILARITY_THRESHOLD {
+                                    all = false;
+                                    break;
+                                }
+                                sims.push(s);
+                            }
+                            None => {
+                                all = false;
+                                break;
+                            }
+                        }
+                    }
+                    if all {
+                        c.results.push(MatchRow { rowid: *rowid, sims });
+                    }
                 }
             }
+
+            // Rank by combined relevance (sum of per-column scores); an explicit
+            // ORDER BY similarity(col) in the query overrides this.
+            c.results.sort_by(|a, b| {
+                let sa: f32 = a.sims.iter().sum();
+                let sb: f32 = b.sims.iter().sum();
+                sb.partial_cmp(&sa).unwrap_or(Ordering::Equal)
+            });
+            metrics::record_search(metrics::now_ms() - t_search, candidates, c.results.len());
         }
     }
 
@@ -1553,8 +1602,8 @@ unsafe extern "C" fn x_find_function(
 /// similarity, or `NULL` when no `MATCH` is active on the scan.
 unsafe extern "C" fn similarity_fn(
     ctx: *mut sqlite3_context,
-    _argc: c_int,
-    _argv: *mut *mut sqlite3_value,
+    argc: c_int,
+    argv: *mut *mut sqlite3_value,
 ) {
     let cur = CURRENT_CURSOR;
     if cur.is_null() {
@@ -1562,14 +1611,37 @@ unsafe extern "C" fn similarity_fn(
         return;
     }
     let c = &*cur;
-    if c.match_col < 0 || c.pos >= c.results.len() {
+    if c.match_cols.is_empty() || c.pos >= c.results.len() {
         sqlite3_result_null(ctx);
         return;
     }
-    match c.results[c.pos].sim {
-        Some(s) => sqlite3_result_double(ctx, s as f64),
-        None => sqlite3_result_null(ctx),
+    let sims = &c.results[c.pos].sims;
+    if sims.is_empty() {
+        sqlite3_result_null(ctx);
+        return;
     }
+    // Single MATCH: the column is unambiguous.
+    if c.match_cols.len() == 1 {
+        sqlite3_result_double(ctx, sims[0] as f64);
+        return;
+    }
+    // Multiple MATCHes: `similarity(col)` is passed that column's *value* for the
+    // current row, so map it back to a matched column by comparing values.
+    let arg = if argc >= 1 { value_to_string(*argv) } else { None };
+    let st = &*(*c.vtab).state;
+    if let Some(row) = st.rows.get(&c.results[c.pos].rowid) {
+        for (i, &col) in c.match_cols.iter().enumerate() {
+            let cell_text = match row.cells.get(col) {
+                Some(Cell::Text(t)) => Some(t.as_str()),
+                _ => None,
+            };
+            if cell_text.is_some() && cell_text == arg.as_deref() {
+                sqlite3_result_double(ctx, sims[i] as f64);
+                return;
+            }
+        }
+    }
+    sqlite3_result_null(ctx);
 }
 
 /// Global `similarity(x)` stub: `NULL` outside a `MATCH` context. The vtab

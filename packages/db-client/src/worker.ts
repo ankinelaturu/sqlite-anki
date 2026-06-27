@@ -386,7 +386,7 @@ WHERE problem MATCH 'users cannot login after sso migration';
 SELECT title, category FROM knowledge_articles
 WHERE body MATCH 'how to migrate enterprise customers to the cloud';
 
--- Multiple semantic columns in one query
+-- Multiple semantic columns in one query (AND), with per-column scores
 SELECT title,
        round(similarity(summary), 3)        AS summary_score,
        round(similarity(customer_notes), 3) AS notes_score
@@ -484,7 +484,8 @@ SELECT title, category FROM knowledge_articles
 WHERE body MATCH 'how to migrate enterprise customers to the cloud';
 \`\`\`
 
-Multiple semantic columns in one query:
+Multiple semantic columns in one query — \`MATCH\` several vector columns (AND'd)
+and read each column's score with \`similarity()\`:
 
 \`\`\`sql
 SELECT title,

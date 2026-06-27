@@ -105,9 +105,9 @@ Uses OPFS for persistence. Requires COOP/COEP headers (configured in Vite).
   auto-embedding INSERT/UPDATE/DELETE, `MATCH`, `similarity()`, persistence
   (shadow tables), transactions/savepoints.
 - **Search:** HNSW ANN + exact brute-force (`MATCH` DSL `mode`), hybrid
-  relational+semantic pre-filtering.
-- **Model:** loaded at runtime (not bundled); wasm ≈ 15 MB.
+  relational+semantic pre-filtering, and **multiple `MATCH` columns per query**
+  (AND'd, each with its own `similarity()` score).
+- **Model:** loaded at runtime (not bundled); wasm ≈ 14 MB.
 - **Tests:** Rust unit tests (`cargo test`) + WASM integration suite
   (`pnpm --filter @sqlite-anki/wasm test`).
-- **Not yet:** `similarity()` inside aggregates, multiple `MATCH` columns per
-  query, explorer wired to `sqlite3Init({ anki })`, quantized model.
+- **Not yet:** `similarity()` inside aggregates, quantized model.
