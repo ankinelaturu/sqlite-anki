@@ -1,9 +1,14 @@
 <!doctype html>
-<html lang="en" class="dark">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>sqlite-anki Explorer</title>
+    <script>
+      // Apply the saved theme before first paint (avoids a flash).
+      document.documentElement.dataset.theme =
+        localStorage.getItem("theme") || "dark";
+    </script>
   </head>
   <body>
     <div id="root"></div>

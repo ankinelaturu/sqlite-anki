@@ -6,6 +6,7 @@ import "@uiw/react-markdown-preview/markdown.css";
 import { Check, RefreshCw, Save } from "lucide-react";
 import type { AnkiWorkerApi, Remote } from "@sqlite-anki/db-client";
 import { Button } from "@/components/ui/button";
+import { useTheme } from "@/lib/theme";
 import { cn } from "@/lib/utils";
 
 interface NotesViewProps {
@@ -20,6 +21,7 @@ export function NotesView({ api, path }: NotesViewProps) {
   const [state, setState] = useState<SaveState>("loading");
   const [view, setView] = useState<"write" | "preview">("write");
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const colorMode = useTheme() === "light" ? "light" : "dark";
 
   useEffect(() => {
     let alive = true;
@@ -105,7 +107,7 @@ export function NotesView({ api, path }: NotesViewProps) {
           <CodeMirror
             value={content}
             onChange={onChange}
-            theme="dark"
+            theme={colorMode}
             extensions={[markdown()]}
             basicSetup={{ lineNumbers: false, foldGutter: false, highlightActiveLine: false }}
             height="100%"
@@ -117,7 +119,7 @@ export function NotesView({ api, path }: NotesViewProps) {
               <MarkdownPreview
                 source={content}
                 style={{ background: "transparent", fontSize: 14 }}
-                wrapperElement={{ "data-color-mode": "dark" }}
+                wrapperElement={{ "data-color-mode": colorMode }}
               />
             ) : (
               <p className="text-sm text-muted-foreground">Nothing to preview yet.</p>

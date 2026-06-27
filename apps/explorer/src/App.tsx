@@ -53,6 +53,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { SchemaTree } from "@/components/SchemaTree";
+import { ThemeSwitcher } from "@/components/ThemeSwitcher";
 import { TableView, type SearchMode } from "@/components/TableView";
 import { QueryView } from "@/components/QueryView";
 import { NotesView } from "@/components/NotesView";
@@ -350,6 +351,9 @@ export function App() {
           >
             change
           </Button>
+          <div className="ml-auto">
+            <ThemeSwitcher />
+          </div>
         </header>
 
         <PanelGroup direction="horizontal" className="min-h-0 flex-1">

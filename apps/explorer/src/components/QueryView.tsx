@@ -5,6 +5,7 @@ import { Check, Play, RefreshCw, TextCursorInput } from "lucide-react";
 import type { AnkiWorkerApi, QueryResult, Remote } from "@sqlite-anki/db-client";
 import { Button } from "@/components/ui/button";
 import { DataGrid } from "@/components/DataGrid";
+import { useTheme } from "@/lib/theme";
 
 interface QueryViewProps {
   api: Remote<AnkiWorkerApi>;
@@ -24,6 +25,7 @@ export function QueryView({ api, path, run }: QueryViewProps) {
   const [hasSelection, setHasSelection] = useState(false);
   const cmRef = useRef<ReactCodeMirrorRef>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const colorMode = useTheme() === "light" ? "light" : "dark";
 
   // Load the persisted scratchpad for this database.
   useEffect(() => {
@@ -128,7 +130,7 @@ export function QueryView({ api, path, run }: QueryViewProps) {
           value={value}
           onChange={onChange}
           onUpdate={(u) => setHasSelection(!u.state.selection.main.empty)}
-          theme="dark"
+          theme={colorMode}
           extensions={[sql({ dialect: SQLite })]}
           onKeyDownCapture={(e) => {
             if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
