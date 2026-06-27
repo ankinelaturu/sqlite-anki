@@ -23,6 +23,11 @@ libc = "0.2"
 tract-core = "0.21"
 tract-onnx = "0.21"
 ndarray = "0.16"
+candle-core = { version = "0.8", default-features = false }
+candle-onnx = "0.8"
+# Must match the prost candle-onnx generates against (0.12), so ModelProto's
+# `Message::decode` is in scope for loading the model from bytes.
+prost = "0.12"
 tokenizers = { version = "0.21", default-features = false, features = ["unstable_wasm"] }
 parking_lot = "0.12"
 once_cell = "1"

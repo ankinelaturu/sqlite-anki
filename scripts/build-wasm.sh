@@ -61,11 +61,19 @@ need_cmd wasm-strip
 # the members it needs. Loose .bc files omit the sysroot and break the link the
 # moment the embedder is actually reachable.
 
-echo "==> Building anki-wasm ($WASM_TARGET, staticlib, +simd128)"
-# wasm SIMD (simd128) lets LLVM vectorize Tract's matmuls — the dominant cost of
+# Embedding engine: tract (default) or candle. See docs/build-variants.md.
+ANKI_ENGINE="${ANKI_ENGINE:-tract}"
+case "$ANKI_ENGINE" in
+  tract|candle) ;;
+  *) die "ANKI_ENGINE must be 'tract' or 'candle' (got '$ANKI_ENGINE')" ;;
+esac
+
+echo "==> Building anki-wasm ($WASM_TARGET, staticlib, +simd128, engine=$ANKI_ENGINE)"
+# wasm SIMD (simd128) lets LLVM vectorize the matmuls — the dominant cost of
 # embedding. Big speedup; requires a SIMD-capable browser (all modern ones).
 RUSTFLAGS="${RUSTFLAGS:-} -C target-feature=+simd128" \
-  cargo build -p anki-wasm --target "$WASM_TARGET" --release
+  cargo build -p anki-wasm --target "$WASM_TARGET" --release \
+  --no-default-features --features "engine-$ANKI_ENGINE"
 
 ANKI_LIB="$CARGO_TARGET/libanki_wasm.a"
 [[ -f "$ANKI_LIB" ]] || die "missing staticlib $ANKI_LIB (cargo build failed?)"
@@ -183,6 +191,7 @@ sqlite-anki custom WASM build
 sqlite tag: $SQLITE_TAG
 emcc: $(emcc --version | head -1)
 rust target: $WASM_TARGET
+engine: $ANKI_ENGINE
 model: runtime-loaded (not bundled)
 built: $(date -u +"%Y-%m-%dT%H:%M:%SZ")
 EOF

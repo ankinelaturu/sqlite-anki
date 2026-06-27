@@ -8,8 +8,13 @@ license.workspace = true
 [lib]
 crate-type = ["staticlib"]
 
+[features]
+default = ["engine-tract"]
+engine-tract = ["anki-core/engine-tract"]
+engine-candle = ["anki-core/engine-candle"]
+
 [dependencies]
-anki-core = { path = "../anki-core" }
+anki-core = { path = "../anki-core", default-features = false }
 
 # Built for wasm32-unknown-emscripten (see scripts/build-wasm.sh), so getrandom's
 # transitive copies (rand/ahash) auto-select Emscripten's getentropy backend. No

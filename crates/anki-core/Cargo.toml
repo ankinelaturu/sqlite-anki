@@ -8,12 +8,22 @@ license.workspace = true
 [lib]
 crate-type = ["rlib", "staticlib"]
 
+[features]
+default = ["engine-tract"]
+# Exactly one engine must be enabled. They select the ONNX inference backend
+# behind the same `Embedder` API (see docs/build-variants.md).
+engine-tract = ["dep:tract-core", "dep:tract-onnx", "dep:ndarray"]
+engine-candle = ["dep:candle-core", "dep:candle-onnx", "dep:prost"]
+
 [dependencies]
 thiserror.workspace = true
 libc.workspace = true
-tract-core.workspace = true
-tract-onnx.workspace = true
-ndarray.workspace = true
+tract-core = { workspace = true, optional = true }
+tract-onnx = { workspace = true, optional = true }
+ndarray = { workspace = true, optional = true }
+candle-core = { workspace = true, optional = true }
+candle-onnx = { workspace = true, optional = true }
+prost = { workspace = true, optional = true }
 tokenizers.workspace = true
 parking_lot.workspace = true
 once_cell.workspace = true
