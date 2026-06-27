@@ -76,4 +76,34 @@ const SelectItem = React.forwardRef<
 ));
 SelectItem.displayName = SelectPrimitive.Item.displayName;
 
-export { Select, SelectValue, SelectTrigger, SelectContent, SelectItem };
+/**
+ * Two-row item: `children` is the label (mirrored into the trigger via ItemText);
+ * `meta` renders on a second row *outside* ItemText, so it shows only in the
+ * dropdown list, not in the selected trigger.
+ */
+const SelectItemRich = React.forwardRef<
+  React.ElementRef<typeof SelectPrimitive.Item>,
+  React.ComponentPropsWithoutRef<typeof SelectPrimitive.Item> & {
+    meta?: React.ReactNode;
+  }
+>(({ className, children, meta, ...props }, ref) => (
+  <SelectPrimitive.Item
+    ref={ref}
+    className={cn(
+      "relative flex w-full cursor-default select-none flex-col items-start gap-1 rounded-sm py-2 pl-8 pr-2 text-sm outline-none focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
+      className,
+    )}
+    {...props}
+  >
+    <span className="absolute left-2 top-2.5 flex h-3.5 w-3.5 items-center justify-center">
+      <SelectPrimitive.ItemIndicator>
+        <Check className="h-4 w-4" />
+      </SelectPrimitive.ItemIndicator>
+    </span>
+    <SelectPrimitive.ItemText>{children}</SelectPrimitive.ItemText>
+    {meta && <span className="flex flex-wrap items-center gap-1.5">{meta}</span>}
+  </SelectPrimitive.Item>
+));
+SelectItemRich.displayName = "SelectItemRich";
+
+export { Select, SelectValue, SelectTrigger, SelectContent, SelectItem, SelectItemRich };

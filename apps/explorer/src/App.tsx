@@ -40,7 +40,7 @@ import {
 import {
   Select,
   SelectContent,
-  SelectItem,
+  SelectItemRich,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
@@ -241,7 +241,7 @@ export function App() {
     const large = (sel?.sizeMb ?? 0) > 200;
     return (
       <div className="flex h-full items-center justify-center bg-background">
-        <div className="w-[28rem] rounded-xl border bg-card p-6 shadow-xl">
+        <div className="w-[32rem] rounded-xl border bg-card p-6 shadow-xl">
           <div className="mb-1 flex items-center gap-2 text-lg font-semibold">
             <Boxes className="h-5 w-5 text-primary" /> sqlite-anki Explorer
           </div>
@@ -255,11 +255,27 @@ export function App() {
               <SelectValue placeholder="Select a model" />
             </SelectTrigger>
             <SelectContent>
-              {MODELS.map((m) => (
-                <SelectItem key={m} value={m}>
-                  {m} · {ANKI_MODEL_REGISTRY[m].dim}d
-                </SelectItem>
-              ))}
+              {MODELS.map((m) => {
+                const r = ANKI_MODEL_REGISTRY[m];
+                const pill =
+                  "rounded border px-1.5 py-0.5 text-[10px] leading-none text-muted-foreground";
+                return (
+                  <SelectItemRich
+                    key={m}
+                    value={m}
+                    className="rounded-none border-b border-border last:border-b-0"
+                    meta={
+                      <>
+                        <span className={pill}>{r.dim}d</span>
+                        {r.maxTokens != null && <span className={pill}>≤{r.maxTokens} tok</span>}
+                        <span className={pill}>{r.sizeMb} MB</span>
+                      </>
+                    }
+                  >
+                    {m}
+                  </SelectItemRich>
+                );
+              })}
             </SelectContent>
           </Select>
 
@@ -269,8 +285,12 @@ export function App() {
               <p className="text-xs leading-relaxed text-muted-foreground">
                 {sel.description}
               </p>
+              {/* dimension · token limit · download size — one row */}
               <div className="mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs">
                 <Badge variant="secondary">{sel.dim}-dim</Badge>
+                {sel.maxTokens != null && (
+                  <Badge variant="secondary">≤{sel.maxTokens} tokens</Badge>
+                )}
                 <span
                   className={cn(
                     "flex items-center gap-1 text-muted-foreground",
@@ -280,15 +300,16 @@ export function App() {
                   <HardDrive className="h-3.5 w-3.5" /> {sel.sizeMb} MB
                   {large ? " · large download" : ""}
                 </span>
-                <a
-                  href={sel.modelUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="flex items-center gap-1 text-primary hover:underline"
-                >
-                  <ExternalLink className="h-3.5 w-3.5" /> HuggingFace
-                </a>
               </div>
+              {/* source URL — separate row */}
+              <a
+                href={sel.homeUrl ?? sel.modelUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="mt-3.5 flex items-center gap-1 text-xs text-primary hover:underline"
+              >
+                <ExternalLink className="h-3.5 w-3.5" /> View on HuggingFace
+              </a>
             </div>
           )}
 
