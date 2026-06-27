@@ -1,31 +1,53 @@
 import { useState, type ReactElement } from "react";
 import {
-  Asterisk,
   Binary,
   Calendar,
   ChevronRight,
   Columns3,
-  Equal,
   Hash,
-  KeyRound,
   Sparkles,
   Table2,
   Type,
+  type LucideIcon,
 } from "lucide-react";
 import type { TableInfo } from "@/db";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
-/** Left-side icon from the column's SQLite type affinity. */
-function typeIcon(type: string | undefined): ReactElement {
-  const cls = "h-3 w-3 shrink-0";
+/** Per-column visual identity from SQLite type affinity: a left icon plus a pill
+ *  style, sharing one color so a column's type and qualifiers read together. */
+function typeMeta(type: string | undefined): { Icon: LucideIcon; color: string; pill: string } {
   const t = (type ?? "").toUpperCase();
-  if (/INT/.test(t)) return <Hash className={cn(cls, "text-sky-400")} />;
-  if (/CHAR|TEXT|CLOB/.test(t)) return <Type className={cn(cls, "text-emerald-400")} />;
-  if (/REAL|FLOA|DOUB|NUM|DEC/.test(t)) return <Hash className={cn(cls, "text-sky-400")} />;
-  if (/BLOB/.test(t)) return <Binary className={cn(cls, "text-orange-400")} />;
-  if (/DATE|TIME/.test(t)) return <Calendar className={cn(cls, "text-pink-400")} />;
-  return <Columns3 className={cls} />;
+  const num = {
+    Icon: Hash,
+    color: "text-sky-400",
+    pill: "border-sky-400/30 bg-sky-400/10 text-sky-400",
+  };
+  if (/INT/.test(t)) return num;
+  if (/CHAR|TEXT|CLOB/.test(t))
+    return {
+      Icon: Type,
+      color: "text-emerald-400",
+      pill: "border-emerald-400/30 bg-emerald-400/10 text-emerald-400",
+    };
+  if (/REAL|FLOA|DOUB|NUM|DEC/.test(t)) return num;
+  if (/BLOB/.test(t))
+    return {
+      Icon: Binary,
+      color: "text-orange-400",
+      pill: "border-orange-400/30 bg-orange-400/10 text-orange-400",
+    };
+  if (/DATE|TIME/.test(t))
+    return {
+      Icon: Calendar,
+      color: "text-pink-400",
+      pill: "border-pink-400/30 bg-pink-400/10 text-pink-400",
+    };
+  return {
+    Icon: Columns3,
+    color: "text-muted-foreground",
+    pill: "border-border bg-muted text-muted-foreground",
+  };
 }
 
 /** Wraps an element in a shadcn tooltip when there's a description. */
@@ -64,7 +86,7 @@ export function SchemaTree({ tables, activeTable, onOpenTable }: SchemaTreeProps
           <div key={t.name}>
             <div
               className={cn(
-                "group flex items-center gap-1 rounded-md px-2 py-1 text-sm",
+                "group flex items-center gap-1 rounded-md px-2 py-1 text-sm hover:bg-accent/50",
                 activeTable === t.name && "bg-accent",
               )}
             >
@@ -89,23 +111,30 @@ export function SchemaTree({ tables, activeTable, onOpenTable }: SchemaTreeProps
             </div>
             {isOpen && (
               <div className="ml-5 border-l pl-2">
-                {t.columns.map((c) => (
-                  <Described key={c.name} desc={c.description}>
-                    <div className="flex items-center gap-1.5 px-2 py-0.5 text-xs text-muted-foreground">
-                      {typeIcon(c.type)}
-                      <span className="text-foreground/80">{c.name}</span>
-                      {c.type && (
-                        <span className="text-[10px] uppercase text-muted-foreground/50">
-                          {c.type}
-                        </span>
-                      )}
-                      {c.pk && <KeyRound className="h-3 w-3 text-amber-400" />}
-                      {c.isVector && <Sparkles className="h-3 w-3 text-violet-400" />}
-                      {c.notnull && !c.pk && <Asterisk className="h-3 w-3 text-rose-400" />}
-                      {c.hasDefault && <Equal className="h-3 w-3 text-muted-foreground/60" />}
-                    </div>
-                  </Described>
-                ))}
+                {t.columns.map((c) => {
+                  const { Icon, color, pill } = typeMeta(c.type);
+                  const pillCls = cn(
+                    "inline-flex items-center rounded border px-1 text-[9px] font-medium uppercase leading-[1.4] tracking-wide",
+                    pill,
+                  );
+                  return (
+                    <Described key={c.name} desc={c.description}>
+                      <div className="flex flex-wrap items-center gap-1.5 rounded px-2 py-[0.3rem] text-muted-foreground hover:bg-accent/50">
+                        <Icon className={cn("h-4 w-4 shrink-0", color)} />
+                        <span className="text-sm text-foreground/80">{c.name}</span>
+                        {c.type && (
+                          <span className={cn("text-xs uppercase opacity-60", color)}>
+                            {c.type}
+                          </span>
+                        )}
+                        {c.pk && <span className={pillCls}>PRIMARY KEY</span>}
+                        {c.isVector && <span className={pillCls}>VECTOR</span>}
+                        {c.notnull && !c.pk && <span className={pillCls}>NOT NULL</span>}
+                        {c.hasDefault && <span className={pillCls}>DEFAULT</span>}
+                      </div>
+                    </Described>
+                  );
+                })}
               </div>
             )}
           </div>
