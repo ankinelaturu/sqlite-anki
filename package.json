@@ -2,7 +2,8 @@
   "name": "sqlite-anki",
   "private": true,
   "scripts": {
-    "build:wasm": "bash scripts/build-wasm.sh",
+    "build:wasm": "pnpm run build:wasm:tract-st",
+    "build:wasm:tract-st": "bash scripts/build-wasm.sh",
     "dev": "pnpm --filter @sqlite-anki/explorer dev",
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck"
