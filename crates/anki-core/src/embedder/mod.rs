@@ -82,8 +82,15 @@ impl Embedder {
         tokenizer_json: &str,
         dim: usize,
     ) -> Result<Self, AnkiError> {
-        let tokenizer = Tokenizer::from_bytes(tokenizer_json.as_bytes())
+        let mut tokenizer = Tokenizer::from_bytes(tokenizer_json.as_bytes())
             .map_err(|e| AnkiError::Inference(format!("tokenizer: {e}")))?;
+        // Pad to the input's actual length, not the model's Fixed(128). We embed
+        // one text at a time, so there's nothing to batch-align with — fixed
+        // padding is pure wasted compute (~82% of each forward pass on the demo).
+        // It also makes our plain mean-pool equal the correct masked mean (no
+        // [PAD] outputs to dilute it). Truncation from the tokenizer config is
+        // left intact so input can't exceed the model's position limit.
+        tokenizer.with_padding(None);
         let engine = Engine::load(model_onnx, dim)?;
         Ok(Self {
             engine,
