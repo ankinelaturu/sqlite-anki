@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
+import {
+  Panel,
+  PanelGroup,
+  PanelResizeHandle,
+  type ImperativePanelGroupHandle,
+} from "react-resizable-panels";
+import type { WorkspaceProps } from "@/App";
 import {
   AppWindow,
   Binary,
@@ -79,10 +85,19 @@ const baseTabs = (): { tabs: Tab[]; active: string } => ({
   active: queryTab.key,
 });
 
-export function SqliteWorkspace() {
+export function SqliteWorkspace({ sidebarSize, onSidebarResize, active }: WorkspaceProps) {
   // The Comlink remote is a *callable* proxy — never put it in React state
   // (a state setter would invoke it as an updater). Use the memoized singleton.
   const api = getDbWorker();
+
+  const panelGroup = useRef<ImperativePanelGroupHandle>(null);
+  // Re-apply the shared sidebar width when this workspace becomes visible. Keyed
+  // on `active` only — the active workspace owns live resizing (via onLayout), so
+  // re-applying on every size change would fight the drag.
+  useEffect(() => {
+    if (active) panelGroup.current?.setLayout([sidebarSize, 100 - sidebarSize]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active]);
 
   const [info, setInfo] = useState<InitResult | null>(null);
   const [modelChoice, setModelChoice] = useState(MODELS[0] ?? "");
@@ -352,9 +367,9 @@ export function SqliteWorkspace() {
     <TooltipProvider delayDuration={300}>
       <div className="flex h-full flex-col bg-background">
         {/* header */}
-        <header className="flex h-12 shrink-0 items-center gap-3 border-b bg-card px-4">
-          <div className="flex items-center gap-2 font-semibold">
-            <Boxes className="h-5 w-5 text-primary" /> sqlite-anki
+        <header className="flex h-14 shrink-0 items-center gap-3 border-b bg-card px-4">
+          <div className="flex items-center gap-2 text-lg font-semibold">
+            <Boxes className="h-6 w-6 text-primary" /> sqlite-anki
           </div>
           <Separator orientation="vertical" className="h-6" />
           <span className="flex items-center gap-1.5 text-sm text-muted-foreground">
@@ -376,10 +391,17 @@ export function SqliteWorkspace() {
           </Button>
         </header>
 
-        <PanelGroup direction="horizontal" className="min-h-0 flex-1">
+        <PanelGroup
+          ref={panelGroup}
+          direction="horizontal"
+          className="min-h-0 flex-1"
+          onLayout={(s) => {
+            if (active) onSidebarResize(s[0]);
+          }}
+        >
           {/* sidebar */}
-          <Panel defaultSize={22} minSize={15} className="flex flex-col border-r bg-card">
-            <div className="flex items-center justify-between px-3 py-2">
+          <Panel defaultSize={sidebarSize} minSize={15} className="flex flex-col border-r bg-card">
+            <div className="flex h-10 shrink-0 items-center justify-between border-b px-3">
               <span className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                 <Database className="h-3.5 w-3.5" /> Databases
               </span>
@@ -433,7 +455,7 @@ export function SqliteWorkspace() {
                 </Dialog>
               </div>
             </div>
-            <div className="scrollbar-thin flex-1 overflow-auto px-1.5">
+            <div className="scrollbar-thin flex-1 overflow-auto px-1.5 pt-2">
               {databases.length === 0 && (
                 <p className="px-2 py-1 text-xs text-muted-foreground">
                   No databases yet. Create one →

@@ -95,7 +95,7 @@ export function QueryView({ api, path, run }: QueryViewProps) {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-center justify-between gap-3 border-b px-3 py-2">
+      <div className="flex h-12 shrink-0 items-center justify-between gap-3 border-b px-3">
         <div className="flex items-center gap-3">
           <span className="text-xs text-muted-foreground">SQL · ⌘/Ctrl+Enter to run</span>
           <span className="flex items-center gap-1 text-xs text-muted-foreground">
