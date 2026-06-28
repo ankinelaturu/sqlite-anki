@@ -5,7 +5,7 @@ import { Check, Play, RefreshCw, TextCursorInput } from "lucide-react";
 import type { AnkiWorkerApi, QueryResult, Remote } from "@/db";
 import { Button } from "@/components/ui/button";
 import { DataGrid } from "@/components/DataGrid";
-import { useTheme } from "@/lib/theme";
+import { editorColorMode, useTheme } from "@/lib/theme";
 
 interface QueryViewProps {
   api: Remote<AnkiWorkerApi>;
@@ -25,7 +25,7 @@ export function QueryView({ api, path, run }: QueryViewProps) {
   const [hasSelection, setHasSelection] = useState(false);
   const cmRef = useRef<ReactCodeMirrorRef>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const colorMode = useTheme() === "light" ? "light" : "dark";
+  const colorMode = editorColorMode(useTheme());
 
   // Load the persisted scratchpad for this database.
   useEffect(() => {

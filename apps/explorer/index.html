@@ -6,8 +6,15 @@
     <title>sqlite-anki Explorer</title>
     <script>
       // Apply the saved theme before first paint (avoids a flash).
-      document.documentElement.dataset.theme =
-        localStorage.getItem("theme") || "dark";
+      (function () {
+        var legacy = { sepia: "paper", mocha: "dim", neon: "nord" };
+        var t = localStorage.getItem("theme") || "dark";
+        if (legacy[t]) {
+          t = legacy[t];
+          localStorage.setItem("theme", t);
+        }
+        document.documentElement.dataset.theme = t;
+      })();
     </script>
   </head>
   <body>

@@ -1,11 +1,11 @@
 import {
-  Coffee,
+  Contrast,
   Database,
   HardDrive,
   Moon,
+  ScrollText,
+  Snowflake,
   Sun,
-  Sunset,
-  Zap,
   type LucideIcon,
 } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -21,10 +21,10 @@ const ACTIVITIES: { id: Activity; label: string; Icon: LucideIcon }[] = [
 
 const THEMES: { key: ThemeKey; label: string; Icon: LucideIcon }[] = [
   { key: "light", label: "Light", Icon: Sun },
-  { key: "sepia", label: "Sepia", Icon: Sunset },
+  { key: "paper", label: "Paper", Icon: ScrollText },
   { key: "dark", label: "Dark", Icon: Moon },
-  { key: "mocha", label: "Mocha", Icon: Coffee },
-  { key: "neon", label: "Neon", Icon: Zap },
+  { key: "dim", label: "Dim", Icon: Contrast },
+  { key: "nord", label: "Nord", Icon: Snowflake },
 ];
 
 /** One icon-only bar button with a left-edge accent line when selected. */

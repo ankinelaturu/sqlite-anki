@@ -8,8 +8,8 @@
 
 /* Each theme sets `--popover` to an *elevated* surface (lighter than the
    background in dark themes) with a visible `--border`, so tooltips, selects and
-   dialogs stand out instead of blending in. Five distinct palettes:
-   two lights (clean + warm), two darks (neutral + Catppuccin), one neon. */
+   dialogs stand out instead of blending in. Five palettes:
+   two lights (cool + warm paper), three darks (neutral + dim + nord). */
 
 /* Dark — neutral charcoal (default) */
 :root,
@@ -58,73 +58,73 @@
   --ring: 250 84% 58%;
 }
 
-/* Sepia — warm paper / easy reading */
-[data-theme="sepia"] {
-  --background: 42 45% 92%;
-  --foreground: 28 28% 22%;
-  --card: 44 55% 96%;
-  --card-foreground: 28 28% 22%;
-  --popover: 44 60% 98%;
-  --popover-foreground: 28 28% 20%;
-  --primary: 22 82% 45%;
-  --primary-foreground: 44 60% 97%;
-  --secondary: 40 35% 86%;
-  --secondary-foreground: 28 28% 22%;
-  --muted: 40 35% 87%;
-  --muted-foreground: 32 18% 42%;
-  --accent: 38 40% 82%;
-  --accent-foreground: 28 28% 20%;
+/* Paper — warm cream/linen with terracotta accent (distinct from cool Light) */
+[data-theme="paper"] {
+  --background: 38 32% 91%;
+  --foreground: 28 22% 16%;
+  --card: 40 42% 95%;
+  --card-foreground: 28 22% 16%;
+  --popover: 40 48% 97%;
+  --popover-foreground: 28 22% 14%;
+  --primary: 22 72% 44%;
+  --primary-foreground: 40 48% 97%;
+  --secondary: 36 28% 85%;
+  --secondary-foreground: 28 22% 16%;
+  --muted: 36 24% 87%;
+  --muted-foreground: 30 12% 38%;
+  --accent: 34 30% 80%;
+  --accent-foreground: 28 22% 14%;
   --destructive: 4 66% 47%;
-  --destructive-foreground: 44 60% 97%;
-  --border: 38 28% 78%;
-  --input: 38 28% 78%;
-  --ring: 22 82% 45%;
+  --destructive-foreground: 40 48% 97%;
+  --border: 34 22% 74%;
+  --input: 34 22% 72%;
+  --ring: 22 72% 44%;
 }
 
-/* Mocha — Catppuccin (warm purple dark) */
-[data-theme="mocha"] {
-  --background: 240 21% 15%;
-  --foreground: 226 64% 88%;
-  --card: 240 21% 19%;
-  --card-foreground: 226 64% 90%;
-  --popover: 240 14% 27%;
-  --popover-foreground: 226 64% 92%;
-  --primary: 267 84% 81%;
-  --primary-foreground: 240 21% 15%;
-  --secondary: 240 13% 25%;
-  --secondary-foreground: 226 64% 90%;
-  --muted: 240 13% 22%;
-  --muted-foreground: 228 24% 72%;
-  --accent: 240 13% 29%;
-  --accent-foreground: 226 64% 94%;
-  --destructive: 343 81% 75%;
-  --destructive-foreground: 240 21% 15%;
-  --border: 240 13% 31%;
-  --input: 240 13% 27%;
-  --ring: 267 84% 81%;
-}
-
-/* Neon — synthwave: deep navy + neon magenta */
-[data-theme="neon"] {
-  --background: 250 45% 9%;
-  --foreground: 280 30% 92%;
-  --card: 252 40% 13%;
-  --card-foreground: 280 30% 93%;
-  --popover: 252 35% 20%;
-  --popover-foreground: 280 40% 96%;
-  --primary: 320 95% 62%;
+/* Dim — low-contrast blue-gray dark (GitHub dimmed–style) */
+[data-theme="dim"] {
+  --background: 220 13% 16%;
+  --foreground: 220 14% 90%;
+  --card: 220 13% 19%;
+  --card-foreground: 220 14% 92%;
+  --popover: 220 12% 24%;
+  --popover-foreground: 220 14% 94%;
+  --primary: 210 85% 58%;
   --primary-foreground: 0 0% 100%;
-  --secondary: 250 35% 20%;
-  --secondary-foreground: 280 30% 92%;
-  --muted: 250 30% 17%;
-  --muted-foreground: 265 22% 72%;
-  --accent: 250 35% 25%;
-  --accent-foreground: 280 40% 96%;
-  --destructive: 0 85% 66%;
-  --destructive-foreground: 0 0% 100%;
-  --border: 290 45% 32%;
-  --input: 250 30% 23%;
-  --ring: 320 95% 62%;
+  --secondary: 220 11% 22%;
+  --secondary-foreground: 220 14% 90%;
+  --muted: 220 11% 20%;
+  --muted-foreground: 220 10% 58%;
+  --accent: 220 11% 26%;
+  --accent-foreground: 220 14% 94%;
+  --destructive: 0 72% 55%;
+  --destructive-foreground: 0 0% 98%;
+  --border: 220 10% 24%;
+  --input: 220 11% 22%;
+  --ring: 210 85% 58%;
+}
+
+/* Nord — arctic blue-gray dark with frost accent */
+[data-theme="nord"] {
+  --background: 220 16% 22%;
+  --foreground: 218 27% 92%;
+  --card: 220 16% 26%;
+  --card-foreground: 218 27% 94%;
+  --popover: 220 15% 30%;
+  --popover-foreground: 218 27% 96%;
+  --primary: 193 43% 67%;
+  --primary-foreground: 220 16% 18%;
+  --secondary: 220 14% 28%;
+  --secondary-foreground: 218 27% 92%;
+  --muted: 220 14% 25%;
+  --muted-foreground: 219 20% 65%;
+  --accent: 220 14% 32%;
+  --accent-foreground: 218 27% 96%;
+  --destructive: 354 42% 56%;
+  --destructive-foreground: 0 0% 98%;
+  --border: 220 15% 32%;
+  --input: 220 14% 28%;
+  --ring: 193 43% 67%;
 }
 
 * {

@@ -28,7 +28,7 @@ import {
   type MarkdownMode,
 } from "@/components/MarkdownEditor";
 import { Button } from "@/components/ui/button";
-import { useTheme } from "@/lib/theme";
+import { editorColorMode, useTheme } from "@/lib/theme";
 import type { WorkspaceProps } from "@/App";
 import {
   downloadFile,
@@ -74,7 +74,7 @@ export function OpfsWorkspace({ sidebarSize, onSidebarResize, active }: Workspac
   const [mode, setMode] = useState<Record<string, MarkdownMode>>({}); // md write/preview per file
   const [saving, setSaving] = useState(false);
 
-  const colorMode = useTheme() === "light" ? "light" : "dark";
+  const colorMode = editorColorMode(useTheme());
   const activeNode = open.find((n) => n.path === activePath) ?? null;
   const activeIsText = activeNode != null && isTextFile(activeNode.name);
   const dirty = activeNode != null && activeIsText && content[activeNode.path] !== original[activeNode.path];

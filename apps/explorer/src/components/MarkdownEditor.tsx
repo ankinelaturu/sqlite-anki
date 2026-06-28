@@ -2,7 +2,7 @@ import CodeMirror from "@uiw/react-codemirror";
 import { markdown } from "@codemirror/lang-markdown";
 import MarkdownPreview from "@uiw/react-markdown-preview";
 import "@uiw/react-markdown-preview/markdown.css";
-import { useTheme } from "@/lib/theme";
+import { editorColorMode, useTheme } from "@/lib/theme";
 import { cn } from "@/lib/utils";
 
 export type MarkdownMode = "write" | "preview";
@@ -49,7 +49,7 @@ export function MarkdownEditor({
   onChange: (v: string) => void;
   mode: MarkdownMode;
 }) {
-  const colorMode = useTheme() === "light" ? "light" : "dark";
+  const colorMode = editorColorMode(useTheme());
   return mode === "write" ? (
     <CodeMirror
       value={value}
