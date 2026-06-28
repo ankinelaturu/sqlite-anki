@@ -118,6 +118,9 @@ else
   echo "==> wasm-opt NOT found — install binaryen for extra optimization (brew install binaryen)"
 fi
 echo "==> Writing $WASM_DIR/config.make"
+# SQLite's ./configure emits ext/wasm/config.make read-only (0444), so a plain
+# redirect fails to overwrite it on a fresh/CI tree — drop it first.
+rm -f "$WASM_DIR/config.make"
 cat >"$WASM_DIR/config.make" <<EOF
 bin.bash = $(command -v bash)
 bin.emcc = $(command -v emcc)
@@ -132,7 +135,7 @@ for pair in "$EXTRA_INIT_SRC:$EXTRA_INIT_DST" "$ANKI_EXT_SRC:$ANKI_EXT_DST"; do
   dst="${pair##*:}"
   if [[ ! -f "$dst" ]] || ! cmp -s "$src" "$dst"; then
     echo "==> Installing $(basename "$src")"
-    cp "$src" "$dst"
+    cp -f "$src" "$dst"
   fi
 done
 
