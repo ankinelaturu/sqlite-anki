@@ -56,9 +56,9 @@ db.exec(`
     ('Cancel',  'the steps to cancel a subscription');
 `);
 
-// Search by meaning. `similarity(col)` is the cosine score for the active MATCH.
+// Search by meaning. `<col>_score` is the cosine score for the active MATCH.
 const hits = db.selectObjects(`
-  SELECT title, similarity(body) AS score
+  SELECT title, body_score AS score
   FROM docs
   WHERE body MATCH 'end my plan'
   ORDER BY score DESC
@@ -77,7 +77,7 @@ console.log(hits); // → [{ title: "Cancel", score: 0.6… }, …]
 ## Querying
 
 Create an `anki` table with `TEXT VECTOR` columns; text is auto-embedded on
-write. Search with `MATCH`, score/order with `similarity()`.
+write. Search with `MATCH`, score/order with each column's `<col>_score`.
 
 ```sql
 CREATE VIRTUAL TABLE customers USING anki(
@@ -92,7 +92,7 @@ INSERT INTO customers(name, status, notes) VALUES
 -- semantic search, best-first, with the score
 SELECT name, status FROM customers
 WHERE notes MATCH 'upsell opportunity'
-ORDER BY similarity(notes) DESC
+ORDER BY notes_score DESC
 LIMIT 10;
 ```
 
@@ -106,7 +106,7 @@ dropping a row SQLite would keep (see
 ```sql
 SELECT name FROM customers
 WHERE status = 'active' AND notes MATCH 'billing issue'
-ORDER BY similarity(notes) DESC;
+ORDER BY notes_score DESC;
 ```
 
 **`MATCH` DSL.** A regex-style suffix controls *how* the search runs (see
@@ -120,12 +120,13 @@ WHERE notes MATCH 'apple/hnsw:512'   -- approximate, candidate budget 512
 
 Notes:
 
-- `similarity(col)` returns the cosine score for the active `MATCH` (NULL without
-  one); it does **not** recompute — the score is cached from the scan. It works in
-  `SELECT`/`WHERE`/`ORDER BY`/`GROUP BY` keys, but **not inside aggregates** yet
-  (returns NULL — wrap it in a `MATERIALIZED` CTE; see
-  [docs/query-planning.md](./docs/query-planning.md)).
-- Default similarity threshold is `0.5`; tighten with `AND similarity(col) > 0.7`.
+- Each `TEXT VECTOR` column exposes a hidden `<col>_score` column (e.g.
+  `notes_score`) — the cosine for the active `MATCH` on that column, `NULL`
+  without one. It's a query-time column (not stored, not recomputed), so it works
+  in `SELECT`/`WHERE`/`ORDER BY`/`GROUP BY` **and inside aggregates**
+  (`AVG(notes_score)`, `MAX(notes_score) … GROUP BY`). See
+  [docs/query-planning.md](./docs/query-planning.md).
+- Default similarity threshold is `0.5`; tighten with `AND notes_score > 0.7`.
 - The model runs in Rust/WASM — no JavaScript on the query hot path.
 
 ## Documentation
@@ -220,13 +221,13 @@ Two layers, both run in CI on every push (`.github/workflows/deploy.yml`):
 ## Status
 
 - **`anki` virtual table:** working — `CREATE VIRTUAL TABLE … USING anki`,
-  auto-embedding INSERT/UPDATE/DELETE, `MATCH`, `similarity()`, persistence
+  auto-embedding INSERT/UPDATE/DELETE, `MATCH`, `<col>_score`, persistence
   (shadow tables), transactions/savepoints.
 - **Search:** HNSW ANN + exact brute-force (`MATCH` DSL `mode`), hybrid
   relational+semantic pre-filtering, and **multiple `MATCH` columns per query**
-  (AND'd, each with its own `similarity()` score).
+  (AND'd, each with its own `<col>_score`).
 - **Model:** loaded at runtime (not bundled); wasm ≈ 14 MB (Tract default) or
   ≈ 5 MB (Candle build variant). See [Performance](#performance).
 - **Tests:** Rust unit tests (`cargo test -p anki-core`) + WASM integration suite
   (`pnpm --filter @sqlite-anki/wasm test`).
-- **Not yet:** `similarity()` inside aggregates, quantized model.
+- **Not yet:** quantized model.

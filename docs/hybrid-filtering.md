@@ -36,7 +36,7 @@ present (no selectivity heuristic yet); push down the six comparison ops only
 SELECT title FROM notes
 WHERE status = 'active'          -- relational filter
   AND body MATCH 'revenue'        -- semantic search
-ORDER BY similarity(body) DESC
+ORDER BY body_score DESC
 LIMIT 10;
 ```
 
@@ -63,7 +63,7 @@ execution was:
 | Completeness | ❌ **Post-filtering recall cliff.** The 256 cap is applied *before* the `status` filter. If `active` rows are sparse among the top-256 semantic matches, you get far fewer results than exist — possibly zero — while good `active` matches sit at rank 257+. |
 | Index acceleration | ❌ None. Virtual-table columns have no native btree index, so `status = 'active'` is always scan-and-filter. |
 
-Concretely: `... WHERE status='active' AND body MATCH '...' ORDER BY similarity DESC LIMIT 10`
+Concretely: `... WHERE status='active' AND body MATCH '...' ORDER BY body_score DESC LIMIT 10`
 can return fewer than 10 rows even when 100 good `active` matches exist, because
 only 256 candidates are produced before the filter runs.
 
@@ -99,7 +99,7 @@ in-memory ANN index):
      satisfy the predicates (`cell_passes`, conservative on NULL/cross-type), and
      brute-force cosine-rank that subset. No candidate cap → no cliff.
    - **no filter** → the existing HNSW path.
-   - **no MATCH** → a filtered scan (`similarity()` stays NULL).
+   - **no MATCH** → a filtered scan (`<col>_score` stays NULL).
 
 Predicate evaluation is conservative — the next section explains exactly how the
 pre-filter stays correct, and the two ways a naive comparison would silently drop

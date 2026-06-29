@@ -42,7 +42,7 @@ A SQLite extension called **sqlite-anki** that:
 1. Provides an `anki` virtual table module with `TEXT VECTOR` columns.
 2. Automatically generates and stores embeddings when text is inserted or updated.
 3. Supports semantic search via `WHERE column MATCH 'query text'`.
-4. Exposes `similarity(column)` for per-query threshold overrides, filtering, and ordering.
+4. Exposes `column_score` for per-query threshold overrides, filtering, and ordering.
 5. Uses HNSW for approximate nearest-neighbor (ANN) search.
 6. Runs entirely inside WebAssembly in the browser using the **official SQLite WASM** build.
 7. Performs inference in **Rust** (ONNX via **Tract**) — **no JavaScript callbacks during SQL execution**.
@@ -102,21 +102,21 @@ To require a higher bar, add an explicit filter:
 
 ```sql
 WHERE notes MATCH 'potential opportunity'
-  AND similarity(notes) > 0.7
+  AND notes_score > 0.7
 ```
 
-### `similarity(column)` — not a stored column
+### `column_score` — not a stored column
 
-There is **no `score` column** on the table. `similarity(notes)` is a SQL **function** provided by the extension. It returns the cosine similarity (0.0–1.0) between that row's stored embedding and the current `MATCH` query embedding.
+There is **no `score` column** on the table. `notes_score` is a SQL **function** provided by the extension. It returns the cosine similarity (0.0–1.0) between that row's stored embedding and the current `MATCH` query embedding.
 
 It is only meaningful in queries that include a `MATCH` on the same column.
 
 ```sql
-SELECT customer_name, similarity(notes)
+SELECT customer_name, notes_score
 FROM customers
 WHERE notes MATCH 'potential opportunity'
-  AND similarity(notes) > 0.7
-ORDER BY similarity(notes) DESC
+  AND notes_score > 0.7
+ORDER BY notes_score DESC
 LIMIT 10;
 ```
 
@@ -124,10 +124,10 @@ LIMIT 10;
 
 | Function | Behavior |
 |----------|----------|
-| `similarity(column)` | Cosine similarity for the row against the active `MATCH` query |
+| `column_score` | Cosine similarity for the row against the active `MATCH` query |
 | With `MATCH` | Both use the same query embedding and HNSW candidate set |
 
-`MATCH` alone does **not** guarantee result order. Use `ORDER BY similarity(column) DESC` for best-first results.
+`MATCH` alone does **not** guarantee result order. Use `ORDER BY column_score DESC` for best-first results.
 
 ### `LIMIT`
 
@@ -137,7 +137,7 @@ Use standard SQL `LIMIT` to cap how many rows are returned:
 SELECT customer_name
 FROM customers
 WHERE notes MATCH 'potential opportunity'
-ORDER BY similarity(notes) DESC
+ORDER BY notes_score DESC
 LIMIT 10;
 ```
 
@@ -178,21 +178,21 @@ WHERE title MATCH 'quarterly results'
 | `WHERE title MATCH 'x'` | Searches the title index only |
 | `WHERE body MATCH 'y'` | Searches the body index only |
 | Both in one query | Two independent searches; combined with `AND` |
-| `similarity(title)` | Score against the `title` column's `MATCH` query |
-| `similarity(body)` | Score against the `body` column's `MATCH` query |
+| `title_score` | Score against the `title` column's `MATCH` query |
+| `body_score` | Score against the `body` column's `MATCH` query |
 
 ### `NULL` and empty text
 
-| Value | Embedding | `MATCH` | `similarity(column)` |
+| Value | Embedding | `MATCH` | `column_score` |
 |-------|-----------|---------|----------------------|
 | `NULL` | None stored | Row excluded | `NULL` |
 | `''` (empty string) | None stored | Row excluded | `NULL` |
 
 Non-empty text is embedded on insert/update. Setting a column to `NULL` or `''` removes its vector from storage and the HNSW index.
 
-### `similarity()` without `MATCH`
+### `<col>_score` without `MATCH`
 
-If `similarity(column)` appears without a `MATCH` on the same column in the query, it returns `NULL`.
+If a `<col>_score` column is read without a `MATCH` on that column in the query, it is `NULL`.
 
 ### Introspection (optional)
 
@@ -217,8 +217,8 @@ INSERT INTO customers (customer_name, notes) VALUES
 SELECT customer_name
 FROM customers
 WHERE notes MATCH 'potential opportunity'
-  AND similarity(notes) > 0.6
-ORDER BY similarity(notes) DESC
+  AND notes_score > 0.6
+ORDER BY notes_score DESC
 LIMIT 10;
 ```
 
@@ -232,10 +232,10 @@ All defaults are **built into query semantics**:
 
 | Default | Value | How to override |
 |---------|-------|-----------------|
-| `MATCH` similarity threshold | **≥ 0.5** (cosine similarity) | `AND similarity(column) > X` in `WHERE` |
+| `MATCH` similarity threshold | **≥ 0.5** (cosine similarity) | `AND column_score > X` in `WHERE` |
 | HNSW candidate cap | **256** (fixed, internal) | Not user-configurable in v1 |
 | Result count | Unlimited | SQL `LIMIT N` |
-| Result order | Undefined | `ORDER BY similarity(column) DESC` |
+| Result order | Undefined | `ORDER BY column_score DESC` |
 
 ### Query pipeline
 
@@ -244,11 +244,11 @@ query text
   → embed once → query vector
   → HNSW: nearest 256 candidates
   → filter: similarity >= 0.5 (or stricter per-query threshold)
-  → ORDER BY similarity(column) DESC  (if requested)
+  → ORDER BY column_score DESC  (if requested)
   → SQL LIMIT  (if present)
 ```
 
-If both the default threshold and an explicit filter apply, the **stricter** condition wins (e.g. `MATCH` at 0.5 plus `similarity(notes) > 0.7` → only rows above 0.7).
+If both the default threshold and an explicit filter apply, the **stricter** condition wins (e.g. `MATCH` at 0.5 plus `notes_score > 0.7` → only rows above 0.7).
 
 ---
 
@@ -259,8 +259,8 @@ If both the default threshold and an explicit filter apply, the **stricter** con
 │  User SQL                                                        │
 │  CREATE VIRTUAL TABLE ... USING anki(...)                        │
 │  INSERT / UPDATE / DELETE                                        │
-│  WHERE notes MATCH '...' AND similarity(notes) > 0.6             │
-│  ORDER BY similarity(notes) DESC LIMIT 10                        │
+│  WHERE notes MATCH '...' AND notes_score > 0.6             │
+│  ORDER BY notes_score DESC LIMIT 10                        │
 └────────────────────────────┬────────────────────────────────────┘
                              │
 ┌────────────────────────────▼────────────────────────────────────┐
@@ -269,7 +269,7 @@ If both the default threshold and an explicit filter apply, the **stricter** con
 │  ┌──────────────────┐  ┌──────────────┐  ┌───────────────────┐  │
 │  │ anki vtab module │  │ Embedder     │  │ xBestIndex/xFilter│  │
 │  │ xCreate/xInsert  │→ │ tokenizer +  │  │ MATCH constraint  │  │
-│  │ xUpdate/xDelete  │  │ ONNX/Tract   │  │ similarity()      │  │
+│  │ xUpdate/xDelete  │  │ ONNX/Tract   │  │ <col>_score       │  │
 │  └────────┬─────────┘  └──────────────┘  └─────────┬─────────┘  │
 │           │                                         │            │
 │           ▼                                         ▼            │
@@ -303,7 +303,6 @@ This matches how FTS5, sqlite-vec, and similar extensions work.
 | `xFilter` / `xNext` / `xColumn` | Row production for `MATCH` queries |
 | `xBestIndex` | Accept `MATCH` constraints; plan HNSW-driven scans |
 | `xUpdate` | Handle `INSERT`, `UPDATE`, `DELETE`; trigger embedding on `TEXT VECTOR` changes |
-| `xFindFunction` | Resolve `similarity(column)` for the vtab |
 
 ### Column types in `CREATE VIRTUAL TABLE`
 
@@ -432,7 +431,7 @@ Filter: cosine similarity >= 0.5 (or per-query override)
 xNext / xColumn: emit matching rows
         │
         ▼
-similarity(notes) returns score for current row
+notes_score returns score for current row
         │
         ▼
 SQLite applies ORDER BY / LIMIT
@@ -472,7 +471,7 @@ These are **implementation constants**, not user configuration:
 | Internal candidate cap (256) | Fixed in extension | How many neighbors HNSW retrieves before threshold filtering |
 | SQL `LIMIT` | User in query | Max rows returned after filtering and ordering |
 
-Example: HNSW may retrieve 256 candidates, 40 pass the ≥ 0.5 threshold, `LIMIT 10` returns the top 10 by `ORDER BY similarity(notes) DESC`.
+Example: HNSW may retrieve 256 candidates, 40 pass the ≥ 0.5 threshold, `LIMIT 10` returns the top 10 by `ORDER BY notes_score DESC`.
 
 ---
 
@@ -615,7 +614,7 @@ pub extern "C" fn sqlite3_anki_init(
     p_api: *const sqlite3_api_routines,
 ) -> c_int {
     // 1. Register anki virtual table module
-    // 2. Register similarity(), anki_model(), anki_dim(), anki_version()
+    // 2. Register anki_model(), anki_dim(), anki_version()
     // 3. Initialize bundled embedder (lazy)
     SQLITE_OK
 }
@@ -645,10 +644,10 @@ db.exec(`INSERT INTO customers (customer_name, notes) VALUES
   ('Acme', 'potential upsell opportunity in Q3')`);
 
 const rows = db.selectObjects(`
-  SELECT customer_name, similarity(notes)
+  SELECT customer_name, notes_score
   FROM customers
   WHERE notes MATCH 'potential opportunity'
-  ORDER BY similarity(notes) DESC
+  ORDER BY notes_score DESC
   LIMIT 10
 `);
 
@@ -764,7 +763,7 @@ When a `TEXT VECTOR` column is present, a **semantic search bar** runs:
 ```sql
 SELECT rowid, * FROM t
 WHERE col MATCH ?
-ORDER BY similarity(col) DESC
+ORDER BY col_score DESC
 LIMIT 20;
 ```
 
@@ -872,7 +871,7 @@ Validate the risky parts before building the full virtual table:
 | SQLite distribution | Official WASM | OPFS, workers, long-term support |
 | Extension loading | Static link | Only option in browser |
 | User DDL (v1) | `CREATE VIRTUAL TABLE ... USING anki` | Planner-integrated `MATCH` + HNSW |
-| Search syntax | `MATCH` + `similarity()` | Familiar FTS-like ergonomics |
+| Search syntax | `MATCH` + `<col>_score` | Familiar FTS-like ergonomics |
 | Parameterized `MATCH` | Required in v1 | Real apps use bound parameters |
 | Multiple vector columns | Required in v1 | One HNSW index per column |
 | `NULL` / `''` | No embedding; excluded from `MATCH` | Clear semantics |

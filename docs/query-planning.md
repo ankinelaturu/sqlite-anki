@@ -5,7 +5,7 @@
 
 How various query shapes are actually planned and executed against the `anki`
 virtual table. These are **observations**, captured by temporarily instrumenting
-`xBestIndex` / `xFilter` / `xFindFunction` to print what they receive, then
+`xBestIndex` / `xFilter` to print what they receive, then
 running a battery of queries (the instrumentation was reverted afterward).
 
 ## Mental model
@@ -32,8 +32,8 @@ SQLite constraint code: EQ=2, GT=4, LE=8, LT=16, GE=32, NE=68).
 | `status LIKE 'act%' AND notes MATCH 'q'` | `MATCH(2)`, `GE(0)`, `LT(0)`, `LIKE(0)` | `m2;f0,32;f0,16` | pre-filter on **derived range**; SQLite re-checks `LIKE` |
 | `(status='active' OR status='trial') AND notes MATCH 'q'` | (split) | `m2;f0,2` per branch | MULTI-INDEX OR; **MATCH pushed into each branch** |
 | `lower(status)='active' AND notes MATCH 'q'` | `MATCH(2)` only | `m2` | **MATCH first, SQLite post-filters** `lower()` |
-| `notes MATCH 'q' AND similarity(notes)>0.7` | `MATCH(2)` only | `m2` | MATCH; SQLite applies `similarity()` after |
-| `notes MATCH 'q' ORDER BY similarity(notes) DESC LIMIT 1` | `MATCH(2)` | `m2` | MATCH → SQLite orders + limits |
+| `notes MATCH 'q' AND notes_score>0.7` | `MATCH(2)` only | `m2` | MATCH; SQLite applies the `notes_score` threshold after |
+| `notes MATCH 'q' ORDER BY notes_score DESC LIMIT 1` | `MATCH(2)` | `m2` | MATCH → SQLite orders + limits |
 | `year<2022` (no MATCH) | `LT(1)` | `f1,16` | filtered scan, no embedding |
 
 ## Notable behaviors
@@ -65,14 +65,14 @@ fundamentally different:
   `m2;m3;f1,2`); one `xFilter` embeds all the queries and does a **single pass**,
   keeping a row only if it clears the threshold on **every** matched column,
   storing a **per-column score**. So multi-column MATCH is one intersecting scan,
-  and `similarity(summary)` vs `similarity(customer_notes)` return different
+  and `summary_score` vs `customer_notes_score` return different
   numbers. (Cost ≈ O(rows × matches) — the general/exact path; a lone MATCH with
   no filter still uses the HNSW fast path.)
 
 - **`a MATCH x OR b MATCH y`** → MULTI-INDEX OR: `xFilter` runs **once per
   branch**, each a *single*-MATCH scan (so each can use HNSW), and SQLite unions
   the rowids. Scores are per-branch: a row from the `a` branch has a score for
-  `a`; `similarity(b)` on it is `NULL`.
+  `a`; `b_score` on it is `NULL`.
 
 - **`(a MATCH x OR b MATCH y) AND status='open'`** → the OR expands to a union and
   the AND'd filter is distributed into each branch (`a MATCH x AND status='open'`,
@@ -94,65 +94,38 @@ applies — relevant to the `mode:exact` option in `match-dsl.md`.
 The planner explores alternative plans (different `usable` subsets / scan orders)
 and picks the lowest `estimatedCost`. The OR cases trigger six or more calls.
 
-### `xFindFunction` is consulted for any function over a vtab column
+### `<col>_score` works in aggregates and subqueries
 
-Observed for `like`, `lower`, and `similarity`. We only claim `similarity`
-(return non-zero); for the rest we return 0 and SQLite uses its built-in.
-
-### `similarity()` can't go *inside* an aggregate (use a `MATERIALIZED` CTE)
-
-`similarity(col)` isn't passed the score — it reads the **current row's** cached
-cosine from a process-global cursor pointer (set as the vtab emits each row).
-That's correct wherever SQLite evaluates it per output row (`SELECT`, `WHERE`,
-`ORDER BY`, and `GROUP BY` *keys*), but an aggregate accumulates in a step
-detached from that cursor, so the score comes back **NULL**:
+Because `<col>_score` is a real (hidden) column, its value flows through SQLite as
+ordinary row data — so it works in `SELECT`/`WHERE`/`ORDER BY`/`GROUP BY` keys
+**and inside aggregates**:
 
 ```sql
-SELECT AVG(similarity(notes)) FROM docs WHERE notes MATCH 'q';   -- → NULL
+SELECT status, AVG(notes_score) AS avg, MAX(notes_score) AS best
+FROM customers WHERE notes MATCH 'q'
+GROUP BY status ORDER BY best DESC;
 ```
 
-Wrapping it in a *plain* subquery does **not** help: SQLite's query flattener
-folds it straight back into the broken form (still NULL). The fix is to force the
-per-row scores to materialize *before* the aggregate — a `MATERIALIZED` CTE (or
-any non-flattenable subquery, e.g. one with `ORDER BY`/`LIMIT`):
-
-```sql
--- average match score
-WITH m AS MATERIALIZED (
-  SELECT similarity(notes) AS score
-  FROM docs WHERE notes MATCH 'q'
-)
-SELECT AVG(score) FROM m;
-
--- per group: average / best match by status
-WITH m AS MATERIALIZED (
-  SELECT status, similarity(notes) AS score
-  FROM customers WHERE notes MATCH 'q'
-)
-SELECT status, AVG(score) AS avg_score, MAX(score) AS best, COUNT(*) AS n
-FROM m GROUP BY status;
-```
-
-The inner query is a per-row context (works); `MATERIALIZED` makes SQLite run it
-to completion into a temp result, so the outer aggregate sees an ordinary `score`
-column. The proper fix — surfacing the score as row data, the way FTS5 exposes
-`rank` — is tracked separately.
+It is `NULL` for any vector column without an active `MATCH` in the query. (An
+earlier per-row `similarity()` function returned `NULL` inside aggregates because
+it read transient cursor state; it was replaced by this column — see
+[design-choices.md](./design-choices.md).)
 
 ### Pre-filter reach is wider than "the six ops"
 
 Pre-filtering kicks in for equality, range, **and** prefix-`LIKE`-as-range. True
 post-filtering is limited to: column-functions, non-prefix `LIKE`, `OR` residuals
-SQLite can't split, and `similarity()` thresholds.
+SQLite can't split, and `<col>_score` thresholds.
 
 ## Implications for users
 
 - **The default 0.5 threshold is loose with all-MiniLM** — its similarity
   baseline is high, so unrelated short texts can score ~0.5–0.65 and "match".
-  Tighten with `AND similarity(notes) > 0.7` (or the DSL `threshold:`).
+  Tighten with `AND notes_score > 0.7` (or the DSL `threshold:`).
 - **Equality / range / prefix-LIKE filters are cliff-proof** (pre-filtered).
 - **Column-function filters are cliff-prone** — prefer a plain `col = value`
   where possible, or use `mode:exact` once the DSL lands.
-- **`ORDER BY similarity(col) DESC`** is needed for best-first order; MATCH alone
+- **`ORDER BY <col>_score DESC`** is needed for best-first order; MATCH alone
   doesn't guarantee ordering.
 
 ## How to reproduce

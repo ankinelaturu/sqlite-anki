@@ -111,7 +111,7 @@ configures how the semantic search executes.
 
 ## Deferred (and why)
 
-- **`threshold:`** — redundant with `AND similarity(col) > X` for any threshold
+- **`threshold:`** — redundant with `AND <col>_score > X` for any threshold
   `>= 0.5` (the in-scan default). The only thing it could add is *loosening*
   below 0.5, which all-MiniLM's high baseline makes rarely useful. The grammar
   can add it later without breaking the suffix form.

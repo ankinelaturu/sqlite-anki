@@ -31,7 +31,7 @@ missing.
 |------|--------|
 | `harness.mjs` | shared setup: module init + model load (byte-passing path) |
 | `introspection.test.mjs` | `anki_version/model/dim`, NULL when no model |
-| `vtab.test.mjs` | CREATE/INSERT/UPDATE/DELETE, `MATCH`, `similarity()`, thresholds |
+| `vtab.test.mjs` | CREATE/INSERT/UPDATE/DELETE, `MATCH`, `<col>_score`, thresholds |
 | `persistence.test.mjs` | close/reopen reload, search on reloaded vectors, `DROP`/xDestroy |
 | `transactions.test.mjs` | `ROLLBACK`, `COMMIT`, `SAVEPOINT`/`ROLLBACK TO` |
 | `hybrid-filtering.test.mjs` | relational `WHERE` + `MATCH` pushdown, incl. the recall-cliff case |
