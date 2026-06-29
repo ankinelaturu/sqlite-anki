@@ -2,7 +2,9 @@
 
 SQLite with built-in semantic search for the browser.
 
-**sqlite-anki** lets you store text and query it by meaning using plain SQL.
+**▶ Live demo — [sqlite-anki.app](https://sqlite-anki.app)** (SQLite, the model, and your data all run in the tab)
+
+**sqlite-anki** lets you store text and query it by meaning using plain SQL:
 
 ```sql
 CREATE VIRTUAL TABLE docs USING anki(
@@ -18,25 +20,59 @@ Embeddings are generated automatically on `INSERT`/`UPDATE` and stored in the sa
 
 ## Quick start
 
+Try it without installing anything at **[sqlite-anki.app](https://sqlite-anki.app)**. To run the explorer locally:
+
 ```bash
 pnpm install
 pnpm build:wasm   # build the custom WASM → packages/wasm/dist/
-pnpm dev          # Explorer SPA → http://localhost:5173
+pnpm dev          # → http://localhost:5173
 ```
 
-The model is **not** bundled in the wasm; it's fetched/loaded at init:
+### Use it in your own app
 
-```js
+```ts
 import sqlite3Init from "@sqlite-anki/wasm";
 
+// Boot SQLite (WASM) and load an embedding model. The model is fetched once
+// from HuggingFace and cached in OPFS — it is NOT bundled into the wasm.
 const sqlite3 = await sqlite3Init({
-  anki: {
-    model: "all-MiniLM-L6-v2" 
-    } 
+  anki: { model: "all-MiniLM-L6-v2" },
 });
 
+// Open a persistent, OPFS-backed database (or ":memory:" for an ephemeral one).
 const db = new sqlite3.oo1.OpfsDb("/app.db");
+
+// A `TEXT VECTOR` column is embedded automatically on every write.
+db.exec(`
+  CREATE VIRTUAL TABLE IF NOT EXISTS docs USING anki(
+    title TEXT,
+    body  TEXT VECTOR
+  );
+`);
+
+db.exec(`
+  INSERT INTO docs(title, body) VALUES
+    ('Billing', 'how to update your payment method'),
+    ('Cancel',  'the steps to cancel a subscription');
+`);
+
+// Search by meaning. `similarity(col)` is the cosine score for the active MATCH.
+const hits = db.selectObjects(`
+  SELECT title, similarity(body) AS score
+  FROM docs
+  WHERE body MATCH 'end my plan'
+  ORDER BY score DESC
+  LIMIT 5;
+`);
+
+console.log(hits); // → [{ title: "Cancel", score: 0.6… }, …]
 ```
+
+> **Self-hosting note:** OPFS persistence + WASM threads need cross-origin
+> isolation, so serve with `Cross-Origin-Opener-Policy: same-origin` and
+> `Cross-Origin-Embedder-Policy: require-corp`. The explorer's Vite config sets
+> these for you. Other models (MiniLM-L12, mpnet, multilingual…) are available —
+> see [docs/dynamic-model-loading.md](./docs/dynamic-model-loading.md).
 
 ## Querying
 
@@ -44,7 +80,11 @@ Create an `anki` table with `TEXT VECTOR` columns; text is auto-embedded on
 write. Search with `MATCH`, score/order with `similarity()`.
 
 ```sql
-CREATE VIRTUAL TABLE customers USING anki(name TEXT, status TEXT, notes TEXT VECTOR);
+CREATE VIRTUAL TABLE customers USING anki(
+  name TEXT,
+  status TEXT,
+  notes TEXT VECTOR
+);
 
 INSERT INTO customers(name, status, notes) VALUES
   ('Acme', 'active', 'potential upsell opportunity');
@@ -58,7 +98,10 @@ LIMIT 10;
 
 **Relational + semantic (hybrid).** Plain SQL predicates combine with `MATCH`;
 equality/range filters are *pre-filtered* (the relational filter runs first, then
-similarity ranks the survivors), so selective filters don't lose matches:
+similarity ranks the survivors), so selective filters don't lose matches. The
+pushdown is collation-aware and numerically exact — it only ever *narrows*, never
+dropping a row SQLite would keep (see
+[docs/hybrid-filtering.md](./docs/hybrid-filtering.md#correctness-false-positives-vs-false-negatives)):
 
 ```sql
 SELECT name FROM customers
@@ -66,7 +109,7 @@ WHERE status = 'active' AND notes MATCH 'billing issue'
 ORDER BY similarity(notes) DESC;
 ```
 
-`**MATCH` DSL.** A regex-style suffix controls *how* the search runs (see
+**`MATCH` DSL.** A regex-style suffix controls *how* the search runs (see
 [docs/match-dsl.md](./docs/match-dsl.md)):
 
 ```sql
@@ -78,26 +121,24 @@ WHERE notes MATCH 'apple/hnsw:512'   -- approximate, candidate budget 512
 Notes:
 
 - `similarity(col)` returns the cosine score for the active `MATCH` (NULL without
-one); it does **not** recompute — the score is cached from the scan. It works in
-`SELECT`/`WHERE`/`ORDER BY`/`GROUP BY` keys, but **not inside aggregates** yet
-(returns NULL — see [docs/query-planning.md](./docs/query-planning.md)).
+  one); it does **not** recompute — the score is cached from the scan. It works in
+  `SELECT`/`WHERE`/`ORDER BY`/`GROUP BY` keys, but **not inside aggregates** yet
+  (returns NULL — see [docs/query-planning.md](./docs/query-planning.md)).
 - Default similarity threshold is `0.5`; tighten with `AND similarity(col) > 0.7`.
 - The model runs in Rust/WASM — no JavaScript on the query hot path.
 
 ## Documentation
-
 
 | Document                                                         | Description                                          |
 | ---------------------------------------------------------------- | ---------------------------------------------------- |
 | [docs/DESIGN.md](./docs/DESIGN.md)                               | Full design specification                            |
 | [docs/dynamic-model-loading.md](./docs/dynamic-model-loading.md) | Runtime model loading (no bundled model)             |
 | [docs/match-dsl.md](./docs/match-dsl.md)                         | The `MATCH` semantic-query DSL                       |
-| [docs/hybrid-filtering.md](./docs/hybrid-filtering.md)           | Relational `WHERE` + `MATCH` pushdown                |
+| [docs/hybrid-filtering.md](./docs/hybrid-filtering.md)           | Relational `WHERE` + `MATCH` pushdown + correctness  |
 | [docs/query-planning.md](./docs/query-planning.md)               | How SQLite plans queries against the vtab            |
 | [docs/metrics.md](./docs/metrics.md)                             | Per-operation metrics via `anki_metrics()`           |
 | [docs/our-findings.md](./docs/our-findings.md)                   | Performance & size profiling: where the time/size go |
 | [docs/build-variants.md](./docs/build-variants.md)               | WASM build variants (engine / threading)             |
-
 
 ## Performance
 
@@ -105,18 +146,18 @@ In-browser embedding was profiled in depth — full data in
 [docs/our-findings.md](./docs/our-findings.md), build variants in
 [docs/build-variants.md](./docs/build-variants.md). Highlights:
 
-- **Where the size goes.** The wasm is ~~14 MB not because of SQLite (~~1 MB) or the
-extension (~50 KB) but because it statically links a full ONNX engine
-(Tract + ndarray ≈ 12 MB). An embedding is a single transformer forward pass;
-the model, graph optimization, and tokenizer load **once**.
+- **Where the size goes.** The wasm is ~14 MB not because of SQLite (~1 MB) or the
+  extension (~50 KB) but because it statically links a full ONNX engine
+  (Tract + ndarray ≈ 12 MB). An embedding is a single transformer forward pass;
+  the model, graph optimization, and tokenizer load **once**.
 - **The biggest win was the tokenizer, not the engine.** The model's tokenizer
-padded every input to a fixed 128 tokens — ~~82% of each forward pass wasted on
-`[PAD]`. Padding to the input's actual length cut a short embed **~~96 ms → ~~11 ms
-(~~9×)** and the 1,200-embedding demo build **~105 s → ~19 s** — and corrected a
-latent mean-pooling bug (it now matches sentence-transformers' masked mean).
+  padded every input to a fixed 128 tokens — ~82% of each forward pass wasted on
+  `[PAD]`. Padding to the input's actual length cut a short embed **~96 ms → ~11 ms
+  (~9×)** and the 1,200-embedding demo build **~105 s → ~19 s** — and corrected a
+  latent mean-pooling bug (it now matches sentence-transformers' masked mean).
 - **Engine choice (Tract vs Candle).** Both give identical embeddings and pass the
-suite. Tract is faster for short text (the common case); Candle is **−65% smaller**
-and edges ahead only for long documents:
+  suite. Tract is faster for short text (the common case); Candle is **−65% smaller**
+  and edges ahead only for long documents:
 
   | build                     | typical text | long (512 tok) | wasm    |
   | ------------------------- | ------------ | -------------- | ------- |
@@ -128,7 +169,7 @@ and edges ahead only for long documents:
   matmuls are too small. Native (non-wasm) ONNX would be ~single-digit ms, but
   that's a different deliverable.
 
-Default is `**tract-onnx-st`** (fastest, stable toolchain, no nightly).
+Default is **`tract-onnx-st`** (fastest, stable toolchain, no nightly).
 
 ## Monorepo layout
 
@@ -144,10 +185,14 @@ models/           ONNX + tokenizer — dev/test fixture, not bundled (see models
 
 ## Explorer app
 
-- **Left:** schema tree (tables → columns, `TEXT VECTOR` badges)
-- **Right:** data grid with inline edit, add/delete rows, semantic search bar
+The SPA behind the [live demo](https://sqlite-anki.app):
 
-Uses OPFS for persistence. Requires COOP/COEP headers (configured in Vite).
+- **Activity bar** switches between a **SQLite** workspace and an **OPFS** file browser.
+- **SQLite:** schema tree (tables → columns, `TEXT VECTOR` badges) on the left; a
+  data grid with inline edit, add/delete rows, and a semantic search bar on the right.
+- **OPFS:** a VSCode-style file tree + tabbed editor over what the explorer persists.
+
+Uses OPFS for persistence; requires COOP/COEP headers (configured in Vite).
 
 ## Tests
 
@@ -172,15 +217,14 @@ Two layers, both run in CI on every push (`.github/workflows/deploy.yml`):
 
 ## Status
 
-- `**anki` virtual table:** working — `CREATE VIRTUAL TABLE … USING anki`,
-auto-embedding INSERT/UPDATE/DELETE, `MATCH`, `similarity()`, persistence
-(shadow tables), transactions/savepoints.
+- **`anki` virtual table:** working — `CREATE VIRTUAL TABLE … USING anki`,
+  auto-embedding INSERT/UPDATE/DELETE, `MATCH`, `similarity()`, persistence
+  (shadow tables), transactions/savepoints.
 - **Search:** HNSW ANN + exact brute-force (`MATCH` DSL `mode`), hybrid
-relational+semantic pre-filtering, and **multiple `MATCH` columns per query**
-(AND'd, each with its own `similarity()` score).
+  relational+semantic pre-filtering, and **multiple `MATCH` columns per query**
+  (AND'd, each with its own `similarity()` score).
 - **Model:** loaded at runtime (not bundled); wasm ≈ 14 MB (Tract default) or
-≈ 5 MB (Candle build variant). See [Performance](#performance).
-- **Tests:** Rust unit tests (`cargo test`) + WASM integration suite
-(`pnpm --filter @sqlite-anki/wasm test`).
+  ≈ 5 MB (Candle build variant). See [Performance](#performance).
+- **Tests:** Rust unit tests (`cargo test -p anki-core`) + WASM integration suite
+  (`pnpm --filter @sqlite-anki/wasm test`).
 - **Not yet:** `similarity()` inside aggregates, quantized model.
-
