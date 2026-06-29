@@ -16,6 +16,11 @@ name: Deploy explorer (Vercel)
 on:
   push:
     branches: [main]
+    # Skip the build+deploy when a push touches only docs (the explorer is
+    # unaffected). A run is still triggerable manually via workflow_dispatch.
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
   workflow_dispatch:
 
 concurrency:
