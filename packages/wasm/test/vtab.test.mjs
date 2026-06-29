@@ -6,9 +6,9 @@
  *    table where `TEXT VECTOR` columns store plain text and auto-embed on write.
  *  - `WHERE col MATCH 'query'` is *semantic* search: the query is embedded and
  *    rows above the default cosine threshold (0.5) are returned.
- *  - `similarity(col)` is a FUNCTION (not a stored column) returning the current
- *    row's cosine similarity to the active MATCH query — NULL when there is no
- *    MATCH on that column.
+ *  - `<col>_score` is a hidden, query-time column holding the current row's
+ *    cosine similarity to the active MATCH on that column — NULL when there is
+ *    no MATCH on it.
  *  - INSERT/UPDATE/DELETE keep embeddings (and the HNSW index) in sync.
  *
  * The model is loaded once per file (the `before` hook); each test uses its own
@@ -48,13 +48,13 @@ test("CREATE VIRTUAL TABLE + INSERT embeds and stores rows", async () => {
 
 // A billing-themed query must rank the billing row first — the clearest
 // semantic discriminator. Also exercises a *parameterized* MATCH (bound `?`),
-// which real apps use, and `ORDER BY similarity(...) DESC` for best-first order.
+// which real apps use, and `ORDER BY <col>_score DESC` for best-first order.
 test("MATCH ranks the semantically closest row first (parameterized)", async () => {
   const db = new sqlite3.oo1.DB(":memory:");
   try {
     seed(db);
     const stmt = db.prepare(
-      `SELECT name FROM customers WHERE notes MATCH ? ORDER BY similarity(notes) DESC`
+      `SELECT name FROM customers WHERE notes MATCH ? ORDER BY notes_score DESC`
     );
     stmt.bind("billing support request");
     const names = [];
@@ -66,18 +66,18 @@ test("MATCH ranks the semantically closest row first (parameterized)", async () 
   }
 });
 
-// `similarity()` is only meaningful alongside a MATCH: without one it yields
+// `<col>_score` is only meaningful alongside a MATCH: without one it yields
 // NULL for every row; with one, every returned row has a numeric score that
 // already passed the default 0.5 threshold.
-test("similarity() is NULL without a MATCH, a score with one", async () => {
+test("col_score is NULL without a MATCH, a score with one", async () => {
   const db = new sqlite3.oo1.DB(":memory:");
   try {
     seed(db);
-    const noMatch = db.selectObjects(`SELECT similarity(notes) AS s FROM customers`);
+    const noMatch = db.selectObjects(`SELECT notes_score AS s FROM customers`);
     assert.ok(noMatch.every((r) => r.s === null));
 
     const withMatch = db.selectObjects(
-      `SELECT similarity(notes) AS s FROM customers WHERE notes MATCH 'billing'`
+      `SELECT notes_score AS s FROM customers WHERE notes MATCH 'billing'`
     );
     assert.ok(withMatch.length > 0);
     assert.ok(withMatch.every((r) => typeof r.s === "number" && r.s >= 0.5));
@@ -86,7 +86,7 @@ test("similarity() is NULL without a MATCH, a score with one", async () => {
   }
 });
 
-// A user can tighten the default threshold with `AND similarity(col) > X`; that
+// A user can tighten the default threshold with `AND col_score > X`; that
 // can only ever return a subset of the unfiltered MATCH.
 test("stricter threshold filter narrows results", async () => {
   const db = new sqlite3.oo1.DB(":memory:");
@@ -94,7 +94,7 @@ test("stricter threshold filter narrows results", async () => {
     seed(db);
     const all = db.selectValue(`SELECT count(*) FROM customers WHERE notes MATCH 'billing'`);
     const strict = db.selectValue(
-      `SELECT count(*) FROM customers WHERE notes MATCH 'billing' AND similarity(notes) > 0.8`
+      `SELECT count(*) FROM customers WHERE notes MATCH 'billing' AND notes_score > 0.8`
     );
     assert.ok(strict <= all);
   } finally {
@@ -111,13 +111,13 @@ test("UPDATE re-embeds; DELETE removes from results", async () => {
     seed(db);
     db.exec(`DELETE FROM customers WHERE name='Beta LLC'`);
     const afterDelete = db.selectObjects(
-      `SELECT name FROM customers WHERE notes MATCH 'billing support' ORDER BY similarity(notes) DESC`
+      `SELECT name FROM customers WHERE notes MATCH 'billing support' ORDER BY notes_score DESC`
     ).map((r) => r.name);
     assert.ok(!afterDelete.includes("Beta LLC"));
 
     db.exec(`UPDATE customers SET notes='invoice and billing dispute' WHERE name='Acme Corp'`);
     const top = db.selectObjects(
-      `SELECT name FROM customers WHERE notes MATCH 'billing invoice' ORDER BY similarity(notes) DESC`
+      `SELECT name FROM customers WHERE notes MATCH 'billing invoice' ORDER BY notes_score DESC`
     )[0].name;
     assert.equal(top, "Acme Corp");
   } finally {

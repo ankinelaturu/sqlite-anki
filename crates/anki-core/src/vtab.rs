@@ -1,4 +1,4 @@
-//! `anki` virtual table module: planner-driven semantic `MATCH` + `similarity()`.
+//! `anki` virtual table module: planner-driven semantic `MATCH` + `<col>_score`.
 //!
 //! v1 storage is in-memory and search is brute-force cosine over stored
 //! embeddings (HNSW is a later optimization; see [`crate::hnsw`]). The module is
@@ -8,8 +8,8 @@
 //! - `TEXT VECTOR` columns store plain text; their embedding is managed here.
 //! - `WHERE col MATCH ?` embeds the query and returns rows with cosine
 //!   similarity >= [`crate::DEFAULT_SIMILARITY_THRESHOLD`], best-first.
-//! - `similarity(col)` returns the current row's cosine similarity for the
-//!   active `MATCH`, or `NULL` when there is no `MATCH`.
+//! - the hidden `<col>_score` column holds the current row's cosine similarity
+//!   for an active `MATCH` on that column, or `NULL` when it has no `MATCH`.
 #![allow(non_camel_case_types, non_snake_case, private_interfaces)]
 
 use crate::embedder::Embedder;
@@ -345,12 +345,9 @@ struct AnkiCursor {
     results: Vec<MatchRow>,
     pos: usize,
     /// Columns with an active `MATCH` (in plan order); empty when none.
-    /// `similarity(col)` maps its argument back to one of these.
+    /// each `<col>_score` column maps back to one of these.
     match_cols: Vec<usize>,
 }
-
-// Single-threaded WASM: the in-flight cursor for `similarity()` resolution.
-static mut CURRENT_CURSOR: *mut AnkiCursor = ptr::null_mut();
 
 // --- helpers -----------------------------------------------------------------
 
@@ -1077,7 +1074,7 @@ fn exact_scan(
 //   xFilter            start the scan: embed the query, build the result list
 //   xEof/xColumn/xNext/xRowid   hand rows back one at a time
 //   xClose             done
-// `similarity()` (via xFindFunction) reads the current cursor's score; xUpdate
+// xColumn returns `<col>_score` from the current row's cached score; xUpdate
 // handles writes. The constraint values (`?`) arrive in xFilter's `argv`.
 
 unsafe extern "C" fn x_create(
@@ -1345,9 +1342,6 @@ unsafe extern "C" fn x_open(vtab: *mut sqlite3_vtab, pp: *mut *mut sqlite3_vtab_
 }
 
 unsafe extern "C" fn x_close(cur: *mut sqlite3_vtab_cursor) -> c_int {
-    if CURRENT_CURSOR == cur as *mut AnkiCursor {
-        CURRENT_CURSOR = ptr::null_mut();
-    }
     drop(Box::from_raw(cur as *mut AnkiCursor));
     SQLITE_OK
 }
@@ -1358,7 +1352,7 @@ unsafe extern "C" fn x_close(cur: *mut sqlite3_vtab_cursor) -> c_int {
 ///   1. MATCH + relational filter → PRE-FILTER: rank only rows passing the
 ///      filter (no candidate cap over the subset → no recall cliff).
 ///   2. MATCH only → HNSW over the whole table (or exact scan if no index yet).
-///   3. no MATCH → a (possibly filtered) plain scan; `similarity()` stays NULL.
+///   3. no MATCH → a (possibly filtered) plain scan; `<col>_score` stays NULL.
 /// SQLite re-applies every `WHERE` term to the rows we emit, so correctness does
 /// not depend on us getting the filter exactly right — only on emitting a
 /// superset of the matching rows.
@@ -1401,7 +1395,7 @@ unsafe extern "C" fn x_filter(
     };
 
     if plan.matches.is_empty() {
-        // No MATCH: a (possibly filtered) scan. `similarity()` stays NULL.
+        // No MATCH: a (possibly filtered) scan. `<col>_score` stays NULL.
         for (rowid, row) in st.rows.iter() {
             if row_passes(row) {
                 c.results.push(MatchRow { rowid: *rowid, sims: Vec::new() });
@@ -1484,7 +1478,7 @@ unsafe extern "C" fn x_filter(
                 // General path: AND of several MATCHes (and/or a relational
                 // filter). Exact-scan the pre-filtered rows; a row qualifies only
                 // if EVERY matched column clears the threshold. Keep per-column
-                // scores so `similarity(col)` can return each one.
+                // scores so each `<col>_score` can return its own.
                 for (rowid, row) in st.rows.iter() {
                     if !preds.is_empty() && !row_passes(row) {
                         continue;
@@ -1515,7 +1509,7 @@ unsafe extern "C" fn x_filter(
             }
 
             // Rank by combined relevance (sum of per-column scores); an explicit
-            // ORDER BY similarity(col) in the query overrides this.
+            // ORDER BY <col>_score in the query overrides this.
             c.results.sort_by(|a, b| {
                 let sa: f32 = a.sims.iter().sum();
                 let sb: f32 = b.sims.iter().sum();
@@ -1525,17 +1519,13 @@ unsafe extern "C" fn x_filter(
         }
     }
 
-    CURRENT_CURSOR = cur as *mut AnkiCursor;
     SQLITE_OK
 }
 
-// Advance to the next result row. We also stash the cursor globally so a
-// `similarity()` call evaluated for this row can find its score (see
-// similarity_fn / CURRENT_CURSOR).
+// Advance to the next result row.
 unsafe extern "C" fn x_next(cur: *mut sqlite3_vtab_cursor) -> c_int {
     let c = &mut *(cur as *mut AnkiCursor);
     c.pos += 1;
-    CURRENT_CURSOR = cur as *mut AnkiCursor;
     SQLITE_OK
 }
 
@@ -1555,7 +1545,6 @@ unsafe extern "C" fn x_column(
     let c = &*(cur as *mut AnkiCursor);
     let vt = &*c.vtab;
     let st = &*vt.state;
-    CURRENT_CURSOR = cur as *mut AnkiCursor;
 
     if c.pos >= c.results.len() {
         sqlite3_result_null(ctx);
@@ -1695,79 +1684,6 @@ unsafe extern "C" fn x_update(
     SQLITE_OK
 }
 
-unsafe extern "C" fn x_find_function(
-    _vtab: *mut sqlite3_vtab,
-    n_arg: c_int,
-    z_name: *const c_char,
-    px_func: *mut Option<ScalarFn>,
-    pp_arg: *mut *mut c_void,
-) -> c_int {
-    let name = CStr::from_ptr(z_name).to_bytes();
-    if n_arg == 1 && name.eq_ignore_ascii_case(b"similarity") {
-        *px_func = Some(similarity_fn);
-        *pp_arg = ptr::null_mut();
-        return 1;
-    }
-    0
-}
-
-/// `similarity(col)` for the active `MATCH`: returns the current row's cosine
-/// similarity, or `NULL` when no `MATCH` is active on the scan.
-unsafe extern "C" fn similarity_fn(
-    ctx: *mut sqlite3_context,
-    argc: c_int,
-    argv: *mut *mut sqlite3_value,
-) {
-    let cur = CURRENT_CURSOR;
-    if cur.is_null() {
-        sqlite3_result_null(ctx);
-        return;
-    }
-    let c = &*cur;
-    if c.match_cols.is_empty() || c.pos >= c.results.len() {
-        sqlite3_result_null(ctx);
-        return;
-    }
-    let sims = &c.results[c.pos].sims;
-    if sims.is_empty() {
-        sqlite3_result_null(ctx);
-        return;
-    }
-    // Single MATCH: the column is unambiguous.
-    if c.match_cols.len() == 1 {
-        sqlite3_result_double(ctx, sims[0] as f64);
-        return;
-    }
-    // Multiple MATCHes: `similarity(col)` is passed that column's *value* for the
-    // current row, so map it back to a matched column by comparing values.
-    let arg = if argc >= 1 { value_to_string(*argv) } else { None };
-    let st = &*(*c.vtab).state;
-    if let Some(row) = st.rows.get(&c.results[c.pos].rowid) {
-        for (i, &col) in c.match_cols.iter().enumerate() {
-            let cell_text = match row.cells.get(col) {
-                Some(Cell::Text(t)) => Some(t.as_str()),
-                _ => None,
-            };
-            if cell_text.is_some() && cell_text == arg.as_deref() {
-                sqlite3_result_double(ctx, sims[i] as f64);
-                return;
-            }
-        }
-    }
-    sqlite3_result_null(ctx);
-}
-
-/// Global `similarity(x)` stub: `NULL` outside a `MATCH` context. The vtab
-/// overrides this via [`x_find_function`] when the argument is one of its
-/// columns.
-unsafe extern "C" fn similarity_stub(
-    ctx: *mut sqlite3_context,
-    _argc: c_int,
-    _argv: *mut *mut sqlite3_value,
-) {
-    sqlite3_result_null(ctx);
-}
-
 /// `anki_model()` — id of the loaded model, or `NULL` if none loaded.
 unsafe extern "C" fn anki_model_fn(
     ctx: *mut sqlite3_context,
@@ -1811,7 +1727,7 @@ static ANKI_MODULE: sqlite3_module = sqlite3_module {
     xSync: Some(x_sync),
     xCommit: Some(x_commit),
     xRollback: Some(x_rollback),
-    xFindFunction: Some(x_find_function),
+    xFindFunction: None,
     xRename: None,
     xSavepoint: Some(x_savepoint),
     xRelease: Some(x_release),
@@ -1820,7 +1736,7 @@ static ANKI_MODULE: sqlite3_module = sqlite3_module {
     xIntegrity: None,
 };
 
-/// Registers the `anki` virtual table module and the `similarity()` function.
+/// Registers the `anki` virtual table module and the `anki_*()` functions.
 ///
 /// Called from `wasm/anki_extension.c` during `sqlite3_anki_init`.
 ///
@@ -1834,20 +1750,6 @@ pub unsafe extern "C" fn anki_register_vtab(db: *mut sqlite3) -> c_int {
         b"anki\0".as_ptr() as *const c_char,
         &ANKI_MODULE,
         ptr::null_mut(),
-        None,
-    );
-    if rc != SQLITE_OK {
-        return rc;
-    }
-    let rc = sqlite3_create_function_v2(
-        db,
-        b"similarity\0".as_ptr() as *const c_char,
-        1,
-        SQLITE_UTF8,
-        ptr::null_mut(),
-        Some(similarity_stub),
-        None,
-        None,
         None,
     );
     if rc != SQLITE_OK {

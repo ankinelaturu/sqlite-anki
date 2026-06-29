@@ -30,7 +30,7 @@ test("equality filter + MATCH returns only matching rows, ranked", () => {
     const rows = db.selectObjects(
       `SELECT status, body FROM docs
        WHERE status = 'active' AND body MATCH 'billing support'
-       ORDER BY similarity(body) DESC`
+       ORDER BY body_score DESC`
     );
     assert.ok(rows.length >= 1);
     assert.ok(rows.every((r) => r.status === "active"), "only active rows");
@@ -97,7 +97,7 @@ test("selective filter returns matching rows the cap would have dropped", () => 
     const rows = db.selectObjects(
       `SELECT status FROM docs
        WHERE status='active' AND body MATCH $q
-       ORDER BY similarity(body) DESC`,
+       ORDER BY body_score DESC`,
       { $q: query }
     );
     // All three active rows must be returned despite 300 more-similar archived

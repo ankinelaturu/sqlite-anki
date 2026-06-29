@@ -40,7 +40,7 @@ test("ROLLBACK reverts cache, store, and search", () => {
     db.exec("ROLLBACK");
     assert.deepEqual(names(db), ["Acme"]);
     const found = db
-      .selectObjects(`SELECT name FROM customers WHERE notes MATCH 'rolled back ghost' ORDER BY similarity(notes) DESC`)
+      .selectObjects(`SELECT name FROM customers WHERE notes MATCH 'rolled back ghost' ORDER BY notes_score DESC`)
       .map((r) => r.name);
     assert.ok(!found.includes("Ghost"));
     assert.equal(db.selectValue(`SELECT count(*) FROM "main"."customers_data"`), 1);

@@ -44,7 +44,7 @@ test("exact-match query is retrieved first across row counts", () => {
       // Querying with the target's own text: the exact match must rank #1.
       const top = db
         .selectObjects(
-          `SELECT title FROM docs WHERE body MATCH $q ORDER BY similarity(body) DESC LIMIT 1`,
+          `SELECT title FROM docs WHERE body MATCH $q ORDER BY body_score DESC LIMIT 1`,
           { $q: target }
         )[0].title;
       assert.equal(top, "TARGET", `n=${n + 1}: exact match not retrieved first`);

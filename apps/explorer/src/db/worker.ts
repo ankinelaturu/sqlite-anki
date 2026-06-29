@@ -399,7 +399,7 @@ function queryName(dbPath: string): string {
 
 function demoQuery(): string {
   return `-- Semantic search, ranked by similarity
-SELECT title, round(similarity(customer_notes), 3) AS score
+SELECT title, round(customer_notes_score, 3) AS score
 FROM opportunities
 WHERE customer_notes MATCH 'enterprise rollout'
 ORDER BY score DESC LIMIT 10;
@@ -424,8 +424,8 @@ WHERE body MATCH 'how to migrate enterprise customers to the cloud';
 
 -- Multiple semantic columns in one query (AND), with per-column scores
 SELECT title,
-       round(similarity(summary), 3)        AS summary_score,
-       round(similarity(customer_notes), 3) AS notes_score
+       round(summary_score, 3)        AS summary_score,
+       round(customer_notes_score, 3) AS notes_score
 FROM opportunities
 WHERE summary MATCH 'manufacturing expansion'
   AND customer_notes MATCH 'budget approved'
@@ -484,7 +484,7 @@ timings on every query.
 Semantic search, ranked by similarity:
 
 \`\`\`sql
-SELECT title, round(similarity(customer_notes), 3) AS score
+SELECT title, round(customer_notes_score, 3) AS score
 FROM opportunities
 WHERE customer_notes MATCH 'enterprise rollout'
 ORDER BY score DESC LIMIT 10;
@@ -521,12 +521,12 @@ WHERE body MATCH 'how to migrate enterprise customers to the cloud';
 \`\`\`
 
 Multiple semantic columns in one query — \`MATCH\` several vector columns (AND'd)
-and read each column's score with \`similarity()\`:
+and read each column's score from its \`<col>_score\` column:
 
 \`\`\`sql
 SELECT title,
-       round(similarity(summary), 3)        AS summary_score,
-       round(similarity(customer_notes), 3) AS notes_score
+       round(summary_score, 3)        AS summary_score,
+       round(customer_notes_score, 3) AS notes_score
 FROM opportunities
 WHERE summary MATCH 'manufacturing expansion'
   AND customer_notes MATCH 'budget approved'

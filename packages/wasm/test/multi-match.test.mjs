@@ -1,6 +1,6 @@
 /**
  * Multiple MATCH columns in one query: `a MATCH x AND b MATCH y` (AND'd), with
- * per-column similarity() scores, optionally combined with a relational filter.
+ * per-column `<col>_score` values, optionally combined with a relational filter.
  */
 import { test, before } from "node:test";
 import assert from "node:assert/strict";
@@ -39,12 +39,12 @@ test("two MATCH columns AND'd, no longer errors", () => {
   }
 });
 
-test("similarity() returns the right per-column score", () => {
+test("col_score returns the right per-column score", () => {
   const db = seed();
   try {
     const [row] = db.selectObjects(`SELECT title,
-        round(similarity(summary), 4) AS s,
-        round(similarity(customer_notes), 4) AS n
+        round(summary_score, 4) AS s,
+        round(customer_notes_score, 4) AS n
       FROM opp
       WHERE summary MATCH 'manufacturing expansion'
         AND customer_notes MATCH 'budget approved'
@@ -78,7 +78,7 @@ test("single MATCH still works", () => {
   const db = seed();
   try {
     const rows = db.selectObjects(
-      `SELECT title, round(similarity(summary),3) s FROM opp
+      `SELECT title, round(summary_score,3) s FROM opp
        WHERE summary MATCH 'cloud migration' ORDER BY s DESC LIMIT 1`,
     );
     assert.equal(rows.length, 1);

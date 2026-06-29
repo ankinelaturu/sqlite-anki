@@ -41,7 +41,7 @@ test("rows + embeddings survive close/reopen (search works on reload)", () => {
   try {
     assert.equal(db.selectValue("SELECT count(*) FROM customers"), 2);
     const top = db.selectObjects(
-      `SELECT name FROM customers WHERE notes MATCH 'billing support' ORDER BY similarity(notes) DESC`
+      `SELECT name FROM customers WHERE notes MATCH 'billing support' ORDER BY notes_score DESC`
     )[0].name;
     assert.equal(top, "Beta");
   } finally {

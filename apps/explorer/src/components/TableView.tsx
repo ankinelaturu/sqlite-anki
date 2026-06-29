@@ -93,7 +93,7 @@ export function TableView({
       const suffix = mode === "exact" ? "/exact" : `/hnsw:${candidates}`;
       const r = await api.query(
         path,
-        `SELECT rowid AS rowid, *, round(similarity(${q(col)}), 4) AS _similarity
+        `SELECT rowid AS rowid, *, round(${q(`${col}_score`)}, 4) AS _similarity
          FROM ${q(table.name)} WHERE ${q(col)} MATCH ?
          ORDER BY _similarity DESC LIMIT ?`,
         [`${query}${suffix}`, PAGE],

@@ -45,7 +45,7 @@ test("COLLATE NOCASE filter combined with MATCH keeps a case-different row", () 
     const rows = db.selectObjects(
       `SELECT status FROM docs
        WHERE status = 'active' COLLATE NOCASE AND body MATCH 'billing support'
-       ORDER BY similarity(body) DESC`,
+       ORDER BY body_score DESC`,
     );
     assert.ok(rows.length >= 1, "the 'Active' row survived the NOCASE pre-filter");
     assert.ok(rows.every((r) => r.status.toLowerCase() === "active"));

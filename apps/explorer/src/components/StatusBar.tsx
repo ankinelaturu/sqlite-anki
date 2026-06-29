@@ -95,7 +95,7 @@ export function StatusBar({ opfs, version, modelId, dim, op, busy, error }: Stat
         </Chip>
       )}
       {modelId && (
-        <Chip desc={`Embedding model loaded for this session${dim ? ` — produces ${dim}-dimensional vectors` : ""}. It powers every MATCH / similarity() query.`}>
+        <Chip desc={`Embedding model loaded for this session${dim ? ` — produces ${dim}-dimensional vectors` : ""}. It powers every MATCH query and the per-column scores.`}>
           <Cpu className="h-3.5 w-3.5 text-violet-400" /> {modelId}
           {dim ? ` · ${dim}d` : ""}
         </Chip>
