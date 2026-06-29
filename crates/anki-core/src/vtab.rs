@@ -569,7 +569,7 @@ fn parse_column(def: &str) -> Option<ColumnDef> {
 }
 
 fn build_declare(cols: &[ColumnDef]) -> String {
-    let body = cols
+    let mut parts: Vec<String> = cols
         .iter()
         .map(|c| {
             if c.decl_type.is_empty() {
@@ -578,9 +578,16 @@ fn build_declare(cols: &[ColumnDef]) -> String {
                 format!("\"{}\" {}", c.name, c.decl_type)
             }
         })
-        .collect::<Vec<_>>()
-        .join(", ");
-    format!("CREATE TABLE x({body})")
+        .collect();
+    // One hidden REAL score column per vector column: `"<col>_score" REAL HIDDEN`.
+    // The query-time cosine for an active MATCH on that column is returned here by
+    // xColumn; it's NULL when the column has no MATCH in the query. HIDDEN keeps it
+    // out of `SELECT *`. Appended after the user columns, in vector-column order,
+    // so the score column at declared index `ncol + k` maps to `vector_cols[k]`.
+    for c in cols.iter().filter(|c| c.is_vector) {
+        parts.push(format!("\"{}_score\" REAL HIDDEN", c.name));
+    }
+    format!("CREATE TABLE x({})", parts.join(", "))
 }
 
 unsafe fn zeroed_vtab() -> sqlite3_vtab {
@@ -1554,6 +1561,26 @@ unsafe extern "C" fn x_column(
         sqlite3_result_null(ctx);
         return SQLITE_OK;
     }
+
+    // Hidden `<col>_score` columns come after the user columns: declared index
+    // `ncol + k` is the score of `vector_cols[k]`. Return the cached cosine for
+    // that column's active MATCH on the current row, or NULL if it isn't matched
+    // in this query. (This is the aggregate-/sort-/subquery-safe path: the value
+    // flows through SQLite as ordinary row data.)
+    if (i as usize) >= st.ncol {
+        let k = i as usize - st.ncol;
+        if let Some(&vc) = st.vector_cols.get(k) {
+            if let Some(j) = c.match_cols.iter().position(|&mc| mc == vc) {
+                if let Some(s) = c.results[c.pos].sims.get(j) {
+                    sqlite3_result_double(ctx, *s as f64);
+                    return SQLITE_OK;
+                }
+            }
+        }
+        sqlite3_result_null(ctx);
+        return SQLITE_OK;
+    }
+
     let rowid = c.results[c.pos].rowid;
     match st.rows.get(&rowid).and_then(|r| r.cells.get(i as usize)) {
         Some(Cell::Int(v)) => sqlite3_result_int64(ctx, *v),
