@@ -27,7 +27,18 @@ env:
   VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
 
 jobs:
+  # Fast Rust unit tests (pure logic — no wasm, no model). Gates the deploy.
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Rust unit tests
+        run: cargo test -p anki-core
+
   deploy:
+    needs: test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -66,6 +77,19 @@ jobs:
 
       - name: Build wasm (default tract-onnx-st)
         run: pnpm build:wasm
+
+      # End-to-end tests against the wasm just built: load it under Node with the
+      # real model and exercise the virtual table. Runs before deploying, so a
+      # failure here blocks the deploy. The 86 MB model is cached (it's pinned).
+      - name: Cache model (all-MiniLM-L6-v2)
+        uses: actions/cache@v4
+        with:
+          path: models/all-MiniLM-L6-v2/model.onnx
+          key: model-all-minilm-l6-v2-onnx-v1
+      - name: Download model
+        run: bash scripts/download-model.sh
+      - name: e2e tests (node --test against built wasm)
+        run: pnpm --filter @sqlite-anki/wasm test
 
       - name: Install Vercel CLI
         run: npm i -g vercel@latest
