@@ -133,6 +133,7 @@ Notes:
 | Document                                                         | Description                                          |
 | ---------------------------------------------------------------- | ---------------------------------------------------- |
 | [docs/DESIGN.md](./docs/DESIGN.md)                               | Full design specification                            |
+| [docs/design-choices.md](./docs/design-choices.md)              | Why the key design decisions are what they are       |
 | [docs/dynamic-model-loading.md](./docs/dynamic-model-loading.md) | Runtime model loading (no bundled model)             |
 | [docs/match-dsl.md](./docs/match-dsl.md)                         | The `MATCH` semantic-query DSL                       |
 | [docs/hybrid-filtering.md](./docs/hybrid-filtering.md)           | Relational `WHERE` + `MATCH` pushdown + correctness  |
