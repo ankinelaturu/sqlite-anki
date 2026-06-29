@@ -5,29 +5,16 @@ SQLite with built-in semantic search for the browser.
 **sqlite-anki** lets you store text and query it by meaning using plain SQL.
 
 ```sql
-CREATE VIRTUAL TABLE docs USING anki(title TEXT, body TEXT VECTOR);
+CREATE VIRTUAL TABLE docs USING anki(
+  title TEXT,
+  body TEXT VECTOR
+);
 
-SELECT *
-FROM docs
+SELECT * FROM docs
 WHERE body MATCH 'how do I cancel my subscription';
 ```
 
 Embeddings are generated automatically on `INSERT`/`UPDATE` and stored in the same table as your text—no joins, no separate vector database, no synchronization pipeline. The model runs *inside* SQLite (Rust compiled to WebAssembly), so search happens entirely in the browser—no embedding API, and no JavaScript on the query hot path.
-
-## Documentation
-
-
-| Document                                                         | Description                                          |
-| ---------------------------------------------------------------- | ---------------------------------------------------- |
-| [docs/DESIGN.md](./docs/DESIGN.md)                               | Full design specification                            |
-| [docs/dynamic-model-loading.md](./docs/dynamic-model-loading.md) | Runtime model loading (no bundled model)             |
-| [docs/match-dsl.md](./docs/match-dsl.md)                         | The `MATCH` semantic-query DSL                       |
-| [docs/hybrid-filtering.md](./docs/hybrid-filtering.md)           | Relational `WHERE` + `MATCH` pushdown                |
-| [docs/query-planning.md](./docs/query-planning.md)               | How SQLite plans queries against the vtab            |
-| [docs/metrics.md](./docs/metrics.md)                             | Per-operation metrics via `anki_metrics()`           |
-| [docs/our-findings.md](./docs/our-findings.md)                   | Performance & size profiling: where the time/size go |
-| [docs/build-variants.md](./docs/build-variants.md)               | WASM build variants (engine / threading)             |
-
 
 ## Quick start
 
@@ -41,7 +28,13 @@ The model is **not** bundled in the wasm; it's fetched/loaded at init:
 
 ```js
 import sqlite3Init from "@sqlite-anki/wasm";
-const sqlite3 = await sqlite3Init({ anki: { model: "all-MiniLM-L6-v2" } });
+
+const sqlite3 = await sqlite3Init({
+  anki: {
+    model: "all-MiniLM-L6-v2" 
+    } 
+});
+
 const db = new sqlite3.oo1.OpfsDb("/app.db");
 ```
 
@@ -54,11 +47,10 @@ write. Search with `MATCH`, score/order with `similarity()`.
 CREATE VIRTUAL TABLE customers USING anki(name TEXT, status TEXT, notes TEXT VECTOR);
 
 INSERT INTO customers(name, status, notes) VALUES
-  ('Acme', 'active', 'discussed renewal — potential upsell opportunity');
+  ('Acme', 'active', 'potential upsell opportunity');
 
 -- semantic search, best-first, with the score
-SELECT name, similarity(notes) AS score
-FROM customers
+SELECT name, status FROM customers
 WHERE notes MATCH 'upsell opportunity'
 ORDER BY similarity(notes) DESC
 LIMIT 10;
@@ -91,6 +83,21 @@ one); it does **not** recompute — the score is cached from the scan. It works 
 (returns NULL — see [docs/query-planning.md](./docs/query-planning.md)).
 - Default similarity threshold is `0.5`; tighten with `AND similarity(col) > 0.7`.
 - The model runs in Rust/WASM — no JavaScript on the query hot path.
+
+## Documentation
+
+
+| Document                                                         | Description                                          |
+| ---------------------------------------------------------------- | ---------------------------------------------------- |
+| [docs/DESIGN.md](./docs/DESIGN.md)                               | Full design specification                            |
+| [docs/dynamic-model-loading.md](./docs/dynamic-model-loading.md) | Runtime model loading (no bundled model)             |
+| [docs/match-dsl.md](./docs/match-dsl.md)                         | The `MATCH` semantic-query DSL                       |
+| [docs/hybrid-filtering.md](./docs/hybrid-filtering.md)           | Relational `WHERE` + `MATCH` pushdown                |
+| [docs/query-planning.md](./docs/query-planning.md)               | How SQLite plans queries against the vtab            |
+| [docs/metrics.md](./docs/metrics.md)                             | Per-operation metrics via `anki_metrics()`           |
+| [docs/our-findings.md](./docs/our-findings.md)                   | Performance & size profiling: where the time/size go |
+| [docs/build-variants.md](./docs/build-variants.md)               | WASM build variants (engine / threading)             |
+
 
 ## Performance
 
