@@ -99,6 +99,45 @@ and picks the lowest `estimatedCost`. The OR cases trigger six or more calls.
 Observed for `like`, `lower`, and `similarity`. We only claim `similarity`
 (return non-zero); for the rest we return 0 and SQLite uses its built-in.
 
+### `similarity()` can't go *inside* an aggregate (use a `MATERIALIZED` CTE)
+
+`similarity(col)` isn't passed the score — it reads the **current row's** cached
+cosine from a process-global cursor pointer (set as the vtab emits each row).
+That's correct wherever SQLite evaluates it per output row (`SELECT`, `WHERE`,
+`ORDER BY`, and `GROUP BY` *keys*), but an aggregate accumulates in a step
+detached from that cursor, so the score comes back **NULL**:
+
+```sql
+SELECT AVG(similarity(notes)) FROM docs WHERE notes MATCH 'q';   -- → NULL
+```
+
+Wrapping it in a *plain* subquery does **not** help: SQLite's query flattener
+folds it straight back into the broken form (still NULL). The fix is to force the
+per-row scores to materialize *before* the aggregate — a `MATERIALIZED` CTE (or
+any non-flattenable subquery, e.g. one with `ORDER BY`/`LIMIT`):
+
+```sql
+-- average match score
+WITH m AS MATERIALIZED (
+  SELECT similarity(notes) AS score
+  FROM docs WHERE notes MATCH 'q'
+)
+SELECT AVG(score) FROM m;
+
+-- per group: average / best match by status
+WITH m AS MATERIALIZED (
+  SELECT status, similarity(notes) AS score
+  FROM customers WHERE notes MATCH 'q'
+)
+SELECT status, AVG(score) AS avg_score, MAX(score) AS best, COUNT(*) AS n
+FROM m GROUP BY status;
+```
+
+The inner query is a per-row context (works); `MATERIALIZED` makes SQLite run it
+to completion into a temp result, so the outer aggregate sees an ordinary `score`
+column. The proper fix — surfacing the score as row data, the way FTS5 exposes
+`rank` — is tracked separately.
+
 ### Pre-filter reach is wider than "the six ops"
 
 Pre-filtering kicks in for equality, range, **and** prefix-`LIKE`-as-range. True

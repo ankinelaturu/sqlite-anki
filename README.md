@@ -123,7 +123,8 @@ Notes:
 - `similarity(col)` returns the cosine score for the active `MATCH` (NULL without
   one); it does **not** recompute — the score is cached from the scan. It works in
   `SELECT`/`WHERE`/`ORDER BY`/`GROUP BY` keys, but **not inside aggregates** yet
-  (returns NULL — see [docs/query-planning.md](./docs/query-planning.md)).
+  (returns NULL — wrap it in a `MATERIALIZED` CTE; see
+  [docs/query-planning.md](./docs/query-planning.md)).
 - Default similarity threshold is `0.5`; tighten with `AND similarity(col) > 0.7`.
 - The model runs in Rust/WASM — no JavaScript on the query hot path.
 
