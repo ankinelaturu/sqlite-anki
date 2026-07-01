@@ -21,17 +21,22 @@ export interface AnkiModelSpec {
   description?: string;
 }
 
-/** Builds a registry entry from a HuggingFace repo with an `onnx/` export. */
+/**
+ * Builds a registry entry from a HuggingFace repo with an `onnx/` export.
+ * `file` selects the ONNX export (default fp32 `model.onnx`; pass
+ * `onnx/model_fp16.onnx` for the half-precision variant).
+ */
 function hf(
   repo: string,
   dim: number,
   maxTokens: number,
   sizeMb: number,
   description: string,
+  file = "onnx/model.onnx",
 ): AnkiModelSpec {
   const base = `https://huggingface.co/${repo}/resolve/main`;
   return {
-    modelUrl: `${base}/onnx/model.onnx`,
+    modelUrl: `${base}/${file}`,
     tokenizerUrl: `${base}/tokenizer.json`,
     homeUrl: `https://huggingface.co/${repo}`,
     dim,
@@ -45,9 +50,14 @@ function hf(
  * Built-in model registry. Extend it or pass custom URLs/bytes instead.
  *
  * All entries are **mean-pooling** sentence-transformers (matching the
- * embedder's pooling) served as fp32 ONNX from the reliable `Xenova/*` mirrors.
+ * embedder's pooling) served from the reliable `Xenova/*` mirrors — fp32 by
+ * default, plus an fp16 half-precision variant of the baseline (same graph, half
+ * the download; the engine runs it because fp16 uses the same float ops as fp32).
+ * Int8-quantized exports are intentionally omitted: they rewrite matmuls into
+ * integer ops (`MatMulInteger`) the Tract engine doesn't implement.
  * Mixed dimensions (384 vs 768) are intentional — vectors are only comparable
- * within one model, so a database is tied to the model that built it.
+ * within one model, so a database is tied to the model that built it (and each
+ * fp32/fp16 id is a distinct model for the mismatch guard).
  *
  * `maxTokens` is each model's configured max sequence length (sentence-transformers
  * `max_seq_length`); text beyond it is truncated before embedding.
@@ -59,6 +69,14 @@ export const ANKI_MODEL_REGISTRY: Record<string, AnkiModelSpec> = {
     256,
     90,
     "Fast, general-purpose baseline. The best default for English semantic search.",
+  ),
+  "all-MiniLM-L6-v2-fp16": hf(
+    "Xenova/all-MiniLM-L6-v2",
+    384,
+    256,
+    45,
+    "Half-precision (fp16) baseline — ~half the download, results effectively identical to fp32. Pick this when first-load size matters most.",
+    "onnx/model_fp16.onnx",
   ),
   "all-MiniLM-L12-v2": hf(
     "Xenova/all-MiniLM-L12-v2",
