@@ -339,6 +339,47 @@ ORT-web was taken off the table: it's a JS library that can't be called
 synchronously from the vtab's `xUpdate`, so it would force embedding in JS and
 passing vectors in — the workflow this project exists to replace.
 
+### WebGPU — the GPU path we don't have (unmeasured)
+
+transformers.js and ONNX Runtime Web can run the forward pass on the GPU via
+ORT-web's **WebGPU execution provider**. Our engines cannot:
+
+- **As of our testing (a snapshot, not a fixed truth).** At the time we looked,
+  neither **Tract** nor **Candle** exposed a WebGPU backend we could use from our
+  wasm build, so both ran **CPU-only** on the wasm virtual CPU — which is why we
+  never exercised a GPU path. From what we could see then: Tract targeted CPU
+  (no GPU backend we found, even natively); Candle had native **CUDA/Metal**
+  backends, but those don't build for `wasm32`, and we didn't find a mainline
+  WebGPU backend for the browser. This is a fast-moving ecosystem — any of that
+  may have changed since, so treat it as *what was available when we tested*, not
+  a standing limitation. The practical consequence at the time: WebGPU was **not
+  a flag we could flip** — reaching it would have meant switching the inference
+  layer to ORT-web (already ruled out above for the same synchronous-`xUpdate`
+  reason) or a candle/tract WebGPU backend we didn't have.
+- **Not measured.** We have **not** benchmarked WebGPU vs our wasm-CPU path, and
+  can't do it in-repo — our engines expose no WebGPU backend, so there is nothing
+  to toggle. Any claim about its benefit here is a hypothesis, not a datapoint.
+- **Hypothesis (by analogy, not proof).** We *expect* WebGPU to help **bulk /
+  long-document** embedding and possibly *hurt* **single short-sentence** latency
+  — extrapolating from the **measured** wasm-threads null result (§6): the hot
+  case is a ~22-real-token matmul, small enough that thread-dispatch overhead
+  erased any parallelism gain, and GPU dispatch (shader launch + data round-trip)
+  plausibly behaves the same. But GPU dispatch is not thread dispatch; this is an
+  argument by analogy and only a benchmark settles it.
+- **The experiment that would settle it.** Run the *same* all-MiniLM ONNX through
+  ORT-web in a real browser (WebGPU needs a browser context, not node) and
+  measure two regimes against our wasm-CPU numbers: (a) a single short embed (the
+  interactive hot path) and (b) a long-doc / batched run. Confound to control:
+  ORT-web also changes the *runtime* (not just CPU→GPU), so isolating WebGPU
+  means comparing **ORT-web-wasm vs ORT-web-webgpu** for the GPU effect, and
+  separately **ORT-web-wasm vs our Rust engine** for the runtime effect.
+
+Bottom line: WebGPU may well be a throughput win for bulk indexing; whether it
+helps or hurts the single-query latency that dominates interactive search is
+**open and untested**. With the engines as they stood when we tested, reaching it
+would also have meant changing the inference layer — but that's the state we
+observed, not a permanent verdict.
+
 ---
 
 ## 9. Decisions / recommendations
