@@ -261,6 +261,7 @@ extern "C" {
     ) -> c_int;
     fn sqlite3_step(stmt: *mut sqlite3_stmt) -> c_int;
     fn sqlite3_finalize(stmt: *mut sqlite3_stmt) -> c_int;
+    fn sqlite3_reset(stmt: *mut sqlite3_stmt) -> c_int;
 
     fn sqlite3_bind_null(stmt: *mut sqlite3_stmt, i: c_int) -> c_int;
     fn sqlite3_bind_int64(stmt: *mut sqlite3_stmt, i: c_int, v: sqlite3_int64) -> c_int;
@@ -357,6 +358,13 @@ struct AnkiCursor {
     /// Columns with an active `MATCH` (in plan order); empty when none.
     /// each `<col>_score` column maps back to one of these.
     match_cols: Vec<usize>,
+    /// Reused `SELECT c0..cN FROM <name>_data WHERE id=?` for serving user columns
+    /// on demand (xColumn). NULL until first used; finalized in x_close.
+    row_stmt: *mut sqlite3_stmt,
+    /// rowid whose values are cached in `row_cells` (`0` = none; rowids are ≥ 1).
+    row_cache_id: i64,
+    /// The cached user-column cells for `row_cache_id`, in declared column order.
+    row_cells: Vec<Cell>,
 }
 
 // --- helpers -----------------------------------------------------------------
@@ -1463,12 +1471,19 @@ unsafe extern "C" fn x_open(vtab: *mut sqlite3_vtab, pp: *mut *mut sqlite3_vtab_
         results: Vec::new(),
         pos: 0,
         match_cols: Vec::new(),
+        row_stmt: ptr::null_mut(),
+        row_cache_id: 0,
+        row_cells: Vec::new(),
     }));
     *pp = cur as *mut sqlite3_vtab_cursor;
     SQLITE_OK
 }
 
 unsafe extern "C" fn x_close(cur: *mut sqlite3_vtab_cursor) -> c_int {
+    let c = &mut *(cur as *mut AnkiCursor);
+    if !c.row_stmt.is_null() {
+        sqlite3_finalize(c.row_stmt);
+    }
     drop(Box::from_raw(cur as *mut AnkiCursor));
     SQLITE_OK
 }
@@ -1657,14 +1672,51 @@ unsafe extern "C" fn x_eof(cur: *mut sqlite3_vtab_cursor) -> c_int {
 
 // Return column `i` of the current result row. The result list holds rowids;
 // the actual cell values come from the in-memory cache keyed by rowid.
+/// Loads the current result row's user-column cells into the cursor cache, reading
+/// them from the (typed) shadow table on demand — the vtab no longer needs user
+/// column data resident in RAM to serve reads. The fetch statement is prepared once
+/// per cursor and reused; cells are cached per rowid, so all columns of one row cost
+/// a single point lookup.
+unsafe fn load_cursor_row(c: &mut AnkiCursor, st: &TableState, rowid: i64) {
+    if c.row_cache_id == rowid {
+        return; // already cached for this row
+    }
+    if c.row_stmt.is_null() {
+        let cols = (0..st.ncol)
+            .map(|i| format!("c{i}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let sql = format!("SELECT {} FROM {} WHERE id = ?", cols, st.data_table);
+        if let Ok(csql) = CString::new(sql) {
+            let mut stmt: *mut sqlite3_stmt = ptr::null_mut();
+            if sqlite3_prepare_v2(st.db, csql.as_ptr(), -1, &mut stmt, ptr::null_mut())
+                == SQLITE_OK
+            {
+                c.row_stmt = stmt;
+            }
+        }
+    }
+    c.row_cells.clear();
+    c.row_cache_id = rowid;
+    if c.row_stmt.is_null() {
+        return; // couldn't prepare → the row's columns read as NULL
+    }
+    sqlite3_reset(c.row_stmt);
+    sqlite3_bind_int64(c.row_stmt, 1, rowid);
+    if sqlite3_step(c.row_stmt) == SQLITE_ROW {
+        for i in 0..st.ncol {
+            c.row_cells.push(column_to_cell(c.row_stmt, i as c_int));
+        }
+    }
+}
+
 unsafe extern "C" fn x_column(
     cur: *mut sqlite3_vtab_cursor,
     ctx: *mut sqlite3_context,
     i: c_int,
 ) -> c_int {
-    let c = &*(cur as *mut AnkiCursor);
-    let vt = &*c.vtab;
-    let st = &*vt.state;
+    let c = &mut *(cur as *mut AnkiCursor);
+    let st = &*(*c.vtab).state;
 
     if c.pos >= c.results.len() {
         sqlite3_result_null(ctx);
@@ -1690,8 +1742,10 @@ unsafe extern "C" fn x_column(
         return SQLITE_OK;
     }
 
+    // Serve the user column from the shadow table on demand (cached per row).
     let rowid = c.results[c.pos].rowid;
-    match st.rows.get(&rowid).and_then(|r| r.cells.get(i as usize)) {
+    load_cursor_row(c, st, rowid);
+    match c.row_cells.get(i as usize) {
         Some(Cell::Int(v)) => sqlite3_result_int64(ctx, *v),
         Some(Cell::Real(v)) => sqlite3_result_double(ctx, *v),
         Some(Cell::Text(s)) => result_text(ctx, s),

@@ -162,6 +162,22 @@ test("typed shadow columns round-trip every storage class", async () => {
   }
 });
 
+// xColumn now serves user columns from the typed shadow table, so a mixed-type
+// insert takes the column's affinity: text '42' into an INTEGER column reads back
+// as the number 42 (exactly what SQLite does for a real INTEGER column).
+test("xColumn reflects declared affinity (text '42' into INTEGER → 42)", async () => {
+  const db = new sqlite3.oo1.DB(":memory:");
+  try {
+    db.exec(`CREATE VIRTUAL TABLE items USING anki(qty INTEGER, body TEXT VECTOR);`);
+    db.exec({ sql: `INSERT INTO items(qty, body) VALUES (?, ?)`, bind: ["42", "a mechanical part"] });
+    const qty = db.selectValue(`SELECT qty FROM items`);
+    assert.equal(typeof qty, "number");
+    assert.equal(qty, 42);
+  } finally {
+    db.close();
+  }
+});
+
 // Writes keep embeddings current: a DELETE drops the row from future searches,
 // and an UPDATE re-embeds the new text (so a row can become the top match for a
 // query it previously didn't match).
