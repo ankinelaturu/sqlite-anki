@@ -65,4 +65,4 @@ The ONNX model is **never** compiled into the wasm — the wasm links a full ONN
 
 ## Docs map
 
-`docs/DESIGN.md` (full spec), `design-choices.md` (rationale), `dynamic-model-loading.md` (runtime model path), `match-dsl.md` (MATCH syntax), `hybrid-filtering.md` (WHERE + MATCH pushdown correctness), `query-planning.md` (vtab planning), `metrics.md` (`anki_metrics()`), `our-findings.md` (perf/size profiling), `build-variants.md` (engine/threading builds).
+`docs/DESIGN.md` (full spec), `design-choices.md` (rationale), `dynamic-model-loading.md` (runtime model path), `match-dsl.md` (MATCH syntax), `hybrid-filtering.md` (WHERE + MATCH pushdown correctness), `query-planning.md` (vtab planning), `metrics.md` (`anki_metrics()`), `our-findings.md` (perf/size profiling), `build-variants.md` (engine/threading builds), `streaming-storage.md` (design: cut WASM RAM by streaming shadow-table data instead of full materialization).
