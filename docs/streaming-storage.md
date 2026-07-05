@@ -175,24 +175,80 @@ optimization, explicitly out of scope here.
 back to exact-over-filtered (HNSW is bypassed when filtering). `/exact` is always
 exact. This is current behavior, made explicit.
 
-## Correctness: the `omit` question
+## Correctness
 
-Keep **`u.omit = 0` for relational filters** (as today). Even though the shadow-SQL
-filter is now correct and complete, treat it as a *narrowing* step and let SQLite
-**re-check** the constraint against what `xColumn` returns (from the typed shadow
-table). This preserves the `hybrid-filtering.md` safety net: any discrepancy between
-our filter query and SQLite's outer evaluation can only cause us to *over-return*
-candidates (extra work), never wrong results.
+### The false-+/- risk shifts category: semantic → mechanical
+
+Today's false-positive/negative risk exists **because `cell_passes` is a hand-rolled
+Rust reimplementation of SQLite's comparison rules** (affinity, collation,
+int-vs-real, NULLs). Any gap in that reimplementation is a wrong pre-filter — which is
+exactly why `hybrid-filtering.md` insists the pre-filter be *conservative*.
+
+This redesign **deletes `cell_passes`.** The comparison is done by **SQLite itself**,
+evaluating a prepared statement on the typed shadow table — the reference
+implementation. So the whole class of "did we implement `NOCASE`/affinity/… correctly?"
+bugs **goes away.** What remains is *not* semantic but **mechanical translation**: did
+we build the *right* `WHERE`?
+
+- map the constraint to the right shadow column and operator;
+- **reproduce the exact collation SQLite would apply** to that constraint
+  (`sqlite3_vtab_collation`), not merely the column's declared collation;
+- bind the RHS value into the correct `argv` slot;
+- and the load-bearing invariant: the **shadow column's declared type + collation
+  must exactly mirror the virtual column's**, because our prepared statement evaluates
+  in the shadow table's context and only matches SQLite's evaluation if that context
+  is identical.
+
+These are few, mechanical, and directly testable by parity tests — a much smaller and
+more tractable surface than reimplementing comparison semantics.
+
+### `omit` policy
 
 - **MATCH** stays `u.omit = 1` (we fully own it) — unchanged.
-- Filters whose collation we cannot reproduce stay **unclaimed** (SQLite does them
-  end to end) — unchanged; with a type-full shadow + explicit `COLLATE` we can now
-  reproduce *more* of them, but user-defined collations still need the collation
-  registered on the connection to be usable in the shadow query.
-- **Future optimization (deferred, risky):** once the type-full shadow provably
-  reproduces SQLite's exact comparison semantics for a claimed filter, we *could*
-  set `u.omit = 1` to skip the re-check. Do not do this in the initial change; it
-  removes the safety net and needs exhaustive affinity/collation/NULL parity testing.
+- **Relational filters** stay `u.omit = 0`. In this design `omit = 0` is
+  *belt-and-suspenders*: since SQLite performs the comparison in *our* pass too, our
+  candidate set should already equal SQLite's, so the re-check normally drops nothing.
+  Its only job is to catch a **translation** bug — and only in the safe direction. The
+  one invariant to protect:
+
+  > Our shadow filter must never be **stricter** than SQLite — a superset (or exact) is
+  > safe (SQLite drops the extras); a subset is not (`omit = 0` re-checks only rows we
+  > *return*, so a row we wrongly dropped is gone for good — a silent false negative).
+
+  With types/collations mirrored exactly, "stricter" essentially can't happen except
+  via a translation bug, which the parity tests catch.
+- Filters whose collation we cannot reproduce stay **unclaimed** (SQLite does them end
+  to end) — unchanged. Type-full storage + explicit `COLLATE` lets us reproduce *more*
+  of them; user-defined collations still require the collation to be registered on the
+  connection to be usable in the shadow query.
+- **Future optimization (deferred, risky):** once we can prove exact parity for a
+  claimed filter, we *could* set `u.omit = 1` to skip the re-check. Not in the initial
+  change — it removes the safety net and needs exhaustive affinity/collation/NULL
+  parity testing.
+
+### Compound queries and joins
+
+Correctness is preserved because we only ever push what we can reproduce, and SQLite
+does the rest:
+
+- **`OR`** is never offered to a vtab (the constraint array is a *conjunction*), so
+  `WHERE a OR b` is applied entirely by SQLite on our output — we never see it. Same as
+  today.
+- **`LIKE` / `GLOB` / function expressions** (`lower(x)=…`) aren't in our pushable-op
+  set → left **unclaimed** → SQLite handles them end to end.
+- **ANDed comparisons** (`amount>10 AND amount<100`) are each pushed and reproduced in
+  the shadow `WHERE`; SQLite evaluates them.
+- We can only ever *under-claim*, never silently mishandle — anything unclaimed is
+  SQLite's.
+
+The one **join subtlety** is the RHS: in `… JOIN … WHERE c.stage = a.col`, the
+constraint's right-hand side is a **runtime value from the other table**, delivered
+per-iteration in `xFilter`'s `argv`. We must **bind the `argv` value SQLite hands us**,
+never resolve it ourselves. With that, joins are correct.
+
+The real join cost is **performance, not correctness** — see the perf notes: `xFilter`
+can be called **once per outer row**, so the shadow-SQL filter (and the query
+embedding) would repeat per iteration.
 
 ## Writes (`xUpdate`) in the new model
 
@@ -220,6 +276,12 @@ random reads).
   and are the smallest essential structure; streaming them (holding only the HNSW
   graph, reading vectors from disk during traversal — "Option B") is a further step,
   deferred, and only worthwhile at very large N.
+- **Joins re-enter `xFilter` per outer row.** In `… JOIN … WHERE anki.col = other.col
+  AND anki.vec MATCH …`, SQLite may call `xFilter` once per outer row, so the
+  shadow-SQL filter *and* the query embedding would repeat each iteration. Mitigate by
+  reusing the prepared filter statement and **caching the query embedding** across
+  iterations that share the same `MATCH` argument. This cost exists today too; it's
+  just more visible once the filter is a SQL round-trip.
 
 ## Phasing
 
@@ -238,7 +300,14 @@ The existing correctness suites are the specification and **must keep passing** 
 `<col>_score` behavior, transactions/rollback resync. Add:
 
 - **Parity:** shadow-SQL filter results == today's in-RAM pre-filter results across
-  operators, collations, affinities, NULLs.
+  operators, collations, affinities, NULLs (this is the *mechanical-translation* check
+  — the semantic comparison is now SQLite's).
+- **Join RHS:** a pushed equality whose RHS is a column from the joined table
+  (`… JOIN … WHERE anki.stage = other.col`) returns identical rows — verifies we bind
+  the per-iteration `argv` value, not a stale/self-resolved one.
+- **Never-stricter:** for every pushed predicate, the shadow filter's row set is a
+  superset-or-equal of SQLite's (no false negatives), including `OR`/`LIKE`/function
+  predicates that must stay unclaimed.
 - **Affinity round-trip:** every declared affinity round-trips through the type-full
   shadow (incl. mixed-type values and `BLOB`).
 - **RAM:** a wide table (few vector cols, many/large non-vector cols) shows the cell
