@@ -135,6 +135,33 @@ test("non-vector BLOB column round-trips byte-identically", async () => {
   }
 });
 
+// The shadow table now carries each column's declared type (for affinity/collation).
+// Well-typed values of every storage class round-trip, and the vector column still
+// embeds + matches. (Mixed-type affinity coercion only becomes observable once
+// xColumn reads from the shadow table — covered in a later commit.)
+test("typed shadow columns round-trip every storage class", async () => {
+  const db = new sqlite3.oo1.DB(":memory:");
+  try {
+    db.exec(`CREATE VIRTUAL TABLE items USING anki(
+      label TEXT, qty INTEGER, price REAL, blob_col BLOB, body TEXT VECTOR);`);
+    db.exec({
+      sql: `INSERT INTO items(label, qty, price, blob_col, body) VALUES (?,?,?,?,?)`,
+      bind: ["widget", 42, 3.5, new Uint8Array([1, 2, 3]), "a small mechanical part"],
+    });
+    const row = db.selectObjects(`SELECT qty, price, label, blob_col FROM items`)[0];
+    assert.equal(row.qty, 42);
+    assert.equal(row.price, 3.5);
+    assert.equal(row.label, "widget");
+    assert.deepEqual([...row.blob_col], [1, 2, 3]);
+    assert.equal(
+      db.selectValue(`SELECT label FROM items WHERE body MATCH 'tiny machine component'`),
+      "widget",
+    );
+  } finally {
+    db.close();
+  }
+});
+
 // Writes keep embeddings current: a DELETE drops the row from future searches,
 // and an UPDATE re-embeds the new text (so a row can become the top match for a
 // query it previously didn't match).

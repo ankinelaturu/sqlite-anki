@@ -623,9 +623,49 @@ unsafe fn set_err(pz_err: *mut *mut c_char, msg: &str) {
     *pz_err = p as *mut c_char;
 }
 
+/// On-disk storage-format version of the shadow table (`<name>_data`). Bumped when
+/// the layout changes incompatibly; `x_connect` refuses to open an older format.
+/// v2 introduced typed shadow columns (affinity/collation carried into storage) so
+/// filters can run directly on the shadow table — see docs/streaming-storage.md.
+const STORAGE_FORMAT: u32 = 2;
+
 /// Quoted, db-qualified `anki_meta` table name (database-wide model metadata).
 fn meta_table_ident(db_name: &str) -> String {
     format!("{}.{}", quote_ident(db_name), quote_ident("anki_meta"))
+}
+
+/// Records the shadow-table storage-format version in `anki_meta` (idempotent).
+/// Written unconditionally on `xCreate` (independent of whether a model is loaded).
+unsafe fn write_storage_format(db: *mut sqlite3, meta_table: &str) -> c_int {
+    let ddl =
+        format!("CREATE TABLE IF NOT EXISTS {meta_table}(key TEXT PRIMARY KEY, value TEXT)");
+    if exec(db, &ddl) != SQLITE_OK {
+        return SQLITE_ERROR;
+    }
+    let sql = format!(
+        "INSERT OR REPLACE INTO {meta_table}(key, value) VALUES('storage_format', '{STORAGE_FORMAT}')"
+    );
+    exec(db, &sql)
+}
+
+/// Reads the shadow-table storage-format version from `anki_meta`; `None` if the
+/// key (or the whole table) is absent — i.e. a table built before formats were
+/// versioned, which `x_connect` treats as an incompatible older format.
+unsafe fn read_storage_format(db: *mut sqlite3, meta_table: &str) -> Option<u32> {
+    let sql = format!("SELECT value FROM {meta_table} WHERE key = 'storage_format'");
+    let csql = CString::new(sql).ok()?;
+    let mut stmt: *mut sqlite3_stmt = ptr::null_mut();
+    if sqlite3_prepare_v2(db, csql.as_ptr(), -1, &mut stmt, ptr::null_mut()) != SQLITE_OK {
+        return None;
+    }
+    let mut out = None;
+    if sqlite3_step(stmt) == SQLITE_ROW {
+        if let Cell::Text(v) = column_to_cell(stmt, 0) {
+            out = v.parse::<u32>().ok();
+        }
+    }
+    sqlite3_finalize(stmt);
+    out
 }
 
 /// Records the active model's `(id, dim)` in `anki_meta` (idempotent upsert).
@@ -782,13 +822,24 @@ fn data_table_ident(db_name: &str, table: &str) -> String {
     )
 }
 
-fn build_ddl(data_table: &str, ncol: usize, vector_cols: &[usize]) -> String {
+fn build_ddl(data_table: &str, columns: &[ColumnDef]) -> String {
     let mut defs = vec!["id INTEGER PRIMARY KEY".to_string()];
-    for i in 0..ncol {
-        defs.push(format!("c{i}"));
+    // Each data column keeps its positional name (`c{i}`, collision-free vs a user
+    // column named `id`) but carries the *declared type + COLLATE*. That gives the
+    // shadow column the same affinity and collation as the virtual column, so a
+    // WHERE run directly on the shadow table matches SQLite's semantics for the
+    // virtual column (see docs/streaming-storage.md).
+    for (i, c) in columns.iter().enumerate() {
+        if c.decl_type.is_empty() {
+            defs.push(format!("c{i}"));
+        } else {
+            defs.push(format!("c{i} {}", c.decl_type));
+        }
     }
-    for vi in vector_cols {
-        defs.push(format!("e{vi} BLOB"));
+    for (i, c) in columns.iter().enumerate() {
+        if c.is_vector {
+            defs.push(format!("e{i} BLOB"));
+        }
     }
     format!("CREATE TABLE IF NOT EXISTS {data_table}({})", defs.join(", "))
 }
@@ -1145,16 +1196,24 @@ unsafe extern "C" fn x_create(
     };
 
     // Create the persistent shadow table (`<name>_data`) backing this vtab.
-    let ddl = build_ddl(&(*state).data_table, (*state).ncol, &(*state).vector_cols);
+    let ddl = build_ddl(&(*state).data_table, &(*state).columns);
     let rc = exec(db, &ddl);
     if rc != SQLITE_OK {
         drop(Box::from_raw(state)); // reclaim the leaked state on the error path
         return rc;
     }
 
+    let meta = meta_table_ident(&arg_str(argv, 1));
+
+    // Stamp the storage-format version so a future reopen can refuse an older,
+    // incompatible on-disk layout. Written regardless of whether a model is loaded.
+    if write_storage_format(db, &meta) != SQLITE_OK {
+        drop(Box::from_raw(state));
+        return SQLITE_ERROR;
+    }
+
     // Record the active model so a later reopen with a different model is caught.
     if let Some((id, dim)) = crate::loader::current() {
-        let meta = meta_table_ident(&arg_str(argv, 1));
         if write_meta(db, &meta, &id, dim) != SQLITE_OK {
             drop(Box::from_raw(state));
             return SQLITE_ERROR;
@@ -1186,10 +1245,22 @@ unsafe extern "C" fn x_connect(
         None => return SQLITE_ERROR,
     };
 
+    // Refuse to open a shadow table written in an older (pre-typed) storage format,
+    // whose columns lack the affinity/collation the current code's filters rely on.
+    let meta = meta_table_ident(&arg_str(argv, 1));
+    if read_storage_format(db, &meta) != Some(STORAGE_FORMAT) {
+        set_err(
+            pz_err,
+            "anki: table built with an older storage format — rebuild required \
+             (see docs/streaming-storage.md)",
+        );
+        drop(Box::from_raw(state));
+        return SQLITE_ERROR;
+    }
+
     // Guard against opening a table whose stored vectors were built with a
     // different model (incompatible dimension / vector space).
     if let Some((cur_id, cur_dim)) = crate::loader::current() {
-        let meta = meta_table_ident(&arg_str(argv, 1));
         if let Some((stored_id, stored_dim)) = read_meta(db, &meta) {
             let id_conflict = !stored_id.is_empty() && !cur_id.is_empty() && stored_id != cur_id;
             if stored_dim != cur_dim || id_conflict {
