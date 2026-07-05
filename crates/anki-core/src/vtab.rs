@@ -18,7 +18,7 @@ use crate::match_query::{parse_match, Mode};
 use crate::metrics;
 use crate::{DEFAULT_SIMILARITY_THRESHOLD, HNSW_CANDIDATE_CAP};
 use core::cmp::Ordering;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::ffi::{CStr, CString};
 use std::mem::transmute;
 use std::os::raw::{c_char, c_int, c_void};
@@ -412,72 +412,76 @@ impl Coll {
     }
 }
 
-/// Orders two TEXT values under a reproducible collation, matching SQLite:
-/// BINARY = raw bytes; NOCASE = ASCII A–Z folded then bytes; RTRIM = trailing
-/// spaces ignored then bytes.
-fn collated_cmp(a: &str, b: &str, coll: Coll) -> Ordering {
-    match coll {
-        Coll::Binary => a.as_bytes().cmp(b.as_bytes()),
-        Coll::Nocase => a
-            .bytes()
-            .map(|c| c.to_ascii_lowercase())
-            .cmp(b.bytes().map(|c| c.to_ascii_lowercase())),
-        Coll::Rtrim => a.trim_end_matches(' ').as_bytes().cmp(b.trim_end_matches(' ').as_bytes()),
+/// SQL text for a pushed comparison operator (only `is_filter_op` ops reach here).
+fn op_sql(op: u8) -> &'static str {
+    match op {
+        SQLITE_INDEX_CONSTRAINT_EQ => "=",
+        SQLITE_INDEX_CONSTRAINT_GT => ">",
+        SQLITE_INDEX_CONSTRAINT_LE => "<=",
+        SQLITE_INDEX_CONSTRAINT_LT => "<",
+        SQLITE_INDEX_CONSTRAINT_GE => ">=",
+        SQLITE_INDEX_CONSTRAINT_NE => "<>",
+        _ => "=",
     }
 }
 
-/// Exact i64-vs-f64 comparison without the precision loss of `as f64` (which
-/// rounds magnitudes above 2^53). Mirrors SQLite's int/float compare; `None`
-/// only for NaN.
-fn cmp_int_real(x: i64, y: f64) -> Option<Ordering> {
-    if y.is_nan() {
+/// Explicit `COLLATE` clause for the collation SQLite reported for the constraint
+/// (recorded at `x_best_index`). Emitting it explicitly overrides the column's
+/// declared collation so the shadow comparison uses exactly the one SQLite would;
+/// it is ignored (harmless) on numeric comparisons.
+fn coll_sql(coll: Coll) -> &'static str {
+    match coll {
+        Coll::Binary => " COLLATE BINARY",
+        Coll::Nocase => " COLLATE NOCASE",
+        Coll::Rtrim => " COLLATE RTRIM",
+    }
+}
+
+/// Evaluates the pushed relational filters as SQL on the (typed) shadow table and
+/// returns the set of candidate rowids. SQLite performs the comparison, so affinity
+/// (from the typed columns) and collation (emitted explicitly) match the virtual
+/// column's semantics — see docs/streaming-storage.md.
+///
+/// Returns `None` when there are no pushed filters, or on any prepare/step error —
+/// meaning "no pre-filter, scan everything". Since we leave `omit = 0`, SQLite
+/// re-checks the constraint, so a `None` fallback can only over-return (never drop a
+/// row): this pre-filter is purely an optimization to narrow the cosine candidates.
+unsafe fn filter_candidate_ids(
+    st: &TableState,
+    filters: &[Filter],
+    argv: *mut *mut sqlite3_value,
+) -> Option<HashSet<i64>> {
+    if filters.is_empty() {
         return None;
     }
-    if y >= 9223372036854775808.0 {
-        return Some(Ordering::Less); // y > i64::MAX
+    let where_sql = filters
+        .iter()
+        .enumerate()
+        .map(|(i, f)| format!("c{} {} ?{}{}", f.col, op_sql(f.op), i + 1, coll_sql(f.coll)))
+        .collect::<Vec<_>>()
+        .join(" AND ");
+    let sql = format!("SELECT id FROM {} WHERE {}", st.data_table, where_sql);
+    let csql = CString::new(sql).ok()?;
+    let mut stmt: *mut sqlite3_stmt = ptr::null_mut();
+    if sqlite3_prepare_v2(st.db, csql.as_ptr(), -1, &mut stmt, ptr::null_mut()) != SQLITE_OK {
+        return None;
     }
-    if y < -9223372036854775808.0 {
-        return Some(Ordering::Greater); // y < i64::MIN
+    for (i, f) in filters.iter().enumerate() {
+        let cell = value_to_cell(*argv.offset(f.slot as isize));
+        bind_cell(stmt, (i + 1) as c_int, &cell);
     }
-    let yf = y.floor(); // finite, within i64 range
-    Some(match x.cmp(&(yf as i64)) {
-        Ordering::Equal if y > yf => Ordering::Less, // x == floor(y), but y has a fraction
-        ord => ord,
-    })
-}
-
-/// Orders two cells where comparable: numbers numerically (int↔real exact),
-/// text under `coll`. Returns `None` for NULL or cross-type pairs ("unknown").
-fn cell_partial_cmp(a: &Cell, b: &Cell, coll: Coll) -> Option<Ordering> {
-    match (a, b) {
-        (Cell::Int(x), Cell::Int(y)) => x.partial_cmp(y),
-        (Cell::Real(x), Cell::Real(y)) => x.partial_cmp(y),
-        (Cell::Int(x), Cell::Real(y)) => cmp_int_real(*x, *y),
-        (Cell::Real(x), Cell::Int(y)) => cmp_int_real(*y, *x).map(Ordering::reverse),
-        (Cell::Text(x), Cell::Text(y)) => Some(collated_cmp(x, y, coll)),
-        // Blob (and cross-type / NULL) pairs are "unknown": a WHERE pre-filter on a
-        // blob column won't push down and falls back to a full scan — deliberately
-        // conservative, never wrong.
-        _ => None,
+    let mut ids = HashSet::new();
+    let mut rc = sqlite3_step(stmt);
+    while rc == SQLITE_ROW {
+        ids.insert(sqlite3_column_int64(stmt, 0));
+        rc = sqlite3_step(stmt);
     }
-}
-
-/// Whether `cell <op> rhs` holds. Conservative: when the comparison is unknown
-/// (NULL / cross-type), returns `true` so the row is KEPT — SQLite re-checks the
-/// constraint (we leave `omit = 0`), so a pre-filter only has to narrow, never
-/// to be exact. This guarantees completeness.
-fn cell_passes(cell: &Cell, op: u8, rhs: &Cell, coll: Coll) -> bool {
-    match cell_partial_cmp(cell, rhs, coll) {
-        Some(ord) => match op {
-            SQLITE_INDEX_CONSTRAINT_EQ => ord == Ordering::Equal,
-            SQLITE_INDEX_CONSTRAINT_NE => ord != Ordering::Equal,
-            SQLITE_INDEX_CONSTRAINT_LT => ord == Ordering::Less,
-            SQLITE_INDEX_CONSTRAINT_LE => ord != Ordering::Greater,
-            SQLITE_INDEX_CONSTRAINT_GT => ord == Ordering::Greater,
-            SQLITE_INDEX_CONSTRAINT_GE => ord != Ordering::Less,
-            _ => true,
-        },
-        None => true,
+    sqlite3_finalize(stmt);
+    // A clean completion → trust the set; any error → fall back to a full scan.
+    if rc == SQLITE_DONE {
+        Some(ids)
+    } else {
+        None
     }
 }
 
@@ -1502,25 +1506,18 @@ unsafe extern "C" fn x_filter(
     // Decode the plan x_best_index chose (which argv slots are MATCH vs filters).
     let plan = parse_idx_str(idx_str);
 
-    // Pair each pushed filter with its actual RHS value from argv (e.g. 'active').
-    let preds: Vec<(usize, u8, Cell, Coll)> = plan
-        .filters
-        .iter()
-        .map(|f| (f.col, f.op, value_to_cell(*argv.offset(f.slot as isize)), f.coll))
-        .collect();
-    // A row survives the relational filter iff it satisfies every pushed pred.
-    let row_passes = |row: &Row| -> bool {
-        preds.iter().all(|(col, op, rhs, coll)| {
-            row.cells
-                .get(*col)
-                .map_or(true, |cell| cell_passes(cell, *op, rhs, *coll))
-        })
-    };
+    // Evaluate the pushed relational filters as SQL on the typed shadow table:
+    // SQLite does the comparison (affinity + collation) and hands back the candidate
+    // rowids. `None` = no filter (scan everything). We leave `omit = 0`, so SQLite
+    // re-checks the constraint — this pre-filter only narrows the cosine candidates.
+    let candidate_ids = filter_candidate_ids(st, &plan.filters, argv);
+    let in_candidates =
+        |rowid: &i64| candidate_ids.as_ref().map_or(true, |ids| ids.contains(rowid));
 
     if plan.matches.is_empty() {
         // No MATCH: a (possibly filtered) scan. `<col>_score` stays NULL.
-        for (rowid, row) in st.rows.iter() {
-            if row_passes(row) {
+        for rowid in st.rows.keys() {
+            if in_candidates(rowid) {
                 c.results.push(MatchRow { rowid: *rowid, sims: Vec::new() });
             }
         }
@@ -1568,7 +1565,7 @@ unsafe extern "C" fn x_filter(
             let t_search = metrics::now_ms();
             let mut candidates = 0usize;
 
-            if queries.len() == 1 && preds.is_empty() {
+            if queries.len() == 1 && plan.filters.is_empty() {
                 // Fast path: a single MATCH with no relational filter. `mode`
                 // chooses HNSW (approximate) vs exact.
                 let m = &queries[0];
@@ -1603,7 +1600,7 @@ unsafe extern "C" fn x_filter(
                 // if EVERY matched column clears the threshold. Keep per-column
                 // scores so each `<col>_score` can return its own.
                 for (rowid, row) in st.rows.iter() {
-                    if !preds.is_empty() && !row_passes(row) {
+                    if !in_candidates(rowid) {
                         continue;
                     }
                     let mut sims = Vec::with_capacity(queries.len());
@@ -1907,61 +1904,7 @@ pub unsafe extern "C" fn anki_register_vtab(db: *mut sqlite3) -> c_int {
     )
 }
 
-#[cfg(test)]
-mod prefilter_tests {
-    //! The pushed-down WHERE pre-filter must never drop a row SQLite would keep
-    //! (a false negative SQLite can't recover, since it only re-checks rows we
-    //! emit). These cover the two cases where a naive compare would: int↔real
-    //! precision past 2^53, and non-BINARY text collations.
-    use super::*;
-
-    fn txt(s: &str) -> Cell {
-        Cell::Text(s.to_string())
-    }
-
-    #[test]
-    fn int_real_compare_exact_past_2_53() {
-        let x = 9007199254740993_i64; // 2^53 + 1, not representable as f64
-        let y = 9007199254740992.0_f64; // 2^53
-        // Naive `x as f64` would round to 2^53 and report Equal — this must not.
-        assert_eq!(cmp_int_real(x, y), Some(Ordering::Greater));
-        assert_eq!(
-            cell_partial_cmp(&Cell::Int(x), &Cell::Real(y), Coll::Binary),
-            Some(Ordering::Greater),
-        );
-        assert!(cell_passes(&Cell::Int(x), SQLITE_INDEX_CONSTRAINT_GT, &Cell::Real(y), Coll::Binary));
-    }
-
-    #[test]
-    fn int_real_fractions_and_bounds() {
-        assert_eq!(cmp_int_real(3, 3.5), Some(Ordering::Less));
-        assert_eq!(cmp_int_real(3, 3.0), Some(Ordering::Equal));
-        assert_eq!(cmp_int_real(4, 3.5), Some(Ordering::Greater));
-        assert_eq!(cmp_int_real(i64::MAX, f64::INFINITY), Some(Ordering::Less));
-        assert_eq!(cmp_int_real(i64::MIN, f64::NEG_INFINITY), Some(Ordering::Greater));
-        assert_eq!(cmp_int_real(0, f64::NAN), None); // unordered → cell_passes keeps
-    }
-
-    #[test]
-    fn nocase_matches_sqlite_and_binary_does_not() {
-        assert_eq!(collated_cmp("alice", "Alice", Coll::Nocase), Ordering::Equal);
-        assert_eq!(collated_cmp("alice", "Alice", Coll::Binary), Ordering::Greater);
-        // A NOCASE column: 'alice' = 'Alice' must be kept...
-        assert!(cell_passes(&txt("alice"), SQLITE_INDEX_CONSTRAINT_EQ, &txt("Alice"), Coll::Nocase));
-        // ...whereas a binary pre-filter would have wrongly dropped it.
-        assert!(!cell_passes(&txt("alice"), SQLITE_INDEX_CONSTRAINT_EQ, &txt("Alice"), Coll::Binary));
-    }
-
-    #[test]
-    fn rtrim_ignores_trailing_spaces() {
-        assert_eq!(collated_cmp("hi   ", "hi", Coll::Rtrim), Ordering::Equal);
-        assert!(cell_passes(&txt("hi   "), SQLITE_INDEX_CONSTRAINT_EQ, &txt("hi"), Coll::Rtrim));
-    }
-
-    #[test]
-    fn unknown_comparisons_keep_the_row() {
-        // NULL and cross-type are "unknown" → keep (SQLite re-checks; only narrows).
-        assert!(cell_passes(&Cell::Null, SQLITE_INDEX_CONSTRAINT_GT, &Cell::Int(10), Coll::Binary));
-        assert!(cell_passes(&txt("x"), SQLITE_INDEX_CONSTRAINT_LT, &Cell::Int(5), Coll::Binary));
-    }
-}
+// The WHERE pre-filter is now evaluated by SQLite on the typed shadow table
+// (`filter_candidate_ids`), so the collation/affinity correctness this module used
+// to guard is covered by the wasm e2e suites (hybrid-filtering, collation,
+// pushdown-fidelity) against SQLite's real comparison.

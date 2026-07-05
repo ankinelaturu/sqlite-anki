@@ -75,6 +75,29 @@ test("relational filter without MATCH (filtered scan)", () => {
   }
 });
 
+// Join: the filter's right-hand side is a column from the joined table, resolved
+// per outer row. The pushed constraint's value arrives in xFilter's argv each
+// iteration, so the shadow-table filter must bind that per-iteration value.
+test("filter RHS from a joined table binds the per-iteration value", () => {
+  const db = new sqlite3.oo1.DB(":memory:");
+  try {
+    db.exec(`CREATE VIRTUAL TABLE docs USING anki(status TEXT, body TEXT VECTOR);`);
+    db.exec(`INSERT INTO docs(status, body) VALUES
+      ('active',   'billing and invoice support request'),
+      ('archived', 'billing and invoice support request');`);
+    db.exec(`CREATE TABLE wanted(s TEXT);`);
+    db.exec(`INSERT INTO wanted(s) VALUES ('active');`);
+    const rows = db.selectObjects(
+      `SELECT d.status FROM docs d JOIN wanted w ON d.status = w.s
+       WHERE d.body MATCH 'billing support'`
+    );
+    assert.ok(rows.length >= 1, "at least the active row matches");
+    assert.ok(rows.every((r) => r.status === "active"), "only the joined 'active' rows");
+  } finally {
+    db.close();
+  }
+});
+
 // The cliff scenario: many non-matching rows that are *more* similar to the
 // query than the few matching rows. With >256 total rows the old post-filter
 // path would rank the top-256 (all non-matching) and drop the matching rows
