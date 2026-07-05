@@ -225,6 +225,7 @@ extern "C" {
     fn sqlite3_value_int64(v: *mut sqlite3_value) -> sqlite3_int64;
     fn sqlite3_value_double(v: *mut sqlite3_value) -> f64;
     fn sqlite3_value_text(v: *mut sqlite3_value) -> *const u8;
+    fn sqlite3_value_blob(v: *mut sqlite3_value) -> *const c_void;
     fn sqlite3_value_bytes(v: *mut sqlite3_value) -> c_int;
 
     fn sqlite3_result_null(ctx: *mut sqlite3_context);
@@ -233,6 +234,12 @@ extern "C" {
     fn sqlite3_result_text(
         ctx: *mut sqlite3_context,
         z: *const c_char,
+        n: c_int,
+        d: SqliteDestructor,
+    );
+    fn sqlite3_result_blob(
+        ctx: *mut sqlite3_context,
+        p: *const c_void,
         n: c_int,
         d: SqliteDestructor,
     );
@@ -291,6 +298,9 @@ enum Cell {
     Int(i64),
     Real(f64),
     Text(String),
+    /// Raw bytes of a `BLOB` value in a non-vector column, stored verbatim in the
+    /// shadow table's typeless `c{i}` column and returned as-is by `xColumn`.
+    Blob(Vec<u8>),
 }
 
 struct ColumnDef {
@@ -445,6 +455,9 @@ fn cell_partial_cmp(a: &Cell, b: &Cell, coll: Coll) -> Option<Ordering> {
         (Cell::Int(x), Cell::Real(y)) => cmp_int_real(*x, *y),
         (Cell::Real(x), Cell::Int(y)) => cmp_int_real(*y, *x).map(Ordering::reverse),
         (Cell::Text(x), Cell::Text(y)) => Some(collated_cmp(x, y, coll)),
+        // Blob (and cross-type / NULL) pairs are "unknown": a WHERE pre-filter on a
+        // blob column won't push down and falls back to a full scan — deliberately
+        // conservative, never wrong.
         _ => None,
     }
 }
@@ -705,7 +718,19 @@ unsafe fn value_to_cell(v: *mut sqlite3_value) -> Cell {
         SQLITE_INTEGER => Cell::Int(sqlite3_value_int64(v)),
         SQLITE_FLOAT => Cell::Real(sqlite3_value_double(v)),
         SQLITE_TEXT => Cell::Text(value_to_string(v).unwrap_or_default()),
+        SQLITE_BLOB => Cell::Blob(value_to_blob(v)),
         _ => Cell::Null,
+    }
+}
+
+/// Copies a `BLOB` `sqlite3_value`'s bytes into an owned `Vec<u8>`.
+unsafe fn value_to_blob(v: *mut sqlite3_value) -> Vec<u8> {
+    let n = sqlite3_value_bytes(v);
+    let p = sqlite3_value_blob(v) as *const u8;
+    if p.is_null() || n <= 0 {
+        Vec::new()
+    } else {
+        slice::from_raw_parts(p, n as usize).to_vec()
     }
 }
 
@@ -720,6 +745,15 @@ unsafe fn result_text(ctx: *mut sqlite3_context, s: &str) {
         ctx,
         bytes.as_ptr() as *const c_char,
         bytes.len() as c_int,
+        transient(),
+    );
+}
+
+unsafe fn result_blob(ctx: *mut sqlite3_context, b: &[u8]) {
+    sqlite3_result_blob(
+        ctx,
+        b.as_ptr() as *const c_void,
+        b.len() as c_int,
         transient(),
     );
 }
@@ -813,6 +847,15 @@ unsafe fn bind_cell(stmt: *mut sqlite3_stmt, idx: c_int, cell: &Cell) {
                 transient(),
             );
         }
+        Cell::Blob(b) => {
+            sqlite3_bind_blob(
+                stmt,
+                idx,
+                b.as_ptr() as *const c_void,
+                b.len() as c_int,
+                transient(),
+            );
+        }
     }
 }
 
@@ -828,6 +871,15 @@ unsafe fn column_to_cell(stmt: *mut sqlite3_stmt, idx: c_int) -> Cell {
             } else {
                 let bytes = slice::from_raw_parts(p, n as usize);
                 Cell::Text(String::from_utf8_lossy(bytes).into_owned())
+            }
+        }
+        SQLITE_BLOB => {
+            let n = sqlite3_column_bytes(stmt, idx);
+            let p = sqlite3_column_blob(stmt, idx) as *const u8;
+            if p.is_null() || n <= 0 {
+                Cell::Blob(Vec::new())
+            } else {
+                Cell::Blob(slice::from_raw_parts(p, n as usize).to_vec())
             }
         }
         _ => Cell::Null,
@@ -1575,6 +1627,7 @@ unsafe extern "C" fn x_column(
         Some(Cell::Int(v)) => sqlite3_result_int64(ctx, *v),
         Some(Cell::Real(v)) => sqlite3_result_double(ctx, *v),
         Some(Cell::Text(s)) => result_text(ctx, s),
+        Some(Cell::Blob(b)) => result_blob(ctx, b),
         _ => sqlite3_result_null(ctx),
     }
     SQLITE_OK

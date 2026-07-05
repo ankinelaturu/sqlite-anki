@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ChangeEvent } from "react";
 import {
   Panel,
   PanelGroup,
@@ -17,6 +17,7 @@ import {
   ExternalLink,
   FileCode2,
   FileText,
+  FileUp,
   HardDrive,
   Plus,
   Sparkles,
@@ -29,6 +30,8 @@ import {
   getDbWorker,
   proxy,
   resetDbWorker,
+  type ImportAnalysis,
+  type ImportPlan,
   type InitResult,
   type QueryResult,
   type TableInfo,
@@ -59,6 +62,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import { ImportDialog } from "@/components/ImportDialog";
 import { SchemaTree } from "@/components/SchemaTree";
 import { TableView, type SearchMode } from "@/components/TableView";
 import { QueryView } from "@/components/QueryView";
@@ -119,9 +123,19 @@ export function SqliteWorkspace({ sidebarSize, onSidebarResize, active }: Worksp
   const [dialogOpen, setDialogOpen] = useState(false);
   const [confirmDemo, setConfirmDemo] = useState(false);
   const [populating, setPopulating] = useState<{ done: number; total: number } | null>(null);
+  const [buildKind, setBuildKind] = useState<"demo" | "import">("demo");
   const [elapsedMs, setElapsedMs] = useState(0);
   const populateStart = useRef(0);
   const populateActive = populating !== null;
+
+  // Import & Vectorize: an uploaded file, analyzed and awaiting column picks.
+  const [importState, setImportState] = useState<{
+    bytes: Uint8Array;
+    analysis: ImportAnalysis;
+    defaultName: string;
+  } | null>(null);
+  const [analyzing, setAnalyzing] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Tick an elapsed timer on the main thread while building the demo, so there's
   // visible motion even between the (slow) per-row progress updates.
@@ -193,6 +207,7 @@ export function SqliteWorkspace({ sidebarSize, onSidebarResize, active }: Worksp
   const startPopulate = async () => {
     setConfirmDemo(false);
     setError(null);
+    setBuildKind("demo");
     setPopulating({ done: 0, total: 0 });
     try {
       await api.populateDemo(
@@ -206,6 +221,53 @@ export function SqliteWorkspace({ sidebarSize, onSidebarResize, active }: Worksp
     } catch (e) {
       setPopulating(null);
       setError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  // ---- import & vectorize ----
+  const onImportPick = () => fileInputRef.current?.click();
+
+  const onImportFile = async (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // let the same file be re-picked later
+    if (!file) return;
+    setError(null);
+    setAnalyzing(true);
+    try {
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      const analysis = await api.analyzeImport(bytes);
+      const defaultName =
+        file.name.replace(/\.[^.]+$/, "").replace(/[^a-zA-Z0-9_-]/g, "-") || "imported";
+      setImportState({ bytes, analysis, defaultName });
+      track("import_analyzed", { tables: analysis.tables.length });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setAnalyzing(false);
+    }
+  };
+
+  const onImportConfirm = async (targetPath: string, plan: ImportPlan) => {
+    const st = importState;
+    if (!st) return;
+    setImportState(null);
+    setError(null);
+    setBuildKind("import");
+    setPopulating({ done: 0, total: 0 });
+    try {
+      await api.rebuildImport(
+        st.bytes,
+        targetPath,
+        plan,
+        proxy((done, total) => setPopulating({ done, total })),
+      );
+      setPopulating(null);
+      setDatabases(await api.listDatabases());
+      await openDb(targetPath);
+      track("db_imported");
+    } catch (err) {
+      setPopulating(null);
+      setError(err instanceof Error ? err.message : String(err));
     }
   };
 
@@ -406,6 +468,30 @@ export function SqliteWorkspace({ sidebarSize, onSidebarResize, active }: Worksp
                 <Database className="h-3.5 w-3.5" /> Databases
               </span>
               <div className="flex items-center gap-0.5">
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".db,.sqlite,.sqlite3,application/x-sqlite3,application/vnd.sqlite3"
+                  className="hidden"
+                  onChange={(e) => void onImportFile(e)}
+                />
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      onClick={onImportPick}
+                      disabled={!!populating || analyzing}
+                    >
+                      <FileUp className={cn("text-primary", analyzing && "animate-pulse")} />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent className="max-w-xs leading-relaxed">
+                    Import an existing SQLite file and make its text columns
+                    semantically searchable — pick which columns to vectorize and
+                    it's rebuilt with embeddings.
+                  </TooltipContent>
+                </Tooltip>
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <Button
@@ -602,13 +688,20 @@ export function SqliteWorkspace({ sidebarSize, onSidebarResize, active }: Worksp
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <DatabaseZap className="h-5 w-5 text-primary" /> Building demo database…
+              {buildKind === "import" ? (
+                <FileUp className="h-5 w-5 text-primary" />
+              ) : (
+                <DatabaseZap className="h-5 w-5 text-primary" />
+              )}
+              {buildKind === "import"
+                ? "Rebuilding your database…"
+                : "Building demo database…"}
             </DialogTitle>
           </DialogHeader>
           <p className="text-sm text-muted-foreground">
-            Generating a CRM + knowledge base and embedding{" "}
-            {populating?.total || "…"} vector rows. This runs entirely in your
-            browser — feel free to wait; it only happens once.
+            {buildKind === "import"
+              ? "Copying your tables and embedding the columns you picked. This runs entirely in your browser — feel free to wait."
+              : "Generating a CRM + knowledge base and embedding vector rows. This runs entirely in your browser — feel free to wait; it only happens once."}
           </p>
           <div className="mt-1">
             <div className="h-2 w-full overflow-hidden rounded-full bg-secondary">
@@ -644,6 +737,18 @@ export function SqliteWorkspace({ sidebarSize, onSidebarResize, active }: Worksp
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* import & vectorize — column picker */}
+      {importState && (
+        <ImportDialog
+          analysis={importState.analysis}
+          defaultName={importState.defaultName}
+          modelId={info.modelId}
+          existingDbs={databases}
+          onCancel={() => setImportState(null)}
+          onConfirm={(targetPath, plan) => void onImportConfirm(targetPath, plan)}
+        />
+      )}
     </TooltipProvider>
   );
 }

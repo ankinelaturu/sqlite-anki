@@ -51,6 +51,37 @@ export interface QueryResult {
   metrics: Metrics;
 }
 
+/** A column of an imported source table (from `PRAGMA table_info`). */
+export interface ImportColumn {
+  name: string;
+  type: string;
+  /** Declared type has TEXT affinity (empty/TEXT/CHAR/CLOB) — offered to vectorize. */
+  textLike: boolean;
+  /** Declared type has BLOB affinity — informational (BLOBs round-trip either way). */
+  isBlob: boolean;
+}
+
+/** One table or view discovered in an uploaded SQLite file. */
+export interface ImportTable {
+  name: string;
+  isView: boolean;
+  rowCount: number;
+  columns: ImportColumn[];
+}
+
+/** Result of inspecting an uploaded SQLite file's schema. */
+export interface ImportAnalysis {
+  tables: ImportTable[];
+}
+
+/** What to build from an import: per-table vector-column picks + freeform notes. */
+export interface ImportPlan {
+  /** Table name → column names to make `TEXT VECTOR`. Absent/empty = plain copy. */
+  tables: Record<string, string[]>;
+  /** Freeform notes to seed the rebuilt database's `.notes.md` sidecar. */
+  notes: string;
+}
+
 /** Model selection passed to `sqlite3Init({ anki })`. */
 export interface ModelSpec {
   model?: string;
@@ -102,6 +133,26 @@ export interface AnkiWorkerApi {
    */
   populateDemo(
     path: string,
+    onProgress: (done: number, total: number) => void,
+  ): Promise<TableInfo[]>;
+  /**
+   * Inspects an uploaded SQLite file's bytes (without persisting it): lists its
+   * tables/views, their columns, and row counts, flagging text-like columns as
+   * vectorize candidates. Used to drive the Import & Vectorize dialog.
+   */
+  analyzeImport(bytes: Uint8Array): Promise<ImportAnalysis>;
+  /**
+   * Rebuilds an uploaded SQLite file into a new sqlite-anki database at `targetPath`,
+   * overwriting any existing database/sidecars there. Tables with picked columns
+   * become `anki` virtual tables (picked columns are `TEXT VECTOR`, embedded on
+   * insert); other tables/views are copied verbatim. If no column is picked
+   * anywhere, the file is persisted unchanged. Reports embedding progress via
+   * `onProgress` (wrap with `proxy()`), counting rows of vectorized tables only.
+   */
+  rebuildImport(
+    bytes: Uint8Array,
+    targetPath: string,
+    plan: ImportPlan,
     onProgress: (done: number, total: number) => void,
   ): Promise<TableInfo[]>;
   /** Reads the database's sidecar notes (`.notes.md`); "" if none. */

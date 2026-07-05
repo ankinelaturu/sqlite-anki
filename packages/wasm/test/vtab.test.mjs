@@ -102,6 +102,39 @@ test("stricter threshold filter narrows results", async () => {
   }
 });
 
+// A non-vector BLOB column must round-trip byte-identically through the vtab.
+// The shadow table stores non-vector columns typelessly and `Cell::Blob` carries
+// the raw bytes, so binary data (zero bytes, high bytes) survives INSERT→SELECT
+// even alongside a TEXT VECTOR column that still embeds and matches normally.
+test("non-vector BLOB column round-trips byte-identically", async () => {
+  const db = new sqlite3.oo1.DB(":memory:");
+  try {
+    db.exec(`CREATE VIRTUAL TABLE docs USING anki(title TEXT, body TEXT VECTOR, thumb BLOB);`);
+    const bytes = new Uint8Array([0, 1, 2, 255, 128, 0, 42, 7]);
+    db.exec({
+      sql: `INSERT INTO docs(title, body, thumb) VALUES (?, ?, ?)`,
+      bind: ["Cloud migration guide", "How to migrate enterprise workloads to the cloud", bytes],
+    });
+
+    const got = db.selectValue(`SELECT thumb FROM docs WHERE title='Cloud migration guide'`);
+    assert.ok(got instanceof Uint8Array, `expected Uint8Array, got ${got}`);
+    assert.deepEqual([...got], [...bytes]);
+
+    // The vector column is unaffected — it still embeds and matches.
+    const hit = db.selectValue(`SELECT title FROM docs WHERE body MATCH 'moving apps to the cloud'`);
+    assert.equal(hit, "Cloud migration guide");
+
+    // A NULL blob stays NULL (not an empty blob).
+    db.exec({
+      sql: `INSERT INTO docs(title, body, thumb) VALUES (?, ?, NULL)`,
+      bind: ["No thumb", "unrelated text"],
+    });
+    assert.equal(db.selectValue(`SELECT thumb FROM docs WHERE title='No thumb'`), null);
+  } finally {
+    db.close();
+  }
+});
+
 // Writes keep embeddings current: a DELETE drops the row from future searches,
 // and an UPDATE re-embeds the new text (so a row can become the top match for a
 // query it previously didn't match).

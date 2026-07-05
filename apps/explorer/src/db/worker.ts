@@ -12,6 +12,10 @@ import {
   ZERO_METRICS,
   type AnkiWorkerApi,
   type ColumnInfo,
+  type ImportAnalysis,
+  type ImportColumn,
+  type ImportPlan,
+  type ImportTable,
   type InitResult,
   type Metrics,
   type ModelSpec,
@@ -189,6 +193,124 @@ class AnkiWorker implements AnkiWorkerApi {
         `tokens avg real ${mean(log.map((e) => e.real_tokens)).toFixed(1)} / pad ${mean(log.map((e) => e.pad_tokens)).toFixed(1)}`,
     );
     console.log(JSON.stringify(log));
+  }
+
+  async analyzeImport(bytes: Uint8Array): Promise<ImportAnalysis> {
+    const s = this.require();
+    const tmp = "anki-import-analyze.db";
+    await writeOpfsFile(tmp, bytes);
+    let db: Db | null = null;
+    try {
+      db = this.opfsAvailable
+        ? new s.oo1.OpfsDb(`/${tmp}`)
+        : new s.oo1.DB(`/${tmp}`, "ct");
+      const objs = sourceObjects(db);
+      const tables: ImportTable[] = objs.map((t) => ({
+        name: t.name,
+        isView: t.type === "view",
+        rowCount: t.type === "view" ? 0 : rowCountOf(db, t.name),
+        columns: t.columns,
+      }));
+      return { tables };
+    } finally {
+      try {
+        db?.close();
+      } catch {
+        /* ignore */
+      }
+      await removeOpfsEntry(tmp);
+    }
+  }
+
+  async rebuildImport(
+    bytes: Uint8Array,
+    targetPath: string,
+    plan: ImportPlan,
+    onProgress: (done: number, total: number) => void,
+  ): Promise<TableInfo[]> {
+    const s = this.require();
+    const tmp = "anki-import-rebuild.db";
+    await writeOpfsFile(tmp, bytes);
+    const src: Db = this.opfsAvailable
+      ? new s.oo1.OpfsDb(`/${tmp}`)
+      : new s.oo1.DB(`/${tmp}`, "ct");
+    try {
+      const schema = sourceObjects(src);
+      const anyPicks = Object.values(plan.tables).some((c) => c && c.length > 0);
+
+      // Nothing selected: persist the uploaded bytes verbatim as the target db.
+      if (!anyPicks) {
+        await this.dropDatabase(targetPath);
+        await writeOpfsFile(targetName(targetPath), bytes);
+        await writeSidecar(notesName(targetPath), importNotes(targetPath, plan, schema));
+        await writeSidecar(queryName(targetPath), importQuery(plan, schema));
+        const dst = this.opfsAvailable
+          ? new s.oo1.OpfsDb(targetPath)
+          : new s.oo1.DB(targetPath, "ct");
+        this.dbs.set(targetPath, dst);
+        return this.schema(targetPath);
+      }
+
+      this.sqlite3?.wasm?.exports?.anki_embed_log_reset?.(); // profile just this rebuild
+      await this.dropDatabase(targetPath);
+      const dst: Db = this.opfsAvailable
+        ? new s.oo1.OpfsDb(targetPath)
+        : new s.oo1.DB(targetPath, "ct");
+      this.dbs.set(targetPath, dst);
+
+      // Only vectorized-table rows are slow (they embed); count just those.
+      const total = schema
+        .filter((t) => t.type === "table" && (plan.tables[t.name]?.length ?? 0) > 0)
+        .reduce((n, t) => n + rowCountOf(src, t.name), 0);
+      let done = 0;
+      onProgress(0, total);
+
+      // Tables first (views may reference them).
+      for (const t of schema.filter((t) => t.type === "table")) {
+        const picks = new Set(plan.tables[t.name] ?? []);
+        const colNames = t.columns.map((c) => c.name);
+        const rows = src.selectObjects(`SELECT * FROM ${quote(t.name)}`) as Row[];
+        if (picks.size > 0) {
+          const decl = t.columns
+            .map((c) => {
+              const base = c.type ? `${quote(c.name)} ${c.type}` : quote(c.name);
+              return picks.has(c.name) ? `${base} VECTOR` : base;
+            })
+            .join(", ");
+          dst.exec(`CREATE VIRTUAL TABLE ${quote(t.name)} USING anki(${decl})`);
+          for (const row of rows) {
+            insertObjectRow(dst, t.name, colNames, row);
+            done++;
+            if (done % 2 === 0 || done === total) onProgress(done, total);
+          }
+        } else {
+          dst.exec(t.sql); // original CREATE TABLE — constraints preserved
+          dst.exec("BEGIN");
+          for (const row of rows) insertObjectRow(dst, t.name, colNames, row);
+          dst.exec("COMMIT");
+        }
+      }
+      // Views after their tables exist.
+      for (const v of schema.filter((t) => t.type === "view")) {
+        try {
+          dst.exec(v.sql);
+        } catch {
+          /* skip views we can't recreate (e.g. referencing dropped objects) */
+        }
+      }
+
+      await writeSidecar(notesName(targetPath), importNotes(targetPath, plan, schema));
+      await writeSidecar(queryName(targetPath), importQuery(plan, schema));
+      this.dumpEmbedLog();
+      return this.schema(targetPath);
+    } finally {
+      try {
+        src.close();
+      } catch {
+        /* ignore */
+      }
+      await removeOpfsEntry(tmp);
+    }
   }
 
   async readNotes(path: string): Promise<string> {
@@ -385,6 +507,150 @@ async function writeSidecar(name: string, content: string): Promise<void> {
   const w = await h.createWritable();
   await w.write(content);
   await w.close();
+}
+
+/** A table/view read from an imported file, with its original DDL and columns. */
+interface SourceObject {
+  name: string;
+  sql: string;
+  type: string; // 'table' | 'view'
+  columns: ImportColumn[];
+}
+
+/** Whether a declared column type has TEXT affinity — a vectorize candidate. */
+function isTextLike(type: string): boolean {
+  return type === "" || /char|clob|text/i.test(type);
+}
+
+/** Reads the user tables/views (skipping sqlite-anki internals) with columns. */
+function sourceObjects(db: Db): SourceObject[] {
+  const objs = db.selectObjects(
+    `SELECT name, sql, type FROM sqlite_master
+     WHERE type IN ('table', 'view')
+       AND name NOT LIKE 'sqlite_%' AND name NOT LIKE 'anki_%'
+       AND name NOT LIKE '%_data'
+     ORDER BY type, name`,
+  ) as Array<{ name: string; sql: string; type: string }>;
+  return objs.map((o) => {
+    const cols = db.selectObjects(
+      `PRAGMA table_info(${quote(o.name)})`,
+    ) as Array<{ name: string; type: string }>;
+    const columns: ImportColumn[] = cols.map((c) => {
+      const type = String(c.type ?? "");
+      return {
+        name: String(c.name),
+        type,
+        textLike: isTextLike(type),
+        isBlob: /blob/i.test(type),
+      };
+    });
+    return {
+      name: String(o.name),
+      sql: String(o.sql ?? ""),
+      type: String(o.type),
+      columns,
+    };
+  });
+}
+
+/** `SELECT count(*)` for a table, as a number. */
+function rowCountOf(db: Db, table: string): number {
+  return Number(db.selectValue(`SELECT count(*) FROM ${quote(table)}`)) || 0;
+}
+
+/** Inserts one object row (column name → value) into `table` by explicit columns. */
+function insertObjectRow(
+  db: Db,
+  table: string,
+  colNames: string[],
+  row: Row,
+): void {
+  const cols = colNames.map(quote).join(", ");
+  const ph = colNames.map(() => "?").join(", ");
+  db.exec({
+    sql: `INSERT INTO ${quote(table)} (${cols}) VALUES (${ph})`,
+    bind: colNames.map((c) => (row[c] ?? null) as SqlValue),
+  });
+}
+
+/** OPFS-root entry name for a database path: `/foo.db` → `foo.db`. */
+function targetName(dbPath: string): string {
+  return dbPath.replace(/^\//, "");
+}
+
+/** Writes raw bytes to an OPFS-root file (creating it), overwriting any content. */
+async function writeOpfsFile(name: string, bytes: Uint8Array): Promise<void> {
+  const root = await (navigator as any).storage.getDirectory();
+  const h = await root.getFileHandle(name, { create: true });
+  const w = await h.createWritable();
+  await w.write(bytes);
+  await w.close();
+}
+
+/** Best-effort removal of an OPFS-root entry. */
+async function removeOpfsEntry(name: string): Promise<void> {
+  try {
+    const root = await (navigator as any).storage.getDirectory();
+    await root.removeEntry(name);
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Seeds the imported database's notes sidecar: user notes + a schema summary. */
+function importNotes(
+  dbPath: string,
+  plan: ImportPlan,
+  schema: SourceObject[],
+): string {
+  const name = dbPath.replace(/^\//, "").replace(/\.db$/, "");
+  const date = new Date().toISOString().slice(0, 10);
+  const rows = schema.map((t) => {
+    const picks = plan.tables[t.name] ?? [];
+    const kind = t.type === "view" ? "view" : picks.length ? "anki" : "table";
+    return `| \`${t.name}\` | ${kind} | ${picks.length ? picks.join(", ") : "—"} |`;
+  });
+  return `# ${name}
+
+_Imported ${date} with sqlite-anki._
+
+${plan.notes.trim() ? `${plan.notes.trim()}\n\n` : ""}## Tables
+
+| Table | Kind | Vector columns |
+| --- | --- | --- |
+${rows.join("\n")}
+
+> Rebuilt from an uploaded SQLite file. Indexes, triggers, and foreign-key
+> constraints from the original are not reproduced.
+`;
+}
+
+/** Generates a sample `MATCH` query per vectorized column into the SQL scratchpad. */
+function importQuery(plan: ImportPlan, schema: SourceObject[]): string {
+  const parts: string[] = [
+    "-- Sample semantic-search queries for your imported database.",
+    "-- Replace the quoted text with what you want to find, then Run.",
+    "",
+  ];
+  let any = false;
+  for (const t of schema) {
+    for (const col of plan.tables[t.name] ?? []) {
+      any = true;
+      parts.push(
+        `-- ${t.name}: search "${col}" by meaning`,
+        `SELECT *, round(${quote(`${col}_score`)}, 3) AS score`,
+        `FROM ${quote(t.name)}`,
+        `WHERE ${quote(col)} MATCH 'your search text'`,
+        `ORDER BY score DESC`,
+        `LIMIT 10;`,
+        "",
+      );
+    }
+  }
+  if (!any) {
+    parts.push("SELECT name FROM sqlite_master WHERE type IN ('table','view');");
+  }
+  return parts.join("\n");
 }
 
 /** Sidecar notes filename for a database path: `/demo.db` → `demo.notes.md`. */
