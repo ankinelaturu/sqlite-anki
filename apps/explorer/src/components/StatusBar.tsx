@@ -64,7 +64,7 @@ function Metric({
     <Chip desc={desc}>
       <Icon
         className={cn(
-          "h-3.5 w-3.5",
+          "h-4 w-4",
           tone === "embed" ? "text-violet-400" : "text-muted-foreground",
         )}
       />
@@ -78,7 +78,7 @@ const ms = (n: number) => `${n.toFixed(n < 10 ? 1 : 0)}ms`;
 
 export function StatusBar({ opfs, version, modelId, dim, op, busy, error }: StatusBarProps) {
   return (
-    <footer className="flex h-7 shrink-0 items-center gap-4 border-t bg-card px-3 text-xs text-muted-foreground">
+    <footer className="flex h-9 shrink-0 items-center gap-4 border-t bg-card px-3 text-sm text-muted-foreground">
       <Chip
         desc={
           opfs
@@ -86,17 +86,17 @@ export function StatusBar({ opfs, version, modelId, dim, op, busy, error }: Stat
             : "Storage backend: in-memory — this database is lost when you reload the page (OPFS unavailable)."
         }
       >
-        <HardDrive className={cn("h-3.5 w-3.5", opfs ? "text-emerald-400" : "text-amber-400")} />
+        <HardDrive className={cn("h-4 w-4", opfs ? "text-emerald-400" : "text-amber-400")} />
         {opfs ? "OPFS" : "in-memory"}
       </Chip>
       {version && (
         <Chip desc="Version of the SQLite engine compiled into the WASM build.">
-          <Database className="h-3.5 w-3.5" /> SQLite {version}
+          <Database className="h-4 w-4" /> SQLite {version}
         </Chip>
       )}
       {modelId && (
         <Chip desc={`Embedding model loaded for this session${dim ? ` — produces ${dim}-dimensional vectors` : ""}. It powers every MATCH query and the per-column scores.`}>
-          <Cpu className="h-3.5 w-3.5 text-violet-400" /> {modelId}
+          <Cpu className="h-4 w-4 text-violet-400" /> {modelId}
           {dim ? ` · ${dim}d` : ""}
         </Chip>
       )}

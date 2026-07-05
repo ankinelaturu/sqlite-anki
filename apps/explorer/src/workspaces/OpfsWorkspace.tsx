@@ -301,9 +301,9 @@ export function OpfsWorkspace({ sidebarSize, onSidebarResize, active }: Workspac
         </Panel>
       </PanelGroup>
 
-      <footer className="flex h-7 shrink-0 items-center gap-3 border-t bg-card px-3 text-xs text-muted-foreground">
+      <footer className="flex h-9 shrink-0 items-center gap-3 border-t bg-card px-3 text-sm text-muted-foreground">
         <span className="flex items-center gap-1.5">
-          <HardDrive className="h-3.5 w-3.5" />
+          <HardDrive className="h-4 w-4" />
           {usage
             ? `${fmtBytes(usage.usage)} used${usage.quota ? ` of ${fmtBytes(usage.quota)}` : ""}`
             : "—"}
