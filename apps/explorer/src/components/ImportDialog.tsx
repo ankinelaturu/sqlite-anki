@@ -14,7 +14,6 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 
 interface ImportDialogProps {
@@ -87,7 +86,7 @@ export function ImportDialog({
   return (
     <Dialog open onOpenChange={(o) => !o && onCancel()}>
       <DialogContent className="flex max-h-[85vh] max-w-2xl flex-col gap-0 p-0">
-        <DialogHeader className="border-b px-5 py-4">
+        <DialogHeader className="shrink-0 border-b px-5 py-4">
           <DialogTitle className="flex items-center gap-2">
             <FileUp className="h-5 w-5 text-primary" /> Import &amp; Vectorize
           </DialogTitle>
@@ -98,8 +97,8 @@ export function ImportDialog({
           </DialogDescription>
         </DialogHeader>
 
-        {/* per-table column picker */}
-        <ScrollArea className="min-h-0 flex-1">
+        {/* per-table column picker — scrolls independently */}
+        <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto">
           <div className="space-y-4 px-5 py-4">
             {analysis.tables.length === 0 && (
               <p className="text-sm text-muted-foreground">
@@ -167,10 +166,10 @@ export function ImportDialog({
               );
             })}
           </div>
-        </ScrollArea>
+        </div>
 
-        {/* footer: name, notes, model, actions */}
-        <div className="space-y-3 border-t px-5 py-4">
+        {/* fixed footer: name, notes, model, actions */}
+        <div className="shrink-0 space-y-3 border-t px-5 py-4">
           <div className="flex items-end gap-4">
             <div className="flex-1">
               <Label className="mb-1.5 block">Database name</Label>
@@ -202,12 +201,12 @@ export function ImportDialog({
               onChange={(e) => setNotes(e.target.value)}
               rows={2}
               placeholder="What is this database for?"
-              className="flex w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              className="flex min-h-[3.5rem] w-full resize-y rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
             />
           </div>
         </div>
 
-        <DialogFooter className="items-center border-t px-5 py-3">
+        <DialogFooter className="shrink-0 items-center border-t px-5 py-3">
           <span className="mr-auto text-xs text-muted-foreground">
             {totalPicks === 0
               ? "No columns picked — the file will be copied unchanged."
