@@ -43,7 +43,7 @@ test("ROLLBACK reverts cache, store, and search", () => {
       .selectObjects(`SELECT name FROM customers WHERE notes MATCH 'rolled back ghost' ORDER BY notes_score DESC`)
       .map((r) => r.name);
     assert.ok(!found.includes("Ghost"));
-    assert.equal(db.selectValue(`SELECT count(*) FROM "main"."customers_data"`), 1);
+    assert.equal(db.selectValue(`SELECT count(*) FROM "main"."customers_anki"`), 1);
   } finally {
     db.close();
   }
@@ -73,7 +73,7 @@ test("ROLLBACK TO savepoint keeps cache consistent with the store", () => {
     db.exec("ROLLBACK TO sp1");
     db.exec("RELEASE sp1");
     const cache = names(db);
-    const shadow = db.selectValue(`SELECT count(*) FROM "main"."customers_data"`);
+    const shadow = db.selectValue(`SELECT count(*) FROM "main"."customers_anki"`);
     assert.deepEqual(cache, ["Acme"]);
     assert.equal(cache.length, shadow);
   } finally {

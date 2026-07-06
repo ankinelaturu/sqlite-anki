@@ -300,7 +300,7 @@ enum Cell {
     Real(f64),
     Text(String),
     /// Raw bytes of a `BLOB` value in a non-vector column, stored verbatim in the
-    /// shadow table's typeless `c{i}` column and returned as-is by `xColumn`.
+    /// shadow table's real-named data column and returned as-is by `xColumn`.
     Blob(Vec<u8>),
 }
 
@@ -327,7 +327,7 @@ struct TableState {
     next_rowid: i64,
     /// Connection used to read/write the persistent shadow table.
     db: *mut sqlite3,
-    /// Quoted, db-qualified shadow table name, e.g. `"main"."customers_data"`.
+    /// Quoted, db-qualified shadow table name, e.g. `"main"."customers_anki"`.
     data_table: String,
     /// Set on `xRollback`: the cache may diverge from the rolled-back shadow
     /// table, so reload it lazily at the next `xFilter`.
@@ -360,7 +360,7 @@ struct AnkiCursor {
     /// Columns with an active `MATCH` (in plan order); empty when none.
     /// each `<col>_score` column maps back to one of these.
     match_cols: Vec<usize>,
-    /// Reused `SELECT c0..cN FROM <name>_data WHERE id=?` for serving user columns
+    /// Reused `SELECT <cols> FROM <name>_anki WHERE anki_id=?` for serving user columns
     /// on demand (xColumn). NULL until first used; finalized in x_close.
     row_stmt: *mut sqlite3_stmt,
     /// rowid whose values are cached in `row_cells` (`0` = none; rowids are ≥ 1).
@@ -484,10 +484,18 @@ unsafe fn filter_candidate_ids(
     let where_sql = filters
         .iter()
         .enumerate()
-        .map(|(i, f)| format!("c{} {} ?{}{}", f.col, op_sql(f.op), i + 1, coll_sql(f.coll)))
+        .map(|(i, f)| {
+            format!(
+                "{} {} ?{}{}",
+                quote_ident(&st.columns[f.col].name),
+                op_sql(f.op),
+                i + 1,
+                coll_sql(f.coll)
+            )
+        })
         .collect::<Vec<_>>()
         .join(" AND ");
-    let sql = format!("SELECT id FROM {} WHERE {}", st.data_table, where_sql);
+    let sql = format!("SELECT anki_id FROM {} WHERE {}", st.data_table, where_sql);
     let csql = CString::new(sql).ok()?;
     let mut stmt: *mut sqlite3_stmt = ptr::null_mut();
     if sqlite3_prepare_v2(st.db, csql.as_ptr(), -1, &mut stmt, ptr::null_mut()) != SQLITE_OK {
@@ -654,11 +662,12 @@ unsafe fn set_err(pz_err: *mut *mut c_char, msg: &str) {
     *pz_err = p as *mut c_char;
 }
 
-/// On-disk storage-format version of the shadow table (`<name>_data`). Bumped when
+/// On-disk storage-format version of the shadow table (`<name>_anki`). Bumped when
 /// the layout changes incompatibly; `x_connect` refuses to open an older format.
-/// v2 introduced typed shadow columns (affinity/collation carried into storage) so
-/// filters can run directly on the shadow table — see docs/streaming-storage.md.
-const STORAGE_FORMAT: u32 = 2;
+/// v2 introduced typed shadow columns; v3 renamed the shadow table to `<name>_anki`,
+/// namespaced internal columns (`anki_id`, `anki_emb_<col>`), and stores data columns
+/// under their real names — see docs/streaming-storage.md.
+const STORAGE_FORMAT: u32 = 3;
 
 /// Quoted, db-qualified `anki_meta` table name (database-wide model metadata).
 fn meta_table_ident(db_name: &str) -> String {
@@ -844,45 +853,51 @@ unsafe fn arg_str(argv: *const *const c_char, i: isize) -> String {
     }
 }
 
-/// Quoted, db-qualified shadow table name, e.g. `"main"."customers_data"`.
+/// Quoted, db-qualified shadow table name, e.g. `"main"."customers_anki"`. The
+/// `_anki` suffix follows SQLite's `<vtabname>_<suffix>` shadow-table convention.
 fn data_table_ident(db_name: &str, table: &str) -> String {
     format!(
         "{}.{}",
         quote_ident(db_name),
-        quote_ident(&format!("{table}_data"))
+        quote_ident(&format!("{table}_anki"))
     )
 }
 
+/// Quoted embedding-column identifier for a vector column, e.g. `"anki_emb_notes"`.
+/// The `anki_` prefix is reserved from user column names, so it never collides.
+fn emb_col_ident(name: &str) -> String {
+    quote_ident(&format!("anki_emb_{name}"))
+}
+
 fn build_ddl(data_table: &str, columns: &[ColumnDef]) -> String {
-    let mut defs = vec!["id INTEGER PRIMARY KEY".to_string()];
-    // Each data column keeps its positional name (`c{i}`, collision-free vs a user
-    // column named `id`) but carries the *declared type + COLLATE*. That gives the
-    // shadow column the same affinity and collation as the virtual column, so a
-    // WHERE run directly on the shadow table matches SQLite's semantics for the
-    // virtual column (see docs/streaming-storage.md).
-    for (i, c) in columns.iter().enumerate() {
+    // Internal columns are namespaced with `anki_` (reserved from user names) so the
+    // data columns can keep their *real* names + declared type/COLLATE — a WHERE run
+    // directly on the shadow table then matches SQLite's semantics for the virtual
+    // column, and CHECK exprs / errors read naturally. See docs/streaming-storage.md.
+    let mut defs = vec!["anki_id INTEGER PRIMARY KEY".to_string()];
+    for c in columns {
         if c.decl_type.is_empty() {
-            defs.push(format!("c{i}"));
+            defs.push(quote_ident(&c.name));
         } else {
-            defs.push(format!("c{i} {}", c.decl_type));
+            defs.push(format!("{} {}", quote_ident(&c.name), c.decl_type));
         }
     }
-    for (i, c) in columns.iter().enumerate() {
-        if c.is_vector {
-            defs.push(format!("e{i} BLOB"));
-        }
+    for c in columns.iter().filter(|c| c.is_vector) {
+        defs.push(format!("{} BLOB", emb_col_ident(&c.name)));
     }
     format!("CREATE TABLE IF NOT EXISTS {data_table}({})", defs.join(", "))
 }
 
-/// Column list shared by the INSERT and SELECT: `id, c0..c{ncol-1}, e{vi}…`.
-fn data_columns(ncol: usize, vector_cols: &[usize]) -> Vec<String> {
-    let mut cols = vec!["id".to_string()];
-    for i in 0..ncol {
-        cols.push(format!("c{i}"));
+/// Column list shared by the INSERT and SELECT: `anki_id, <cols…>, anki_emb_<vec>…`.
+/// Order (rowid, then declared columns, then embeddings per vector column) matches
+/// `persist_row`'s bind order.
+fn data_columns(columns: &[ColumnDef]) -> Vec<String> {
+    let mut cols = vec!["anki_id".to_string()];
+    for c in columns {
+        cols.push(quote_ident(&c.name));
     }
-    for vi in vector_cols {
-        cols.push(format!("e{vi}"));
+    for c in columns.iter().filter(|c| c.is_vector) {
+        cols.push(emb_col_ident(&c.name));
     }
     cols
 }
@@ -969,14 +984,14 @@ unsafe fn column_to_cell(stmt: *mut sqlite3_stmt, idx: c_int) -> Cell {
 }
 
 /// Upserts one row into the shadow table. Embeddings are stored as little-endian
-/// `f32` BLOBs in the `e{col}` columns.
+/// `f32` BLOBs in the `anki_emb_<col>` columns.
 unsafe fn persist_row(
     st: &TableState,
     rowid: i64,
     cells: &[Cell],
     embeddings: &[Option<Vec<f32>>],
 ) -> c_int {
-    let cols = data_columns(st.ncol, &st.vector_cols);
+    let cols = data_columns(&st.columns);
     let placeholders = vec!["?"; cols.len()].join(", ");
     let sql = format!(
         "INSERT OR REPLACE INTO {}({}) VALUES({})",
@@ -1026,7 +1041,7 @@ unsafe fn persist_row(
 }
 
 unsafe fn delete_row(st: &TableState, rowid: i64) -> c_int {
-    let sql = format!("DELETE FROM {} WHERE id = ?", st.data_table);
+    let sql = format!("DELETE FROM {} WHERE anki_id = ?", st.data_table);
     let csql = match CString::new(sql) {
         Ok(c) => c,
         Err(_) => return SQLITE_ERROR,
@@ -1053,12 +1068,12 @@ unsafe fn load_all(st: &mut TableState) {
     st.dirty = false;
     st.index_dirty = true;
     // Only rowid + embeddings are held in RAM; user column data stays on disk and
-    // is read on demand by xColumn. The SELECT fetches `id, e{vi}…` (no c{i}).
-    let mut cols = vec!["id".to_string()];
-    for vi in &st.vector_cols {
-        cols.push(format!("e{vi}"));
+    // is read on demand by xColumn. The SELECT fetches `anki_id, anki_emb_<col>…`.
+    let mut cols = vec!["anki_id".to_string()];
+    for &vi in &st.vector_cols {
+        cols.push(emb_col_ident(&st.columns[vi].name));
     }
-    let sql = format!("SELECT {} FROM {} ORDER BY id", cols.join(", "), st.data_table);
+    let sql = format!("SELECT {} FROM {} ORDER BY anki_id", cols.join(", "), st.data_table);
     let csql = match CString::new(sql) {
         Ok(c) => c,
         Err(_) => return,
@@ -1097,6 +1112,7 @@ unsafe fn new_state(
     db: *mut sqlite3,
     argc: c_int,
     argv: *const *const c_char,
+    pz_err: *mut *mut c_char,
 ) -> Option<*mut TableState> {
     let mut columns: Vec<ColumnDef> = Vec::new();
     for i in 3..argc as isize {
@@ -1111,6 +1127,24 @@ unsafe fn new_state(
     }
     if columns.is_empty() {
         return None;
+    }
+
+    // The shadow table stores data columns under their real names, so: reserve the
+    // `anki_` prefix (used by internal columns `anki_id`/`anki_emb_*`), and require
+    // unique names (duplicates would collide in the shadow CREATE).
+    let mut seen: HashSet<String> = HashSet::new();
+    for c in &columns {
+        if c.name.to_ascii_lowercase().starts_with("anki_") {
+            set_err(
+                pz_err,
+                &format!("anki: column name '{}' uses the reserved 'anki_' prefix", c.name),
+            );
+            return None;
+        }
+        if !seen.insert(c.name.to_ascii_lowercase()) {
+            set_err(pz_err, &format!("anki: duplicate column name '{}'", c.name));
+            return None;
+        }
     }
 
     let cdecl = CString::new(build_declare(&columns)).ok()?;
@@ -1219,16 +1253,16 @@ unsafe extern "C" fn x_create(
     argc: c_int,
     argv: *const *const c_char,
     pp_vtab: *mut *mut sqlite3_vtab,
-    _err: *mut *mut c_char,
+    err: *mut *mut c_char,
 ) -> c_int {
     // argv[0]=module, [1]=db, [2]=table, [3..]=column definitions.
     // new_state parses the columns and declares the user-facing schema to SQLite.
-    let state = match new_state(db, argc, argv) {
+    let state = match new_state(db, argc, argv, err) {
         Some(s) => s, // raw *mut TableState we now own
         None => return SQLITE_ERROR,
     };
 
-    // Create the persistent shadow table (`<name>_data`) backing this vtab.
+    // Create the persistent shadow table (`<name>_anki`) backing this vtab.
     let ddl = build_ddl(&(*state).data_table, &(*state).columns);
     let rc = exec(db, &ddl);
     if rc != SQLITE_OK {
@@ -1273,7 +1307,7 @@ unsafe extern "C" fn x_connect(
     pz_err: *mut *mut c_char,
 ) -> c_int {
     // Reopen: the shadow table already exists; reload its rows into memory.
-    let state = match new_state(db, argc, argv) {
+    let state = match new_state(db, argc, argv, pz_err) {
         Some(s) => s,
         None => return SQLITE_ERROR,
     };
@@ -1704,11 +1738,14 @@ unsafe fn load_cursor_row(c: &mut AnkiCursor, st: &TableState, rowid: i64) {
         return; // already cached for this row
     }
     if c.row_stmt.is_null() {
-        let cols = (0..st.ncol)
-            .map(|i| format!("c{i}"))
+        // Real column names, in declared order, so row_cells[i] aligns with column i.
+        let cols = st
+            .columns
+            .iter()
+            .map(|c| quote_ident(&c.name))
             .collect::<Vec<_>>()
             .join(", ");
-        let sql = format!("SELECT {} FROM {} WHERE id = ?", cols, st.data_table);
+        let sql = format!("SELECT {} FROM {} WHERE anki_id = ?", cols, st.data_table);
         if let Ok(csql) = CString::new(sql) {
             let mut stmt: *mut sqlite3_stmt = ptr::null_mut();
             if sqlite3_prepare_v2(st.db, csql.as_ptr(), -1, &mut stmt, ptr::null_mut())

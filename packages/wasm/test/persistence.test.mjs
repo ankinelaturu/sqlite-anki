@@ -2,7 +2,7 @@
  * Persistence via the per-table shadow table.
  *
  * Each `anki` virtual table is backed by a real, hidden SQLite table
- * (`<name>_data`) that stores the column values AND the embeddings (as
+ * (`<name>_anki`) that stores the column values AND the embeddings (as
  * little-endian f32 BLOBs). The in-memory state is just a cache:
  *  - `xUpdate` write-through persists every change to the shadow table.
  *  - `xConnect` (reopen) reloads rows + embeddings from it.
@@ -33,7 +33,7 @@ test("rows + embeddings survive close/reopen (search works on reload)", () => {
     ('Acme','potential upsell opportunity'),
     ('Beta','support ticket about billing');`);
   // The shadow table is a real table we can count directly — proves write-through.
-  const shadow = db.selectValue(`SELECT count(*) FROM "main"."customers_data"`);
+  const shadow = db.selectValue(`SELECT count(*) FROM "main"."customers_anki"`);
   db.close();
   assert.equal(shadow, 2, "write-through to shadow table");
 
@@ -49,15 +49,15 @@ test("rows + embeddings survive close/reopen (search works on reload)", () => {
   }
 });
 
-// DROP TABLE must not leak the backing store: xDestroy drops `<name>_data` too.
+// DROP TABLE must not leak the backing store: xDestroy drops `<name>_anki` too.
 test("DROP TABLE removes the shadow table (xDestroy)", () => {
   const db = new sqlite3.oo1.DB(":memory:");
   try {
     db.exec(`CREATE VIRTUAL TABLE t USING anki(name TEXT, notes TEXT VECTOR);`);
     db.exec(`INSERT INTO t(name,notes) VALUES('a','hello world');`);
-    assert.equal(db.selectValue(`SELECT count(*) FROM sqlite_master WHERE name='t_data'`), 1);
+    assert.equal(db.selectValue(`SELECT count(*) FROM sqlite_master WHERE name='t_anki'`), 1);
     db.exec(`DROP TABLE t`);
-    assert.equal(db.selectValue(`SELECT count(*) FROM sqlite_master WHERE name='t_data'`), 0);
+    assert.equal(db.selectValue(`SELECT count(*) FROM sqlite_master WHERE name='t_anki'`), 0);
   } finally {
     db.close();
   }

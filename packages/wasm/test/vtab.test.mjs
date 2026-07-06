@@ -201,6 +201,55 @@ test("large non-vector column round-trips from disk alongside MATCH", async () =
   }
 });
 
+// Data columns are stored under their REAL names in the shadow table (`<t>_anki`),
+// with internal columns namespaced `anki_`. So a column named `id` or `c0` — which
+// the old positional scheme existed to avoid — now round-trips fine.
+test("real column names (incl 'id'/'c0') round-trip; shadow uses them", async () => {
+  const db = new sqlite3.oo1.DB(":memory:");
+  try {
+    db.exec(`CREATE VIRTUAL TABLE docs USING anki(id TEXT, c0 TEXT, body TEXT VECTOR);`);
+    db.exec({
+      sql: `INSERT INTO docs(id, c0, body) VALUES (?,?,?)`,
+      bind: ["X-1", "legacy", "database hosting in the cloud"],
+    });
+    const row = db.selectObjects(`SELECT id, c0 FROM docs`)[0];
+    assert.equal(row.id, "X-1");
+    assert.equal(row.c0, "legacy");
+    assert.equal(db.selectValue(`SELECT id FROM docs WHERE body MATCH 'cloud database'`), "X-1");
+    // The shadow table carries the real names + `anki_` internals, in order.
+    const cols = db.selectObjects(`PRAGMA table_info("docs_anki")`).map((c) => c.name);
+    assert.deepEqual(cols, ["anki_id", "id", "c0", "body", "anki_emb_body"]);
+  } finally {
+    db.close();
+  }
+});
+
+// The `anki_` prefix is reserved for internal columns, so a user column can't use it.
+test("reserved 'anki_' column prefix is rejected at CREATE", async () => {
+  const db = new sqlite3.oo1.DB(":memory:");
+  try {
+    assert.throws(
+      () => db.exec(`CREATE VIRTUAL TABLE t USING anki(anki_foo TEXT, body TEXT VECTOR);`),
+      /reserved/,
+    );
+  } finally {
+    db.close();
+  }
+});
+
+// Real names must be unique (they'd collide in the shadow CREATE otherwise).
+test("duplicate column names are rejected at CREATE", async () => {
+  const db = new sqlite3.oo1.DB(":memory:");
+  try {
+    assert.throws(
+      () => db.exec(`CREATE VIRTUAL TABLE t USING anki(x TEXT, x TEXT VECTOR);`),
+      /duplicate/,
+    );
+  } finally {
+    db.close();
+  }
+});
+
 // Writes keep embeddings current: a DELETE drops the row from future searches,
 // and an UPDATE re-embeds the new text (so a row can become the top match for a
 // query it previously didn't match).
