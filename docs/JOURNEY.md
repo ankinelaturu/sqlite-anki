@@ -1,506 +1,575 @@
-# The sqlite-anki journey
+# The Journey of the `sqlite-anki` project
 
-A narrative, chronological account of how this project was built — the decisions, the
-walls we hit, the reversals, and the small stuff too. Unlike [CHANGELOG.md](../CHANGELOG.md)
-(a terse "what changed, when" ledger) and the design docs (the *what/how* of a finished
-piece), this is the *why* and the *story*: read it top-to-bottom like a log book.
+**The goal** — make semantic search feel like ordinary SQL. No embedding API, no service, no
+JavaScript on the query path: declare a column `TEXT VECTOR`, and search it by meaning.
 
-Each step is its own section in commit order — even minor ones, and even when several
-belong to the same theme. When we come back to something we'd already built, the heading
-says **"Revisiting…"**.
+```sql
+CREATE VIRTUAL TABLE docs USING anki(title TEXT, body TEXT VECTOR);
+
+INSERT INTO docs(title, body) VALUES
+  ('Acme renewal', 'the enterprise contract is up for renewal next quarter');
+
+SELECT title, round(body_score, 3) AS score
+FROM docs
+WHERE body MATCH 'contract renewal'
+ORDER BY score DESC;
+```
+
+Everything below is the journey to make those three statements real — the decisions, the walls
+we hit, the reversals, and the small stuff too.
 
 ---
 
-## Jun 23 — The founding bet: put the model *inside* SQLite
+## The founding bet: put the model *inside* SQLite
+`Jun 23, 2026` · `f5738c8`
 
-The initial commit stakes the whole thesis: semantic search where the embedding model
-runs *inside* SQLite (Rust compiled to WASM), so there's no embedding API, no service, and
-no JavaScript on the query hot path. `WHERE col MATCH 'text'` should feel like a native SQL
+The initial commit stakes the whole thesis: semantic search where the embedding model runs
+*inside* SQLite (Rust compiled to WASM), so there's no embedding API, no service, and no
+JavaScript on the query hot path. `WHERE col MATCH 'text'` should feel like a native SQL
 capability. Everything after this is in service of that bet. (Spec: [DESIGN.md](./DESIGN.md).)
 
-## Jun 23 — Writing the spec (and rewriting it, and rewriting it)
+## Writing the spec (and rewriting it, and rewriting it)
 
-A run of README/DESIGN passes (`960d197`, `5eb6de1`, `1b6ab9c`, `126c260`, `3245af5`)
-hammered out the shape before much code existed: the `anki` virtual table, `TEXT VECTOR`
-columns, query semantics, NULL/empty handling, parameterized `MATCH`, the monorepo layout,
-and the choice of the HNSW crate. Iterating the prose first was a way to think — the design
-churned here so the code wouldn't have to later.
+A run of README/DESIGN passes hammered out the shape before much code existed — iterating the
+prose first was a way to think, so the design churned here instead of in the code later.
 
-## Jun 23 — The build pipeline: link Rust into the *official* SQLite wasm
+### First cut of README + DESIGN
+`Jun 23, 2026` · `960d197`
+Clarified features/usage and restructured DESIGN around the virtual-table module and query
+semantics; dropped outdated sections and stated the "key decisions for v1."
 
-Rather than hand-roll a wasm, the build compiles `anki-core` to a static library and links
-it into SQLite's own `ext/wasm` build (`fd74851`), pulling in ONNX and gitignoring the
-vendored SQLite + Emscripten trees. This "ride the official build" decision is why the JS
-API namespace stays upstream's and only the artifact names differ.
+### A quick-summary README; retire docs/README
+`Jun 23, 2026` · `5eb6de1`
+Added a short summary of the key functionality and removed a duplicate docs README.
 
-## Jun 23 — Trimming the staticlib wiring
+### Column types, indexing, parameterized MATCH, NULL/empty
+`Jun 23, 2026` · `1b6ab9c`
+Spelled out column types and search behavior, parameterized `MATCH`, NULL/empty handling, and
+committed to multiple `TEXT VECTOR` columns + the chosen HNSW crate.
 
-`d25d9da` cleaned up `Cargo.lock` and `build.rs` to conditionally set the embedded-model
-config and get Emscripten linking of the staticlib right. Small, but it's the seam that made
-the "Rust inside SQLite's wasm" approach actually link.
+### Worked usage examples
+`Jun 23, 2026` · `126c260`
+Fleshed out concrete usage examples and the architecture/data-handling narrative.
 
-## Jun 24 — Fighting Emscripten for SQLite 3.49
+### Monorepo layout + the explorer test app
+`Jun 23, 2026` · `3245af5`
+Streamlined descriptions, clarified the monorepo layout, and documented the explorer test app.
 
-`408f88f`: the link needed extra runtime methods (`HEAPU64`, `HEAP64`) exposed or SQLite
-3.49 would fault at runtime. The kind of environment-specific paper cut that costs an
-afternoon and one line.
+## The build pipeline: link Rust into the *official* SQLite wasm
 
-## Jun 24 — `panic = "abort"` and taming ONNX output shapes
+Rather than hand-roll a wasm, the build compiles `anki-core` to a static library and links it
+into SQLite's own `ext/wasm` build — "ride the official build," which is why the JS API stays
+upstream's and only the artifact names differ.
 
-`2ed48d4` made two consequential calls. First, release builds abort on panic — because
-unwinding across the FFI boundary into SQLite's C is undefined behavior and Emscripten can't
-lower the unwind. (This is why, to this day, we prefer returning `AnkiError` over panicking
-on any load/inference path.) Second, the embedder learned to handle the various ONNX output
-shapes and mean-pool correctly. The `anki` vtab module got registered in the wasm extension.
+### Build script + ONNX + gitignore the vendored trees
+`Jun 23, 2026` · `fd74851`
+Added the ONNX-integrated deps and the `build-wasm.sh` automation; gitignored the vendored
+SQLite + Emscripten trees.
 
-## Jun 24 — Shadow-table persistence
+### Trim the staticlib wiring
+`Jun 23, 2026` · `d25d9da`
+Cleaned up `Cargo.lock`/`build.rs` (conditional embedded-model config) and got Emscripten
+linking of the staticlib right — the seam that made the whole approach link.
 
-`eafc587` taught the vtab to persist: prepared-statement handling and a real backing
-"shadow" table so rows (and later, embeddings) survive. The virtual table you query and the
-real table that stores bytes become two separate things here.
+### Fight Emscripten for SQLite 3.49
+`Jun 24, 2026` · `408f88f`
+The link needed `HEAPU64`/`HEAP64` runtime methods exposed or SQLite 3.49 faulted at runtime —
+an environment paper cut that costs an afternoon and one line.
 
-## Jun 24 — Transactions, and reloading the cache on rollback
+## WASM panic handling + ONNX output shapes
+`Jun 24, 2026` · `2ed48d4`
 
-`7d0abf5` added transaction handling with a lazy cache reload on rollback — if a transaction
-rolls back the shadow table, the in-memory cache must re-sync to match. A correctness detail
-that would quietly matter for years.
+Two consequential calls. First, release builds **abort on panic** — unwinding across the FFI
+boundary into SQLite's C is undefined behavior and Emscripten can't lower the unwind (still why
+we prefer returning `AnkiError` over panicking on any load/inference path). Second, the embedder
+learned to handle the various ONNX output shapes and mean-pool correctly. The `anki` vtab module
+got registered in the wasm extension.
 
-## Jun 24 — Bringing in HNSW
+## Persistence & transactions
 
-`8da40f2` refactored in an HNSW index for approximate nearest-neighbour search — the bet
-that we'd want sub-linear vector search, not just brute force.
+Making the shadow table durable and transaction-safe — the base the vtab still stands on.
 
-## Jun 24 — Making HNSW lazy
+### Shadow-table persistence
+`Jun 24, 2026` · `eafc587`
+Prepared-statement handling and a real backing "shadow" table so rows survive. The virtual table
+you query and the real table that stores bytes become two separate things here.
 
-`07e8bc6` made the index lazy-loading and optimized search around it — build/consult the
-graph only when needed, for memory efficiency. (Years later this same "when is the index
-built?" question resurfaces in the streaming redesign.)
+### Transactions + lazy cache reload on rollback
+`Jun 24, 2026` · `7d0abf5`
+If a transaction rolls back the shadow table, the in-memory cache must re-sync to match — a
+correctness detail that would quietly matter for years (and resurface in the streaming redesign).
 
-## Jun 25 — The size wall: stop bundling the model
+## The HNSW index
 
-`c024d75` is a pivot. Bundling the ONNX weights into the wasm made it enormous. So the model
-became a **runtime** artifact: the wasm links a full ONNX engine but *no weights*; the model
-is fetched by id or URL/bytes, cached in OPFS, and handed to the extension at load. The
-embedding *dimension* becomes a property of the loaded model, not a constant.
-(See [dynamic-model-loading.md](./dynamic-model-loading.md).)
+The bet that we'd want sub-linear vector search, not just brute force.
 
-## Jun 25 — Naming the package and adding a test harness
+### Bring in HNSW
+`Jun 24, 2026` · `8da40f2`
+Refactored an HNSW ANN index into `anki-core`.
 
-`77d18c0` renamed artifacts to `@sqlite-anki/wasm` and added an integration test harness
-that loads the real wasm + real model under Node — the e2e layer that would gate every
-change from here on.
+### Make it lazy
+`Jun 24, 2026` · `07e8bc6`
+Lazy-loading + search optimization: build/consult the graph only when needed. (The "when is the
+index built?" question returns in July.)
 
-## Jun 25 — Hybrid filtering: the first WHERE + MATCH pushdown
+## The size wall: stop bundling the model
+`Jun 25, 2026` · `c024d75`
 
-`7b7f529` added relational `WHERE` + semantic `MATCH` in one statement, with a pre-filter:
-rank only the rows passing the filter instead of ranking everything and filtering after
-(which would drop matching rows off the similarity "cliff"). This is the first cut of what
-becomes a long correctness saga. (See [hybrid-filtering.md](./hybrid-filtering.md).)
+A pivot. Bundling the ONNX weights made the wasm enormous, so the model became a **runtime**
+artifact: the wasm links a full ONNX engine but *no weights*; the model is fetched by id or
+URL/bytes, cached in OPFS, and handed to the extension at load. The embedding *dimension* becomes
+a property of the loaded model, not a constant. (See [dynamic-model-loading.md](./dynamic-model-loading.md).)
 
-## Jun 25 — Documenting the vtab lifecycle in the code
+## Packaging + the e2e harness
+`Jun 25, 2026` · `77d18c0`
 
-`c0efce3` wasn't behavior — it was heavy inline comments on the SQLite integration and vtab
-lifecycle. Worth its own line because "explain the C ABI contract in the source" became a
-standing convention.
+Renamed artifacts to `@sqlite-anki/wasm` and added an integration test harness that loads the
+real wasm + real model under Node — the e2e layer that would gate every change from here on.
 
-## Jun 25 — The MATCH DSL
+## Hybrid filtering: the first WHERE + MATCH pushdown
+`Jun 25, 2026` · `7b7f529`
 
-`af3a6e9` gave users a per-query strategy knob: `/exact` vs `/hnsw:N`, parsed from the MATCH
-string. Small syntax, big control — and a surface we'd guard fiercely later.
-(See [match-dsl.md](./match-dsl.md).)
+Relational `WHERE` + semantic `MATCH` in one statement, with a pre-filter: rank only the rows
+passing the filter instead of ranking everything and filtering after (which drops matches off the
+similarity "cliff"). The first cut of a long correctness saga. (See [hybrid-filtering.md](./hybrid-filtering.md).)
 
-## Jun 25 — `anki_metrics()`
+## Documenting the vtab lifecycle in the code
+`Jun 25, 2026` · `c0efce3`
 
-`cbb3090` added operation metrics + instrumentation so the cost of embedding vs search vs
-persist is observable, not guessed. (See [metrics.md](./metrics.md).)
+Not behavior — heavy inline comments on the SQLite integration and vtab lifecycle. Worth a line
+because "explain the C ABI contract in the source" became a standing convention.
 
-## Jun 25 — Explorer groundwork: deps + structure
+## The MATCH DSL
+`Jun 25, 2026` · `af3a6e9`
 
-`de4ea38` — unglamorous dependency and structure updates for the explorer app. Noting it
-because it's where the demo SPA starts taking shape.
+A per-query strategy knob: `/exact` vs `/hnsw:N`, parsed from the MATCH string. Small syntax, big
+control — and a surface we'd guard fiercely later. (See [match-dsl.md](./match-dsl.md).)
 
-## Jun 25 — Explorer: notes
+## `anki_metrics()`
+`Jun 25, 2026` · `cbb3090`
 
-`aba8479` added a per-database notes feature (Markdown sidecar). The first of many small
-explorer affordances.
+Operation metrics + instrumentation so the cost of embedding vs search vs persist is observable,
+not guessed. (See [metrics.md](./metrics.md).)
 
-## Jun 25 — Explorer: a WHERE-clause search toolbar (and a Vite wasm fix)
+## Explorer groundwork: deps + structure
+`Jun 25, 2026` · `de4ea38`
 
-`28ffb4b` added a search toolbar and fixed Vite dev wasm loading — the recurring "the
-bundler must rewrite the wasm URL" gotcha of shipping a custom sqlite3.wasm.
+Unglamorous dependency/structure updates — where the demo SPA starts taking shape.
 
-## Jun 26 — Explorer: model registry + an animated load gate
+## Explorer: notes
+`Jun 25, 2026` · `aba8479`
 
-`fb3ac84` expanded the model registry and added a model-details gate with an animated load —
-the first-run screen where you pick a model before anything else.
+A per-database notes feature (Markdown sidecar) — the first of many small explorer affordances.
 
-## Jun 26 — Explorer: a persistent SQL editor
+## Explorer: a WHERE-clause search toolbar (and a Vite wasm fix)
+`Jun 25, 2026` · `28ffb4b`
 
-`7ca4d97` made the SQL editor persistent with run-selection, kept across tab switches — so
-your query, results, and selection survive navigation. (This "keep it mounted" pattern
-recurs across the explorer.)
+A search toolbar, plus a fix for the recurring "the bundler must rewrite the wasm URL" gotcha of
+shipping a custom sqlite3.wasm.
 
-## Jun 26 — Explorer: Markdown preview in notes
+## Explorer: model registry + an animated load gate
+`Jun 26, 2026` · `fb3ac84`
 
-`9a1fcc8` added a rendered Markdown preview toggle to the notes editor. Small polish.
+Expanded the model registry and added a model-details gate with an animated load — the first-run
+screen where you pick a model before anything else.
 
-## Jun 26 — SIMD: ~2× faster embedding
+## Explorer: a persistent SQL editor
+`Jun 26, 2026` · `7ca4d97`
 
-`2462a02` built the wasm with `+simd128`, roughly doubling embedding throughput — the single
-biggest cheap perf win. (See [our-findings.md](./our-findings.md).)
+Persistent SQL editor with run-selection, kept across tab switches, so your query/results/selection
+survive navigation. (This "keep it mounted" pattern recurs across the explorer.)
 
-## Jun 26 — Explorer: the rich demo database
+## Explorer: Markdown preview in notes
+`Jun 26, 2026` · `9a1fcc8`
 
-`6b8e501` added the CRM + knowledge-base demo (~870 rows) behind a Populate button — the
-thing that makes the project *show* rather than *tell*, with multiple `TEXT VECTOR` columns
+A rendered Markdown preview toggle for the notes editor. Small polish.
+
+## SIMD: ~2× faster embedding
+`Jun 26, 2026` · `2462a02`
+
+Built the wasm with `+simd128`, roughly doubling embedding throughput — the single biggest cheap
+perf win. (See [our-findings.md](./our-findings.md).)
+
+## The demo database
+
+The thing that makes the project *show* rather than *tell*.
+
+### Build it (CRM + knowledge base)
+`Jun 26, 2026` · `6b8e501`
+A ~870-row CRM + knowledge-base demo behind a Populate button, with multiple `TEXT VECTOR` columns
 across realistic tables.
 
-## Jun 26 — Explorer: an elapsed-time ticker during populate
+### An elapsed-time ticker during populate
+`Jun 26, 2026` · `c844947`
+Because embedding hundreds of rows in-browser is slow and silence feels broken — motion == trust.
 
-`c844947` added elapsed-time tracking during demo population — because embedding hundreds of
-rows in-browser is slow and silence feels broken. Motion == trust.
+## Schema tree gains table descriptions
+`Jun 26, 2026` · `fe11a9f`
 
-## Jun 26 — Schema tree gains table descriptions
+Turned SQLite's preserved inline `--` DDL comments into table descriptions in the schema tree.
 
-`fe11a9f` enhanced the SchemaTree + schema with table descriptions (parsed from inline `--`
-comments in the CREATE text). Turning SQLite's preserved DDL comments into UI.
+## Explorer: tooltips
+`Jun 26, 2026` · `4b56ddd`
 
-## Jun 26 — Explorer: tooltips
+Tooltips throughout — the start of the "shadcn only, never native controls" UI discipline.
 
-`4b56ddd` added tooltips throughout. Minor — but it's the start of the "shadcn only, never
-native controls" UI discipline.
+## Explorer: a five-theme switcher
+`Jun 26, 2026` · `1cc6b8f`
 
-## Jun 26 — Explorer: a five-theme switcher
+A switcher with 5 distinct themes, plus a popover/tooltip contrast fix.
 
-`1cc6b8f` added a theme switcher (5 distinct themes) and fixed popover/tooltip contrast.
+## Clarifying the worker's SQL examples
+`Jun 26, 2026` · `27cf849`
 
-## Jun 26 — Clarifying the worker's SQL examples
+Doc-only polish on the worker's example queries. Its own tiny step.
 
-`27cf849` — doc-only polish on the worker's example queries. Kept separate because it's its
-own tiny step.
+## Multiple MATCH columns per query
+`Jun 26, 2026` · `8549943`
 
-## Jun 26 — Multiple MATCH columns per query
+One query can `MATCH` several vector columns (AND'd), each contributing its own similarity — the
+seed of the per-column score idea that gets rethought at month's end.
 
-`8549943` let one query `MATCH` several vector columns (AND'd), each contributing its own
-similarity — the seed of the per-column score idea that gets rethought at the end of the
-month.
+## A dedicated SQLite worker + DB API
+`Jun 27, 2026` · `1dee665`
 
-## Jun 27 — A dedicated SQLite worker + DB API
+Moved SQLite into a Web Worker with a clean database API — search off the main thread. The
+architecture the explorer keeps to this day.
 
-`1dee665` moved SQLite into a Web Worker with a clean database API — search off the main
-thread. The architecture the explorer keeps to this day.
+## Revisiting app structure: drop the db-client package
+`Jun 27, 2026` · `3f43e70`
 
-## Jun 27 — Revisiting app structure: drop the db-client package
+Removed the separate db-client package and rewired imports — collapsing an abstraction that wasn't
+earning its keep.
 
-`3f43e70` removed the separate db-client package and rewired imports — collapsing an
-abstraction that wasn't earning its keep.
+## Per-embedding profiling log
 
-## Jun 27 — Per-embedding profiling log
+The instrument that makes the next stretch of perf discoveries possible.
 
-`5a98439` added a per-embedding profiling log + reset, so we could measure *individual*
-embeddings, not just aggregates. This instrument makes the next week's perf discoveries
-possible.
+### Add the log + reset
+`Jun 27, 2026` · `5a98439`
+A per-embedding profiling log with reset, so we could measure *individual* embeddings, not just
+aggregates.
 
-## Jun 27 — Revisiting the profiling log: enhancements
+### Sharpen the microscope
+`Jun 27, 2026` · `7e19bdd`
+Refined the log (timings, token counts, reset semantics) before putting it to use.
 
-`7e19bdd` refined that log (timings, token counts, reset semantics). Separate step, same
-tool — sharpening the microscope before using it.
+## Engines, threads & the performance investigation
 
-## Jun 27 — Naming the real build target
+One coherent investigation into how fast and how small the wasm could be — which engine, whether
+threads help, and where the compute was actually going. It produced [our-findings.md](./our-findings.md)
+and, in the middle of it, an embarrassing discovery and its fix.
 
-`15eb6dd` made `build:wasm:tract-st` the actual build target — committing to Tract,
-single-threaded, as the default engine.
+### Make tract-st the real build target
+`Jun 27, 2026` · `15eb6dd`
+Committed to Tract, single-threaded, as the default engine.
 
-## Jun 27 — A build variant that fails on purpose
+### A build variant that fails on purpose
+`Jun 27, 2026` · `b27bea5`
+`build:wasm:tract-mt` *exits 1 with an explanation* — a "tombstone" so the next person learns that
+multi-threaded wasm gave no measurable gain.
 
-`b27bea5` added `build:wasm:tract-mt` that *exits 1 with an explanation*. A "tombstone":
-multi-threaded wasm gave no measurable gain, so the variant exists only to tell the next
-person why not to bother.
+### The findings doc
+`Jun 27, 2026` · `42c7879`
+Started the running lab notebook where the perf story gets recorded rather than lost.
 
-## Jun 27 — The performance & size findings doc
+### A second engine: Candle
+`Jun 27, 2026` · `f9fcd5f`
+Added a Candle engine variant to compare; engine becomes a compile-time, mutually-exclusive feature.
 
-`42c7879` started [our-findings.md](./our-findings.md) — the running lab notebook where the
-perf story gets recorded rather than lost.
+### Measure real vs padding tokens
+`Jun 27, 2026` · `4ce98d9`
+Instrumented real vs padding token counts per embedding — with a purpose.
 
-## Jun 27 — A second engine: Candle
+### The 82%-wasted-on-[PAD] finding
+`Jun 27, 2026` · `361bb7d`
+Wrote it down: with fixed 128-token padding, ~82% of the compute was spent on `[PAD]` tokens.
 
-`f9fcd5f` added a Candle engine variant alongside Tract, to compare. Engine becomes a
-compile-time feature, the two mutually exclusive.
+### The padding fix
+`Jun 27, 2026` · `8147cd2`
+Padded to the *actual* length instead of the model's fixed 128. Since we embed one text at a time,
+fixed padding was almost all waste — and had been skewing mean-pooling. (Don't reintroduce it.)
 
-## Jun 27 — Measuring real vs padding tokens
+### Record the payoff
+`Jun 27, 2026` · `361b371`
+Captured the after-fix demo numbers. Measure, fix, re-measure.
 
-`4ce98d9` recorded real vs padding token counts per embedding. Instrumentation with a
-purpose — it's about to expose something embarrassing.
+### Revisiting threads: candle-mt, tract-mt still a tombstone
+`Jun 27, 2026` · `0b8127f`
+Added a `candle-mt` variant and re-documented why `tract-mt` is a dead end.
 
-## Jun 27 — The 82%-wasted-on-[PAD] finding
+### The engine crossover sweep
+`Jun 27, 2026` · `0dbc7df`
+A variable-length token sweep: Candle wins only for long docs (a crossover), and threads still
+don't help. Data settling the engine debate.
 
-`361bb7d` wrote it down: with fixed 128-token padding, ~82% of the compute was spent on
-`[PAD]` tokens. A measurement that demanded a fix.
+### Distill findings into the README
+`Jun 27, 2026` · `92f4f9b`
+Pulled the key numbers up into the README (and fixed a stale monorepo layout) — visible where people
+actually look.
 
-## Jun 27 — The padding fix
+## Revisiting the model panel: token limits & links
+`Jun 27, 2026` · `461ddfc`
 
-`8147cd2` stopped padding to the model's fixed 128 and padded to the *actual* length. Since
-we embed one text at a time, fixed padding was almost all waste — and it had also been
-skewing mean-pooling. (To this day, don't reintroduce fixed padding.)
+Gave the model picker token limits, two-row dropdown items, and page links — a bare `<select>` made
+informative.
 
-## Jun 27 — Recording the payoff
+## Revisiting build-variant naming
+`Jun 27, 2026` · `54981de`
 
-`361b371` captured the after-padding-fix demo numbers in the findings. Close the loop:
-measure, fix, re-measure.
+Renamed the variants to `[engine]-[format]-[threads]` and reserved `candle-native` — now that there
+were several, they needed a scheme. (See [build-variants.md](./build-variants.md).)
 
-## Jun 27 — Revisiting threads: candle-mt, and why tract-mt stays a tombstone
+## Renaming artifacts to sqlite-anki_*
+`Jun 27, 2026` · `75fd2be`
 
-`0b8127f` added a `candle-mt` variant and documented, again, why `tract-mt` is a dead end.
-The threads question keeps getting asked; the answer keeps being "no."
+`sqlite3* → sqlite-anki_*` so it's clear this is our build, not stock SQLite — while keeping the
+upstream JS API namespace.
 
-## Jun 27 — The engine crossover sweep
+## Gitignoring Claude settings + worktrees
+`Jun 27, 2026` · `1b942ab`
 
-`0dbc7df` added a variable-length token sweep to the findings: Candle wins only for long
-docs (an engine crossover), and threads still don't help. Data settling the engine debate.
+Housekeeping so personal tool settings and worktrees stay out of the repo.
 
-## Jun 27 — Distilling findings into the README
+## Going live: deploy + analytics
 
-`92f4f9b` pulled the key perf findings up into the README (and fixed a stale monorepo
-layout). Make the hard-won numbers visible where people actually look.
+Shipping it, and knowing whether anyone uses it.
 
-## Jun 27 — Model panel polish
+### CI builds the wasm and deploys
+`Jun 27, 2026` · `edec074`
+Vercel config + a GitHub Actions deploy that *builds the wasm in CI*. The project goes live.
 
-`461ddfc` gave the model picker token limits, two-row dropdown items, and page links —
-turning a bare `<select>` into something informative.
+### Analytics + engagement events
+`Jun 27, 2026` · `b52355c`
+Vercel Web Analytics + Speed Insights + engagement events.
 
-## Jun 27 — Revisiting build-variant naming
+## Revisiting the schema tree: icons, pills, hover
 
-`54981de` renamed the variants to `[engine]-[format]-[threads]` and reserved
-`candle-native`. Now that there were several, they needed a scheme.
-(See [build-variants.md](./build-variants.md).)
+A polish pass on the schema tree (first built with table descriptions on Jun 26).
 
-## Jun 27 — Renaming artifacts to sqlite-anki_*
+### Type-affinity + qualifier icons
+`Jun 27, 2026` · `2963208`
+Read a column's shape at a glance.
 
-`75fd2be` renamed the emitted files `sqlite3* → sqlite-anki_*` so it's clear this is our
-build, not stock SQLite — while keeping the upstream JS API namespace.
+### Streamline the column display
+`Jun 27, 2026` · `6f9fb28`
+Cleaner rendering, same data.
 
-## Jun 27 — Gitignoring Claude settings + worktrees
+### Qualifier pills, hover rows, sizing
+`Jun 27, 2026` · `7fb8ae2`
+Three small tweaks to the same tree.
 
-`1b942ab` — housekeeping so personal tool settings and worktrees stay out of the repo.
+## Splitting into workspaces (Phases 1 & 2)
 
-## Jun 27 — CI: build the wasm and deploy
+The explorer grows from one screen into an IDE-shaped thing.
 
-`edec074` added Vercel config + a GitHub Actions deploy that *builds the wasm in CI*. The
-project goes live.
+### Phase 1: activity bar + two workspaces
+`Jun 27, 2026` · `fbc6c9f`
+A VSCode-style activity bar and a split into **SQLite** and **OPFS** workspaces.
 
-## Jun 27 — Analytics + engagement events
+### Phase 2: the OPFS workspace
+`Jun 27, 2026` · `8c1d77f`
+A recursive file tree, a tabbed editor, a storage status bar, and a sidebar width shared with the
+SQLite workspace.
 
-`b52355c` added Vercel Web Analytics + Speed Insights + engagement events. Knowing whether
-anyone uses it.
+## Revisiting theming: management refactor
+`Jun 27, 2026` · `451baa9`
 
-## Jun 27 — Schema tree: affinity + qualifier icons
+Refactored theme management and styles — consolidating the five-theme system into something
+maintainable.
 
-`2963208` added type-affinity icons and qualifier icons to the schema tree — reading a
-column's shape at a glance.
+## Pinning pnpm for CI
+`Jun 27, 2026` · `2e5a9df`
 
-## Jun 27 — Revisiting the schema tree: streamline columns
+Pinned pnpm via `packageManager` so CI could resolve the version. A one-liner that unbreaks the build.
 
-`6f9fb28` refactored the column display. Same component, cleaner rendering.
+## The read-only config.make CI fix
+`Jun 28, 2026` · `2e9757b`
 
-## Jun 27 — Revisiting the schema tree again: pills, hover, sizing
+Made `build-wasm.sh` overwrite the read-only `config.make` so the CI build would succeed — the
+vendored SQLite tree's read-only files meeting a fresh CI checkout.
 
-`7fb8ae2` added qualifier pills, hover rows, and larger column rows. Three tweaks to the same
-tree — kept distinct on purpose.
+## Revisiting the WHERE pre-filter: collation + exact int/real
+`Jun 29, 2026` · `3595f48`
 
-## Jun 27 — Phase 1: an activity bar and two workspaces
+Hardened the pre-filter to be collation-aware and to compare integers vs reals *exactly* (no
+`as f64` precision loss past 2^53). The pre-filter's second life — and the hand-rolled comparison
+logic it introduces is exactly what the July streaming redesign later *deletes* in favour of letting
+SQLite compare. (See [query-planning.md](./query-planning.md).)
 
-`fbc6c9f` added a VSCode-style activity bar and split the app into **SQLite** and **OPFS**
-workspaces. The explorer grows from one screen into an IDE-shaped thing.
+## CI: test before deploying
+`Jun 29, 2026` · `58bde81`
 
-## Jun 27 — Phase 2: the OPFS workspace
+Made CI run the Rust unit + wasm e2e tests before deploying. Gate the deploy on green.
 
-`8c1d77f` fleshed out the OPFS workspace: a recursive file tree, a tabbed editor, a storage
-status bar, and a sidebar width shared with the SQLite workspace.
+## Documenting pre-filter correctness (false +/-)
+`Jun 29, 2026` · `af0e325`
 
-## Jun 27 — Revisiting theming: management refactor
+Wrote down the pre-filter's contract: it may over-return (SQLite re-checks) but must never wrongly
+drop a row. This "conservative, omit=0" principle becomes load-bearing in July.
 
-`451baa9` refactored theme management and styles — consolidating the five-theme system into
-something maintainable.
+## CI: skip deploy on docs-only pushes
+`Jun 29, 2026` · `3d4d15c`
 
-## Jun 27 — Pinning pnpm for CI
+Made the deploy workflow ignore docs-only changes — don't rebuild and redeploy for a typo.
 
-`2e5a9df` pinned pnpm via `packageManager` so CI could resolve the version. A one-liner that
-unbreaks the build.
+## README formatting pass
+`Jun 29, 2026` · `44d35bb`
 
-## Jun 28 — The read-only config.make CI fix
+Formatting + documentation polish. Its own small step.
 
-`2e9757b` made `build-wasm.sh` overwrite the read-only `config.make` so the CI build would
-succeed — the vendored SQLite tree shipping read-only files, meeting a fresh CI checkout.
+## README: live demo + TS quick-start
+`Jun 29, 2026` · `34abede`
 
-## Jun 29 — Revisiting the WHERE pre-filter: collation + exact int/real
+A live-demo link and a TypeScript quick-start, plus rendering-artifact fixes. Lowering the barrier to
+try it.
 
-`3595f48` hardened the pre-filter to be collation-aware and to compare integers vs reals
-*exactly* (no `as f64` precision loss past 2^53). This is the pre-filter's second life — and
-the hand-rolled comparison logic it introduces is exactly what the July streaming redesign
-later *deletes* in favour of letting SQLite compare. (See [query-planning.md](./query-planning.md).)
+## The similarity()-in-aggregate problem
 
-## Jun 29 — CI: test before deploying
+Naming a wart, and encoding its fix as a red test.
 
-`58bde81` made CI run the Rust unit + wasm e2e tests before deploying. Gate the deploy on
-green.
+### Document the workaround
+`Jun 29, 2026` · `aa80cef`
+Wrote down that `similarity()` inside an aggregate needed a MATERIALIZED-CTE workaround.
 
-## Jun 29 — Documenting pre-filter correctness (false +/-)
+### A failing test that names the goal
+`Jun 29, 2026` · `e71977d`
+Added a *failing* (todo) test for `similarity()` inside aggregates, plus regressions for the
+workaround — encoding the desired end-state.
 
-`af0e325` wrote down the pre-filter's correctness contract: it may over-return (SQLite
-re-checks) but must never wrongly drop a row. Plus a README rework. This "conservative,
-omit=0" principle becomes load-bearing later.
+## The Design Choices doc
+`Jun 29, 2026` · `079a9ab`
 
-## Jun 29 — CI: skip deploy on docs-only pushes
+Added [design-choices.md](./design-choices.md) — rationale for the key decisions, explained on their
+own terms (deliberately *not* framed against FTS5 or sqlite-vec).
 
-`3d4d15c` made the deploy workflow ignore docs-only changes (`paths-ignore`) — don't rebuild
-and redeploy for a typo fix.
+## Revisiting similarity(): the `<col>_score` column
 
-## Jun 29 — README formatting pass
+Replacing the function with a column — the reversal that made the failing test go green.
 
-`44d35bb` — formatting + documentation polish. Its own small step.
+### Add the hidden score column
+`Jun 29, 2026` · `bf2aa6e`
+A query-time `<col>_score` column flows through SQLite as ordinary row data, so it works in
+SELECT/WHERE/ORDER BY/GROUP BY *and* inside aggregates — no CTE workaround.
 
-## Jun 29 — README: live demo + TS quick-start
+### Remove similarity() entirely
+`Jun 29, 2026` · `0f7f2d4`
+Deleted the function so there's exactly one surface for the score. Pre-1.0 discipline: one clean way,
+no legacy alias.
 
-`34abede` added a live-demo link and a TypeScript quick-start, and fixed rendering
-artifacts. Lowering the barrier to try it.
+### Sweep the docs
+`Jun 29, 2026` · `9717159`
+Replaced `similarity()` with `<col>_score` everywhere it had appeared.
 
-## Jun 29 — Documenting the similarity()-in-aggregate workaround
+## An fp16 model variant
+`Jul 01, 2026` · `3c5a4f7`
 
-`aa80cef` documented that `similarity()` inside an aggregate needed a MATERIALIZED-CTE
-workaround. Writing down a wart is the first step to removing it.
+An fp16 `all-MiniLM-L6-v2` registry entry — roughly half the download for a little precision.
 
-## Jun 29 — A failing test that names the goal
+## Noting the WebGPU path
+`Jul 01, 2026` · `785fc29`
 
-`e71977d` added a *failing* (todo) test for `similarity()` inside aggregates, plus regression
-tests for the workaround. Encoding the desired end-state as a red test.
+Recorded the WebGPU acceleration path in the findings (§8) — a future direction captured while fresh,
+not built.
 
-## Jun 29 — The Design Choices doc
+## A CLAUDE.md for future sessions
+`Jul 05, 2026` · `e362c57`
 
-`079a9ab` added [design-choices.md](./design-choices.md) — the rationale for the key
-decisions, explained on their own terms (deliberately *not* framed against FTS5 or
-sqlite-vec).
+Added `CLAUDE.md` — the standing instructions and map so future work (including everything below)
+starts oriented.
 
-## Jun 29 — Revisiting similarity(): the `<col>_score` column
+## Import & Vectorize
+`Jul 05, 2026` · `c3a6c6b`
 
-`bf2aa6e` replaced the function idea with a hidden, query-time `<col>_score` column: it flows
-through SQLite as ordinary row data, so it works in SELECT/WHERE/ORDER BY/GROUP BY *and*
-inside aggregates — no CTE workaround. The failing test from earlier goes green.
+The big feature of the day: upload an existing `.sqlite`, pick which TEXT columns to make
+semantically searchable, and rebuild it into a sqlite-anki database with embeddings computed on
+import — plus generated sample `MATCH` queries. Tables without picks are copied verbatim (full DDL
+preserved); nothing picked persists the file unchanged. Building it forced a core fix: `Cell::Blob`,
+because the vtab's `Cell` type had no blob variant, so a BLOB column in a vectorized table was
+silently turning to NULL.
 
-## Jun 29 — Removing similarity() entirely
+## Revisiting the import dialog: layout
+`Jul 05, 2026` · `aa438f2`
 
-`0f7f2d4` deleted the `similarity()` function so there's exactly one surface for the score.
-Pre-1.0 discipline: one clean way, no legacy alias.
+Fixed the ImportDialog layout — the tables panel scrolls on its own while name/notes/actions stay
+pinned, and the notes box has a two-line minimum.
 
-## Jun 29 — Propagating the `<col>_score` change through the docs
+## Revisiting the status bar: make metrics primary
+`Jul 05, 2026` · `5e5e340`
 
-`9717159` swept the docs to use `<col>_score` everywhere `similarity()` had appeared. Keep
-the story consistent.
+Enlarged both workspaces' status bars — the per-operation embed/search/persist metrics are the point,
+so they got more visual weight.
 
-## Jul 1 — An fp16 model variant
+## The streaming-storage redesign
 
-`3c5a4f7` added an fp16 `all-MiniLM-L6-v2` registry entry — roughly half the download for
-users willing to trade a little precision.
+This session's big arc. Working through the vtab's memory use, we realized it *materializes the
+entire table* — all columns and embeddings — into WASM linear memory at open (~2 GB cap); for a
+20-column table with one vector column, 19/20 of the row data sits in RAM for nothing. We weighed
+sqlite-vec's brute-force-from-disk model, chose to *keep* HNSW (and the `/exact` `/hnsw` DSL) but
+*stream the storage*, and shipped it as five green commits. (Design: [streaming-storage.md](./streaming-storage.md).)
 
-## Jul 1 — Noting the WebGPU path
+### The design
+`Jul 05, 2026` · `b23aeff`
+Wrote up the problem, the alternatives, and the plan in [streaming-storage.md](./streaming-storage.md).
 
-`785fc29` recorded the WebGPU acceleration path in the findings (§8) — a future direction
-captured while it was fresh, not built.
+### Sharpen the correctness argument
+`Jul 05, 2026` · `efe0262`
+The false-+/- risk shifts from *semantic* (our comparison being wrong) to *mechanical* (translating a
+constraint to SQL), since SQLite now does the comparing; plus the join RHS-binding rule and the
+per-outer-row perf note.
 
-## Jul 5 — A CLAUDE.md for future sessions
+### Step 1 — a type-full shadow table
+`Jul 05, 2026` · `bdd1802`
+Gave the shadow columns their declared types + `COLLATE` (positional `c{i}` names, to avoid colliding
+with a user column named `id`), and a storage-format version guard that refuses pre-redesign DBs.
 
-`e362c57` added `CLAUDE.md` — the standing instructions and map so future work (including
-everything below) starts oriented.
+### Step 2 — let SQLite evaluate the WHERE
+`Jul 05, 2026` · `149f2f7`
+Replaced the hand-rolled pre-filter with a prepared `SELECT id FROM <name>_data WHERE …` on the typed
+shadow table — *deleting* the `cell_passes`/`collated_cmp`/`cmp_int_real` cluster hardened back on
+Jun 29. `omit=0` stays, so SQLite re-checks and the pre-filter only narrows.
 
-## Jul 5 — Import & Vectorize
+### Step 3 — serve columns from disk
+`Jul 05, 2026` · `efa9639`
+`xColumn` fetches user columns from the shadow table on demand (a reused per-cursor point lookup,
+cached per row). A side effect surfaced: mixed-type inserts now take the column's affinity (text `'42'`
+into an INTEGER column reads back as `42`).
 
-`c3a6c6b` shipped the big feature of the day: upload an existing `.sqlite`, pick which TEXT
-columns to make semantically searchable, and rebuild it into a sqlite-anki database with
-embeddings computed on import — plus generated sample `MATCH` queries. Tables without picks
-are copied verbatim (their full DDL preserved); nothing picked persists the file unchanged.
-Building it forced a core fix: `Cell::Blob`, because the vtab's `Cell` type had no blob
-variant, so a BLOB column in a vectorized table was silently turning to NULL.
+### Step 4 — drop the cell cache (the payoff)
+`Jul 05, 2026` · `e2eeea3`
+`Row` now holds only embeddings; `load_all` selects just `id, e{vi}`. The resident footprint becomes
+**rowid + embeddings + HNSW** — the essentials — with all column data on disk.
 
-## Jul 5 — Revisiting the import dialog: layout
+### Step 5 — cache the query embedding for joins
+`Jul 05, 2026` · `6639d5f`
+A per-cursor `(col, text) → embedding` cache: in a join, SQLite re-enters `xFilter` once per outer row
+with the same MATCH text, so it's now embedded once per query instead of per iteration.
 
-`aa438f2` fixed the ImportDialog layout — the tables panel scrolls on its own while the
-database-name/notes/actions stay pinned, and the notes box has a two-line minimum. UI polish
-on the just-shipped feature.
+## The roadmap
 
-## Jul 5 — Revisiting the status bar: make metrics primary
+Consolidating what we deferred, then sharpening it after a good question.
 
-`5e5e340` enlarged the status bars (both workspaces) — the per-operation embed/search/persist
-metrics are the point, so they got more visual weight.
+### Add TODO.md
+`Jul 05, 2026` · `ac6d334`
+Consolidated the follow-ups that surfaced along the way (HNSW incremental insert, persist the graph,
+int8 quantization, streaming the embeddings too, a session-level embedding cache, `omit=1`, indexing
+filtered columns, the "rebuild required" UI, and the Import gaps). (See [TODO.md](./TODO.md).)
 
-## Jul 5 — The WASM-RAM realization, written up as a design
-
-`b23aeff` is where this session's big arc begins. Working through how the `anki` vtab uses
-memory, we realized it *materializes the entire table* — all columns and embeddings — into
-WASM linear memory at open, capped at ~2 GB. For a 20-column table with one vector column,
-19/20 of the row data sits in RAM for no reason. We weighed sqlite-vec's brute-force-from-disk
-model, decided to *keep* HNSW (and the `/exact` `/hnsw` DSL) but *stream the storage*, and
-wrote it all down in [streaming-storage.md](./streaming-storage.md).
-
-## Jul 5 — Revisiting the design: sharpening correctness
-
-`efe0262` refined the design doc's correctness section: the false-+/- risk shifts from
-*semantic* (our hand-rolled comparison being wrong) to *mechanical* (translating a
-constraint into SQL), because SQLite will now do the comparing; plus the join RHS-binding
-rule and the per-outer-row perf note.
-
-## Jul 5 — Streaming, step 1: a type-full shadow table
-
-`bdd1802` gave the shadow table's data columns their declared types + `COLLATE` (kept
-positional `c{i}` names to avoid colliding with a user column named `id`), so a `WHERE` run
-directly on the shadow table matches SQLite's affinity/collation. Added a storage-format
-version guard that refuses to open pre-redesign DBs with a clear "rebuild required."
-
-## Jul 5 — Streaming, step 2: let SQLite evaluate the WHERE
-
-`149f2f7` replaced the hand-rolled pre-filter with a prepared `SELECT id FROM <name>_data
-WHERE …` on the typed shadow table — SQLite does the comparison, so the whole
-`cell_passes`/`collated_cmp`/`cmp_int_real` cluster (the very code hardened back on Jun 29)
-gets *deleted*. `omit=0` stays, so SQLite re-checks and the pre-filter can only narrow.
-
-## Jul 5 — Streaming, step 3: serve columns from disk
-
-`efa9639` made `xColumn` fetch user columns from the shadow table on demand (a reused
-per-cursor point lookup, cached per row) instead of from the in-RAM cache — the read side of
-"don't keep columns in RAM." A side effect became visible here: mixed-type inserts now take
-the column's affinity (text `'42'` into an INTEGER column reads back as `42`).
-
-## Jul 5 — Streaming, step 4: drop the cell cache (the payoff)
-
-`e2eeea3` is the reward: `Row` now holds only its embeddings, `load_all` selects just
-`id, e{vi}`, and writes cache only embeddings. The resident footprint becomes **rowid +
-embeddings + HNSW** — exactly the essentials — with all column data on disk.
-
-## Jul 5 — Streaming, step 5: cache the query embedding for joins
-
-`6639d5f` added a per-cursor `(col, text) → embedding` cache. In a join, SQLite re-enters
-`xFilter` once per outer row with the same MATCH text; without the cache we re-embed it every
-iteration (the dominant cost). Now it's embedded once per query.
-
-## Jul 5 — A roadmap for what we deferred
-
-`ac6d334` added [TODO.md](./TODO.md), consolidating the follow-ups that surfaced along the
-way: HNSW incremental insertion, persisting the HNSW graph, int8 quantization, streaming the
-embeddings too ("Option B"), a session-level embedding cache, the `omit=1` optimization,
-indexing filtered shadow columns, the "rebuild required" UI, and the Import & Vectorize gaps.
-
-## Jul 5 — Revisiting the roadmap: what import really drops
-
-`f461ecf` sharpened the import fidelity item after a good question: data, JOINs, and
-*plain-copied* tables' full DDL (incl. FKs) are preserved; the real gap is secondary
-**indexes** (a performance loss), plus triggers and constraints on *vectorized* tables. FK
+### Revisiting: what import really drops
+`Jul 05, 2026` · `f461ecf`
+Clarified that data, JOINs, and *plain-copied* tables' full DDL (incl. FKs) are preserved; the real gap
+is secondary **indexes** (performance), plus triggers and constraints on *vectorized* tables. FK
 enforcement is off by default in browser SQLite anyway.
 
-## Jul 5 — A CHANGELOG
+## A CHANGELOG
+`Jul 05, 2026` · `e4101bb`
 
-`e4101bb` added [CHANGELOG.md](../CHANGELOG.md) — the terse, date-sectioned ledger, curated
-from this same history, with each entry linking to its design doc. The companion to this
-narrative.
+Added [CHANGELOG.md](../CHANGELOG.md) — the terse, date-sectioned ledger, curated from this same
+history. The companion to this narrative.
 
-## Jul 5 — This document
+## This document
+`Jul 05, 2026` · `2dcd494`
 
-The narrative you're reading — the "why" and the "journey," kept separate from the changelog
-so each can do its own job. Add new sections at the bottom as the story continues.
+The narrative you're reading — the "why," kept separate from the changelog so each can do its own job.
+Written, then restructured to group consecutive commits under one section with per-commit sub-sections.
+Add new sections at the bottom as the story continues.
