@@ -75,12 +75,11 @@ dropping a vectorized table's indexes/triggers/constraints is a real footgun.
   column — same as the query-perf "index filtered shadow columns" item). **FK and triggers can't**
   be recovered cleanly (FK cascades / triggers modify the shadow behind the vtab and desync its
   in-RAM cache) → those need the companion strategy.
-- **Real column names via an `anki_` prefix** (storage-format v3). Namespace the internal columns
-  (`anki_id`, `anki_emb_N`) and reserve the `anki_` prefix so shadow *data* columns can use their
-  real names instead of positional `c{i}`. Payoff: readable storage, no CHECK-expression
-  rewriting, clean error messages, easier constraint pushdown. Resolution for a user column named
-  `anki_*`: greenfield → hard error at `xCreate`; import → interactive rename in ImportDialog,
-  block rebuild until resolved (only affects *vectorized* tables). Bundle with constraint pushdown.
+- **Real column names via an `anki_` prefix — DONE (2026-07-06, storage-format v3).** Shadow
+  table `<name>_anki`, internal columns `anki_id` / `anki_emb_<col>`, data columns stored under
+  their real names. Greenfield: `xCreate` hard-errors on a reserved-prefix or duplicate column
+  name. Import: `ImportDialog` shows an inline rename for `anki_*` columns on a vectorized table
+  and blocks the rebuild until resolved. This is the enabler for constraint pushdown below.
 
 ## Related design docs
 - `streaming-storage.md` — the shipped WASM-RAM redesign; §correctness + open questions

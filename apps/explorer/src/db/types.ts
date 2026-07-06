@@ -59,6 +59,8 @@ export interface ImportColumn {
   textLike: boolean;
   /** Declared type has BLOB affinity — informational (BLOBs round-trip either way). */
   isBlob: boolean;
+  /** Name uses the reserved `anki_` prefix — must be renamed before vectorizing. */
+  reserved: boolean;
 }
 
 /** One table or view discovered in an uploaded SQLite file. */
@@ -78,6 +80,13 @@ export interface ImportAnalysis {
 export interface ImportPlan {
   /** Table name → column names to make `TEXT VECTOR`. Absent/empty = plain copy. */
   tables: Record<string, string[]>;
+  /**
+   * Per-vectorized-table column renames: `{ table: { oldName: newName } }`. Used to
+   * escape source columns whose names use the reserved `anki_` prefix (a vectorized
+   * table becomes an `anki` vtab, which reserves that prefix). Plain-copied tables are
+   * never renamed.
+   */
+  renames: Record<string, Record<string, string>>;
   /** Freeform notes to seed the rebuilt database's `.notes.md` sidecar. */
   notes: string;
 }

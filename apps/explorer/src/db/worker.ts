@@ -272,15 +272,21 @@ class AnkiWorker implements AnkiWorkerApi {
         const colNames = t.columns.map((c) => c.name);
         const rows = src.selectObjects(`SELECT * FROM ${quote(t.name)}`) as Row[];
         if (picks.size > 0) {
+          // Escape reserved-prefix source columns (the vtab reserves `anki_`). The
+          // anki column uses the renamed name; data is still read from the old name.
+          const rn = plan.renames?.[t.name] ?? {};
+          const target = (c: string) => rn[c] ?? c;
           const decl = t.columns
             .map((c) => {
-              const base = c.type ? `${quote(c.name)} ${c.type}` : quote(c.name);
+              const nm = target(c.name);
+              const base = c.type ? `${quote(nm)} ${c.type}` : quote(nm);
               return picks.has(c.name) ? `${base} VECTOR` : base;
             })
             .join(", ");
           dst.exec(`CREATE VIRTUAL TABLE ${quote(t.name)} USING anki(${decl})`);
+          const dstNames = colNames.map(target);
           for (const row of rows) {
-            insertObjectRow(dst, t.name, colNames, row);
+            insertObjectRow(dst, t.name, colNames, row, dstNames);
             done++;
             if (done % 2 === 0 || done === total) onProgress(done, total);
           }
@@ -577,11 +583,13 @@ function sourceObjects(db: Db): SourceObject[] {
     ) as Array<{ name: string; type: string }>;
     const columns: ImportColumn[] = cols.map((c) => {
       const type = String(c.type ?? "");
+      const name = String(c.name);
       return {
-        name: String(c.name),
+        name,
         type,
         textLike: isTextLike(type),
         isBlob: /blob/i.test(type),
+        reserved: /^anki_/i.test(name),
       };
     });
     return {
@@ -598,18 +606,23 @@ function rowCountOf(db: Db, table: string): number {
   return Number(db.selectValue(`SELECT count(*) FROM ${quote(table)}`)) || 0;
 }
 
-/** Inserts one object row (column name → value) into `table` by explicit columns. */
+/**
+ * Inserts one object row into `table`. Values are read from `row` by `srcNames`;
+ * they're written to columns `dstNames` (defaults to `srcNames`) — the two differ
+ * only when a vectorized table renamed a reserved-prefix column.
+ */
 function insertObjectRow(
   db: Db,
   table: string,
-  colNames: string[],
+  srcNames: string[],
   row: Row,
+  dstNames: string[] = srcNames,
 ): void {
-  const cols = colNames.map(quote).join(", ");
-  const ph = colNames.map(() => "?").join(", ");
+  const cols = dstNames.map(quote).join(", ");
+  const ph = srcNames.map(() => "?").join(", ");
   db.exec({
     sql: `INSERT INTO ${quote(table)} (${cols}) VALUES (${ph})`,
-    bind: colNames.map((c) => (row[c] ?? null) as SqlValue),
+    bind: srcNames.map((c) => (row[c] ?? null) as SqlValue),
   });
 }
 

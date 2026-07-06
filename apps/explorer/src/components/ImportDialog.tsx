@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { Cpu, Database, Eye, FileUp, Sparkles, Table2 } from "lucide-react";
-import type { ImportAnalysis, ImportPlan } from "@/db";
+import type { ImportAnalysis, ImportColumn, ImportPlan } from "@/db";
 import {
   Dialog,
   DialogContent,
@@ -47,6 +47,8 @@ export function ImportDialog({
   const [name, setName] = useState(defaultName);
   const [notes, setNotes] = useState("");
   const [picks, setPicks] = useState<Picks>({});
+  // Per-table renames for reserved-prefix columns: { table: { oldName: newName } }.
+  const [renames, setRenames] = useState<Record<string, Record<string, string>>>({});
 
   const toggle = (table: string, col: string) =>
     setPicks((p) => {
@@ -55,6 +57,26 @@ export function ImportDialog({
       else cur.add(col);
       return { ...p, [table]: cur };
     });
+
+  const setRename = (table: string, oldName: string, newName: string) =>
+    setRenames((r) => ({ ...r, [table]: { ...(r[table] ?? {}), [oldName]: newName } }));
+
+  // A rename is valid if it's non-empty, not itself `anki_`-prefixed, and doesn't
+  // collide (case-insensitive) with another column's effective name in the table.
+  const isValidRename = (table: string, oldName: string, cols: ImportColumn[]) => {
+    const v = (renames[table]?.[oldName] ?? "").trim();
+    if (!v || /^anki_/i.test(v)) return false;
+    const lower = v.toLowerCase();
+    return !cols.some(
+      (c) => c.name !== oldName && (renames[table]?.[c.name] ?? c.name).toLowerCase() === lower,
+    );
+  };
+
+  // Every vectorized table's reserved columns must be renamed before we can rebuild.
+  const renamesResolved = analysis.tables.every((t) => {
+    if ((picks[t.name]?.size ?? 0) === 0) return true;
+    return t.columns.filter((c) => c.reserved).every((c) => isValidRename(t.name, c.name, t.columns));
+  });
 
   const safeName = name.trim().replace(/[^a-zA-Z0-9_-]/g, "");
   const targetPath = `/${safeName}.db`;
@@ -71,13 +93,24 @@ export function ImportDialog({
   const totalPicks = Object.values(picks).reduce((n, s) => n + s.size, 0);
 
   const submit = () => {
-    if (!safeName || collision) return;
+    if (!safeName || collision || !renamesResolved) return;
+    // Collect the reserved-column renames for vectorized tables only.
+    const renamesOut: Record<string, Record<string, string>> = {};
+    for (const t of analysis.tables) {
+      if ((picks[t.name]?.size ?? 0) === 0) continue;
+      const map: Record<string, string> = {};
+      for (const c of t.columns) {
+        if (c.reserved) map[c.name] = (renames[t.name]?.[c.name] ?? "").trim();
+      }
+      if (Object.keys(map).length) renamesOut[t.name] = map;
+    }
     const plan: ImportPlan = {
       tables: Object.fromEntries(
         Object.entries(picks)
           .filter(([, s]) => s.size > 0)
           .map(([t, s]) => [t, [...s]]),
       ),
+      renames: renamesOut,
       notes,
     };
     onConfirm(targetPath, plan);
@@ -162,6 +195,33 @@ export function ImportDialog({
                       );
                     })}
                   </div>
+                  {picked.size > 0 && t.columns.some((c) => c.reserved) && (
+                    <div className="space-y-1.5 border-t px-3 py-2.5">
+                      <p className="text-xs text-amber-400">
+                        Reserved <code className="text-foreground">anki_</code> prefix —
+                        rename to vectorize this table:
+                      </p>
+                      {t.columns
+                        .filter((c) => c.reserved)
+                        .map((c) => (
+                          <div key={c.name} className="flex items-center gap-2 text-sm">
+                            <span className="truncate font-mono text-xs text-muted-foreground">
+                              {c.name}
+                            </span>
+                            <span className="text-muted-foreground">→</span>
+                            <Input
+                              value={renames[t.name]?.[c.name] ?? ""}
+                              onChange={(e) => setRename(t.name, c.name, e.target.value)}
+                              placeholder="new name"
+                              className={cn(
+                                "h-7 flex-1",
+                                !isValidRename(t.name, c.name, t.columns) && "border-destructive",
+                              )}
+                            />
+                          </div>
+                        ))}
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -217,7 +277,7 @@ export function ImportDialog({
           <Button variant="ghost" onClick={onCancel}>
             Cancel
           </Button>
-          <Button onClick={submit} disabled={!safeName || collision}>
+          <Button onClick={submit} disabled={!safeName || collision || !renamesResolved}>
             {totalPicks === 0 ? "Import" : "Rebuild & Vectorize"}
           </Button>
         </DialogFooter>
