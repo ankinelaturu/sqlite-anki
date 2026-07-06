@@ -29,7 +29,7 @@ we hit, the reversals, and the small stuff too.
 The initial commit stakes the whole thesis: semantic search where the embedding model runs
 *inside* SQLite (Rust compiled to WASM), so there's no embedding API, no service, and no
 JavaScript on the query hot path. `WHERE col MATCH 'text'` should feel like a native SQL
-capability. Everything after this is in service of that bet. (Spec: [DESIGN.md](./DESIGN.md).)
+capability. Everything after this is in service of that bet. (Spec: [DESIGN.md](docs/DESIGN.md).)
 
 ## Writing the spec (and rewriting it, and rewriting it)
 
@@ -121,7 +121,7 @@ index built?" question returns in July.)
 A pivot. Bundling the ONNX weights made the wasm enormous, so the model became a **runtime**
 artifact: the wasm links a full ONNX engine but *no weights*; the model is fetched by id or
 URL/bytes, cached in OPFS, and handed to the extension at load. The embedding *dimension* becomes
-a property of the loaded model, not a constant. (See [dynamic-model-loading.md](./dynamic-model-loading.md).)
+a property of the loaded model, not a constant. (See [dynamic-model-loading.md](docs/dynamic-model-loading.md).)
 
 ## Packaging + the e2e harness
 `Jun 25, 2026` · `77d18c0`
@@ -134,7 +134,7 @@ real wasm + real model under Node — the e2e layer that would gate every change
 
 Relational `WHERE` + semantic `MATCH` in one statement, with a pre-filter: rank only the rows
 passing the filter instead of ranking everything and filtering after (which drops matches off the
-similarity "cliff"). The first cut of a long correctness saga. (See [hybrid-filtering.md](./hybrid-filtering.md).)
+similarity "cliff"). The first cut of a long correctness saga. (See [hybrid-filtering.md](docs/hybrid-filtering.md).)
 
 ## Documenting the vtab lifecycle in the code
 `Jun 25, 2026` · `c0efce3`
@@ -146,13 +146,13 @@ because "explain the C ABI contract in the source" became a standing convention.
 `Jun 25, 2026` · `af3a6e9`
 
 A per-query strategy knob: `/exact` vs `/hnsw:N`, parsed from the MATCH string. Small syntax, big
-control — and a surface we'd guard fiercely later. (See [match-dsl.md](./match-dsl.md).)
+control — and a surface we'd guard fiercely later. (See [match-dsl.md](docs/match-dsl.md).)
 
 ## `anki_metrics()`
 `Jun 25, 2026` · `cbb3090`
 
 Operation metrics + instrumentation so the cost of embedding vs search vs persist is observable,
-not guessed. (See [metrics.md](./metrics.md).)
+not guessed. (See [metrics.md](docs/metrics.md).)
 
 ## Explorer groundwork: deps + structure
 `Jun 25, 2026` · `de4ea38`
@@ -191,7 +191,7 @@ A rendered Markdown preview toggle for the notes editor. Small polish.
 `Jun 26, 2026` · `2462a02`
 
 Built the wasm with `+simd128`, roughly doubling embedding throughput — the single biggest cheap
-perf win. (See [our-findings.md](./our-findings.md).)
+perf win. (See [our-findings.md](docs/our-findings.md).)
 
 ## The demo database
 
@@ -260,7 +260,7 @@ Refined the log (timings, token counts, reset semantics) before putting it to us
 ## Engines, threads & the performance investigation
 
 One coherent investigation into how fast and how small the wasm could be — which engine, whether
-threads help, and where the compute was actually going. It produced [our-findings.md](./our-findings.md)
+threads help, and where the compute was actually going. It produced [our-findings.md](docs/our-findings.md)
 and, in the middle of it, an embarrassing discovery and its fix.
 
 ### Make tract-st the real build target
@@ -321,7 +321,7 @@ informative.
 `Jun 27, 2026` · `54981de`
 
 Renamed the variants to `[engine]-[format]-[threads]` and reserved `candle-native` — now that there
-were several, they needed a scheme. (See [build-variants.md](./build-variants.md).)
+were several, they needed a scheme. (See [build-variants.md](docs/build-variants.md).)
 
 ## Renaming artifacts to sqlite-anki_*
 `Jun 27, 2026` · `75fd2be`
@@ -398,7 +398,7 @@ vendored SQLite tree's read-only files meeting a fresh CI checkout.
 Hardened the pre-filter to be collation-aware and to compare integers vs reals *exactly* (no
 `as f64` precision loss past 2^53). The pre-filter's second life — and the hand-rolled comparison
 logic it introduces is exactly what the July streaming redesign later *deletes* in favour of letting
-SQLite compare. (See [query-planning.md](./query-planning.md).)
+SQLite compare. (See [query-planning.md](docs/query-planning.md).)
 
 ## CI: test before deploying
 `Jun 29, 2026` · `58bde81`
@@ -443,7 +443,7 @@ workaround — encoding the desired end-state.
 ## The Design Choices doc
 `Jun 29, 2026` · `079a9ab`
 
-Added [design-choices.md](./design-choices.md) — rationale for the key decisions, explained on their
+Added [design-choices.md](docs/design-choices.md) — rationale for the key decisions, explained on their
 own terms (deliberately *not* framed against FTS5 or sqlite-vec).
 
 ## Revisiting similarity(): the `<col>_score` column
@@ -509,11 +509,11 @@ This session's big arc. Working through the vtab's memory use, we realized it *m
 entire table* — all columns and embeddings — into WASM linear memory at open (~2 GB cap); for a
 20-column table with one vector column, 19/20 of the row data sits in RAM for nothing. We weighed
 sqlite-vec's brute-force-from-disk model, chose to *keep* HNSW (and the `/exact` `/hnsw` DSL) but
-*stream the storage*, and shipped it as five green commits. (Design: [streaming-storage.md](./streaming-storage.md).)
+*stream the storage*, and shipped it as five green commits. (Design: [streaming-storage.md](docs/streaming-storage.md).)
 
 ### The design
 `Jul 05, 2026` · `b23aeff`
-Wrote up the problem, the alternatives, and the plan in [streaming-storage.md](./streaming-storage.md).
+Wrote up the problem, the alternatives, and the plan in [streaming-storage.md](docs/streaming-storage.md).
 
 ### Sharpen the correctness argument
 `Jul 05, 2026` · `efe0262`
@@ -556,7 +556,7 @@ Consolidating what we deferred, then sharpening it after a good question.
 `Jul 05, 2026` · `ac6d334`
 Consolidated the follow-ups that surfaced along the way (HNSW incremental insert, persist the graph,
 int8 quantization, streaming the embeddings too, a session-level embedding cache, `omit=1`, indexing
-filtered columns, the "rebuild required" UI, and the Import gaps). (See [TODO.md](./TODO.md).)
+filtered columns, the "rebuild required" UI, and the Import gaps). (See [TODO.md](docs/TODO.md).)
 
 ### Revisiting: what import really drops
 `Jul 05, 2026` · `f461ecf`
@@ -567,7 +567,7 @@ enforcement is off by default in browser SQLite anyway.
 ## A CHANGELOG
 `Jul 05, 2026` · `e4101bb`
 
-Added [CHANGELOG.md](../CHANGELOG.md) — the terse, date-sectioned ledger, curated from this same
+Added [CHANGELOG.md](CHANGELOG.md) — the terse, date-sectioned ledger, curated from this same
 history. The companion to this narrative.
 
 ## This document
