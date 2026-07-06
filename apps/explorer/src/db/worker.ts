@@ -266,6 +266,7 @@ class AnkiWorker implements AnkiWorkerApi {
       onProgress(0, total);
 
       // Tables first (views may reference them).
+      const plainTables = new Set<string>(); // tables copied as plain SQLite tables
       for (const t of schema.filter((t) => t.type === "table")) {
         const picks = new Set(plan.tables[t.name] ?? []);
         const colNames = t.columns.map((c) => c.name);
@@ -285,11 +286,30 @@ class AnkiWorker implements AnkiWorkerApi {
           }
         } else {
           dst.exec(t.sql); // original CREATE TABLE — constraints preserved
+          plainTables.add(t.name);
           dst.exec("BEGIN");
           for (const row of rows) insertObjectRow(dst, t.name, colNames, row);
           dst.exec("COMMIT");
         }
       }
+
+      // Replay CREATE INDEX for plain-copied tables (after data, so each index is
+      // built once). Vectorized tables became anki virtual tables, which SQLite
+      // won't let you index, so their source indexes are necessarily dropped.
+      // Auto-indexes from PK/UNIQUE have sql=NULL and already rode along with the
+      // CREATE TABLE, so filtering on `sql IS NOT NULL` skips them.
+      const indexes = src.selectObjects(
+        `SELECT tbl_name, sql FROM sqlite_master WHERE type = 'index' AND sql IS NOT NULL`,
+      ) as Array<{ tbl_name: string; sql: string }>;
+      for (const ix of indexes) {
+        if (!plainTables.has(ix.tbl_name)) continue;
+        try {
+          dst.exec(ix.sql);
+        } catch {
+          /* skip an index we can't recreate */
+        }
+      }
+
       // Views after their tables exist.
       for (const v of schema.filter((t) => t.type === "view")) {
         try {
@@ -620,8 +640,9 @@ ${plan.notes.trim() ? `${plan.notes.trim()}\n\n` : ""}## Tables
 | --- | --- | --- |
 ${rows.join("\n")}
 
-> Rebuilt from an uploaded SQLite file. Indexes, triggers, and foreign-key
-> constraints from the original are not reproduced.
+> Rebuilt from an uploaded SQLite file. Plain-copied tables keep their original
+> schema and indexes; vectorized tables became \`anki\` virtual tables, which can't
+> carry indexes, triggers, or table constraints. Triggers are not reproduced.
 `;
 }
 
