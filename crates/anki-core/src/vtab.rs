@@ -310,8 +310,10 @@ struct ColumnDef {
     is_vector: bool,
 }
 
+/// The only per-row state held in RAM: the embeddings (for cosine + the HNSW
+/// index). User column data lives in the shadow table and is read on demand by
+/// `xColumn`. See docs/streaming-storage.md.
 struct Row {
-    cells: Vec<Cell>,
     /// Per-column embedding; `None` for non-vector columns or NULL/empty text.
     embeddings: Vec<Option<Vec<f32>>>,
 }
@@ -1033,7 +1035,12 @@ unsafe fn load_all(st: &mut TableState) {
     st.next_rowid = 1;
     st.dirty = false;
     st.index_dirty = true;
-    let cols = data_columns(st.ncol, &st.vector_cols);
+    // Only rowid + embeddings are held in RAM; user column data stays on disk and
+    // is read on demand by xColumn. The SELECT fetches `id, e{vi}…` (no c{i}).
+    let mut cols = vec!["id".to_string()];
+    for vi in &st.vector_cols {
+        cols.push(format!("e{vi}"));
+    }
     let sql = format!("SELECT {} FROM {} ORDER BY id", cols.join(", "), st.data_table);
     let csql = match CString::new(sql) {
         Ok(c) => c,
@@ -1046,13 +1053,10 @@ unsafe fn load_all(st: &mut TableState) {
 
     while sqlite3_step(stmt) == SQLITE_ROW {
         let rowid = sqlite3_column_int64(stmt, 0);
-        let mut cells = Vec::with_capacity(st.ncol);
-        for i in 0..st.ncol {
-            cells.push(column_to_cell(stmt, (1 + i) as c_int));
-        }
+        // Embedding columns follow `id`, one per vector column, in vector_cols order.
         let mut embeddings: Vec<Option<Vec<f32>>> = vec![None; st.ncol];
         for (k, &vi) in st.vector_cols.iter().enumerate() {
-            let idx = (1 + st.ncol + k) as c_int;
+            let idx = (1 + k) as c_int;
             if sqlite3_column_type(stmt, idx) == SQLITE_BLOB {
                 let n = sqlite3_column_bytes(stmt, idx);
                 let p = sqlite3_column_blob(stmt, idx) as *const u8;
@@ -1065,7 +1069,7 @@ unsafe fn load_all(st: &mut TableState) {
         if rowid >= st.next_rowid {
             st.next_rowid = rowid + 1;
         }
-        st.rows.insert(rowid, Row { cells, embeddings });
+        st.rows.insert(rowid, Row { embeddings });
     }
     sqlite3_finalize(stmt);
 }
@@ -1847,8 +1851,10 @@ unsafe extern "C" fn x_update(
         }
     }
 
-    // Update the in-memory cache and bookkeeping (index rebuilt lazily on query).
-    st.rows.insert(rowid, Row { cells, embeddings });
+    // Cache only the embeddings + bookkeeping (index rebuilt lazily on query). The
+    // user column values (`cells`) were just written to the shadow table by
+    // persist_row and are served from there on read — not cached in RAM.
+    st.rows.insert(rowid, Row { embeddings });
     if rowid >= st.next_rowid {
         st.next_rowid = rowid + 1;
     }

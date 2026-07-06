@@ -178,6 +178,29 @@ test("xColumn reflects declared affinity (text '42' into INTEGER → 42)", async
   }
 });
 
+// Only rowid + embeddings live in RAM now; user column data is served from the
+// shadow table. A large non-vector column round-trips intact while a MATCH (which
+// uses the in-RAM embeddings) selects the row — RAM search + on-disk columns combine.
+test("large non-vector column round-trips from disk alongside MATCH", async () => {
+  const db = new sqlite3.oo1.DB(":memory:");
+  try {
+    db.exec(`CREATE VIRTUAL TABLE docs USING anki(payload TEXT, body TEXT VECTOR);`);
+    const big = "x".repeat(20000); // well beyond any inline threshold
+    db.exec({
+      sql: `INSERT INTO docs(payload, body) VALUES (?, ?)`,
+      bind: [big, "database hosting in the cloud"],
+    });
+    const row = db.selectObjects(
+      `SELECT payload, round(body_score, 3) AS score FROM docs
+       WHERE body MATCH 'managed cloud database' ORDER BY score DESC`
+    )[0];
+    assert.equal(row.payload, big, "large payload intact from disk");
+    assert.ok(row.score >= 0.5, "matched via in-RAM embedding");
+  } finally {
+    db.close();
+  }
+});
+
 // Writes keep embeddings current: a DELETE drops the row from future searches,
 // and an UPDATE re-embeds the new text (so a row can become the top match for a
 // query it previously didn't match).
