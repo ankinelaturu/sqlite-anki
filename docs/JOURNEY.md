@@ -4,7 +4,10 @@
 JavaScript on the query path: declare a column `TEXT VECTOR`, and search it by meaning.
 
 ```sql
-CREATE VIRTUAL TABLE docs USING anki(title TEXT, body TEXT VECTOR);
+CREATE VIRTUAL TABLE docs USING anki(
+  title TEXT, 
+  body TEXT VECTOR -- The vector column
+);
 
 INSERT INTO docs(title, body) VALUES
   ('Acme renewal', 'the enterprise contract is up for renewal next quarter');
