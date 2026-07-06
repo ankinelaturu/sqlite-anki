@@ -6,7 +6,7 @@ JavaScript on the query path: declare a column `TEXT VECTOR`, and search it by m
 ```sql
 CREATE VIRTUAL TABLE docs USING anki(
   title TEXT, 
-  body TEXT VECTOR -- The vector column
+  body TEXT VECTOR -- the vector column
 );
 
 INSERT INTO docs(title, body) VALUES
@@ -14,7 +14,7 @@ INSERT INTO docs(title, body) VALUES
 
 SELECT title, round(body_score, 3) AS score
 FROM docs
-WHERE body MATCH 'contract renewal'
+WHERE body MATCH 'contract renewal' -- the semantic search
 ORDER BY score DESC;
 ```
 
