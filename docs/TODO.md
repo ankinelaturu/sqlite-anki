@@ -50,6 +50,25 @@ The streaming redesign (see `streaming-storage.md`, shipped) already cut RAM to
   actually fixable — the rest are inherent vtab limits.)
 - **Per-import model switching** — currently one model per session.
 
+## Future direction: native CLI + faithful (companion) import
+A native macOS/Windows **CLI** reusing `anki-core` + the `anki` vtab (link into a native
+SQLite build — see the reserved `candle-native` variant). Its "vectorize an existing DB"
+feature makes import a serious tool on real, possibly write-heavy DBs — where silently
+dropping a vectorized table's indexes/triggers/constraints is a real footgun.
+
+- **Companion-table import strategy.** Instead of transforming a constraint-heavy table into
+  a vtab (losing its indexes/triggers/constraints), keep it **plain** and add a **companion**
+  `anki` table (`USING anki(<pk> INTEGER, <text> TEXT VECTOR)`) kept in sync by **triggers on
+  the plain table** (allowed — only triggers *on* a vtab are forbidden). Search joins back to
+  the original. Zero fidelity loss; the import tool auto-generates the companion + triggers.
+  Needs **no vtab changes**. Offer two strategies: *in-place* (current, simple) vs *companion*
+  (faithful, default for constraint-heavy tables).
+- **Framing:** greenfield (new table) stays a single `USING anki` table — simpler than the
+  hand-rolled companion+vectors pattern other extensions require. The companion strategy is
+  only for *retrofitting* existing tables, where it's the same structure done for you.
+- **Dialog transparency** (near-term, explorer): until the companion strategy exists, warn in
+  ImportDialog which indexes/triggers/constraints a table loses when you tick it to vectorize.
+
 ## Related design docs
 - `streaming-storage.md` — the shipped WASM-RAM redesign; §correctness + open questions
   cover `omit=1`, indexing, and Option B in more depth.
