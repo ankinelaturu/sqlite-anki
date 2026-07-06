@@ -68,6 +68,19 @@ dropping a vectorized table's indexes/triggers/constraints is a real footgun.
   only for *retrofitting* existing tables, where it's the same structure done for you.
 - **Dialog transparency** (near-term, explorer): until the companion strategy exists, warn in
   ImportDialog which indexes/triggers/constraints a table loses when you tick it to vectorize.
+- **Constraint pushdown onto the shadow table.** The shadow table is a real table and every vtab
+  write flows through it, so a constraint declared there actually enforces on the vtab. Recover
+  **UNIQUE** (unique index), **NOT NULL**, **CHECK** (needs expr rewrite unless columns are
+  named), **DEFAULT** (in the declared vtab schema), and **index speed** (index on the shadow
+  column — same as the query-perf "index filtered shadow columns" item). **FK and triggers can't**
+  be recovered cleanly (FK cascades / triggers modify the shadow behind the vtab and desync its
+  in-RAM cache) → those need the companion strategy.
+- **Real column names via an `anki_` prefix** (storage-format v3). Namespace the internal columns
+  (`anki_id`, `anki_emb_N`) and reserve the `anki_` prefix so shadow *data* columns can use their
+  real names instead of positional `c{i}`. Payoff: readable storage, no CHECK-expression
+  rewriting, clean error messages, easier constraint pushdown. Resolution for a user column named
+  `anki_*`: greenfield → hard error at `xCreate`; import → interactive rename in ImportDialog,
+  block rebuild until resolved (only affects *vectorized* tables). Bundle with constraint pushdown.
 
 ## Related design docs
 - `streaming-storage.md` — the shipped WASM-RAM redesign; §correctness + open questions
