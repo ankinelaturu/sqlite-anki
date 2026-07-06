@@ -319,6 +319,26 @@ class AnkiWorker implements AnkiWorkerApi {
         }
       }
 
+      // Replay CREATE TRIGGER last — after all data, tables, and views exist, so a
+      // trigger neither fires on the copied rows nor references a missing target.
+      // Triggers on plain tables and views (INSTEAD OF) are replayed; SQLite forbids
+      // triggers on virtual tables, so triggers on vectorized tables are dropped.
+      const triggerTargets = new Set<string>([
+        ...plainTables,
+        ...schema.filter((t) => t.type === "view").map((t) => t.name),
+      ]);
+      const triggers = src.selectObjects(
+        `SELECT tbl_name, sql FROM sqlite_master WHERE type = 'trigger' AND sql IS NOT NULL`,
+      ) as Array<{ tbl_name: string; sql: string }>;
+      for (const tr of triggers) {
+        if (!triggerTargets.has(tr.tbl_name)) continue;
+        try {
+          dst.exec(tr.sql);
+        } catch {
+          /* skip a trigger we can't recreate */
+        }
+      }
+
       await writeSidecar(notesName(targetPath), importNotes(targetPath, plan, schema));
       await writeSidecar(queryName(targetPath), importQuery(plan, schema));
       this.dumpEmbedLog();
@@ -641,8 +661,8 @@ ${plan.notes.trim() ? `${plan.notes.trim()}\n\n` : ""}## Tables
 ${rows.join("\n")}
 
 > Rebuilt from an uploaded SQLite file. Plain-copied tables keep their original
-> schema and indexes; vectorized tables became \`anki\` virtual tables, which can't
-> carry indexes, triggers, or table constraints. Triggers are not reproduced.
+> schema, indexes, and triggers; vectorized tables became \`anki\` virtual tables,
+> which can't carry indexes, triggers, or table constraints.
 `;
 }
 

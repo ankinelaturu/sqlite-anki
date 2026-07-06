@@ -41,11 +41,13 @@ The streaming redesign (see `streaming-storage.md`, shipped) already cut RAM to
   Vectorized tables became `anki` virtual tables, which SQLite won't let you index, so
   their source indexes are necessarily dropped (unavoidable). Data, JOINs, and plain-table
   DDL (PK/FK/UNIQUE/CHECK/DEFAULT) were already preserved.
-- **Triggers on import** — not yet reproduced; same mechanism as index replay (read
-  `type='trigger'` from `sqlite_master`, replay for plain tables; SQLite forbids triggers
-  on virtual tables).
+- **Trigger replay — DONE (2026-07-05).** `rebuildImport` replays `CREATE TRIGGER` from
+  `sqlite_master` for plain tables and views (INSTEAD OF) — created *last*, after all data,
+  so a trigger neither fires on the copied rows nor references a missing target. SQLite
+  forbids triggers on virtual tables, so triggers on vectorized tables are dropped.
 - **Dialog transparency** — warn in ImportDialog which indexes/triggers/constraints a table
-  will lose when you tick it to vectorize.
+  will lose when you tick it to vectorize. (Now the only remaining import-fidelity gap that's
+  actually fixable — the rest are inherent vtab limits.)
 - **Per-import model switching** — currently one model per session.
 
 ## Related design docs
