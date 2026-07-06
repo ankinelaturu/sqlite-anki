@@ -367,6 +367,23 @@ struct AnkiCursor {
     row_cache_id: i64,
     /// The cached user-column cells for `row_cache_id`, in declared column order.
     row_cells: Vec<Cell>,
+    /// Query-embedding cache `(col, match text) -> embedding`, reused across the
+    /// repeated `xFilter` calls a join makes (one per outer row, same MATCH text),
+    /// so the (dominant) embedding cost is paid once per distinct query.
+    q_cache: Vec<(usize, String, Vec<f32>)>,
+}
+
+impl AnkiCursor {
+    /// Embeds `text` for `col`, reusing a prior embedding of the same query on this
+    /// cursor (see `q_cache`). `None` only when the text embeds to nothing.
+    fn embed_cached(&mut self, col: usize, text: &str) -> Option<Vec<f32>> {
+        if let Some((_, _, emb)) = self.q_cache.iter().find(|(c, t, _)| *c == col && t == text) {
+            return Some(emb.clone());
+        }
+        let emb = embed_text(text)?;
+        self.q_cache.push((col, text.to_string(), emb.clone()));
+        Some(emb)
+    }
 }
 
 // --- helpers -----------------------------------------------------------------
@@ -1478,6 +1495,7 @@ unsafe extern "C" fn x_open(vtab: *mut sqlite3_vtab, pp: *mut *mut sqlite3_vtab_
         row_stmt: ptr::null_mut(),
         row_cache_id: 0,
         row_cells: Vec::new(),
+        q_cache: Vec::new(),
     }));
     *pp = cur as *mut sqlite3_vtab_cursor;
     SQLITE_OK
@@ -1565,7 +1583,7 @@ unsafe extern "C" fn x_filter(
                     break;
                 }
             };
-            match embed_text(&mq.query) {
+            match c.embed_cached(*col, &mq.query) {
                 Some(q) => queries.push(MatchQ {
                     col: *col,
                     q,
