@@ -36,7 +36,15 @@ The streaming redesign (see `streaming-storage.md`, shipped) already cut RAM to
   (Import & Vectorize / re-populate demo).
 
 ## Import & Vectorize
-- **Reproduce source indexes / triggers / FK constraints** on import (currently dropped).
+- **Reproduce source indexes (and triggers) on import.** Already fine: data, JOINs, and
+  *plain-copied* tables' full DDL (PK/FK/UNIQUE/CHECK/DEFAULT — recreated from the source
+  `CREATE TABLE`). Actually dropped: secondary **indexes** on all tables (`CREATE INDEX`
+  isn't copied → a *performance* loss, correctness unaffected — **the real gap**);
+  **triggers**; and constraints on *vectorized* tables only (the anki vtab can't hold
+  PK/FK/etc.). FK *enforcement* is off by default in browser SQLite, so dropped FKs change
+  no query behavior. Fix: replay `CREATE INDEX` from `sqlite_master` (for vectorized
+  tables, on the shadow `*_data` table — ties into "index filtered shadow columns");
+  optionally replay `CREATE TRIGGER` for plain tables.
 - **Per-import model switching** — currently one model per session.
 
 ## Related design docs
