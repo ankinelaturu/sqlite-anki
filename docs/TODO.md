@@ -78,6 +78,15 @@ already bumped to v4), so it's written against a stable format instead of revise
   / "pre-bundled per WASM package" model delivery (now runtime-fetched + OPFS-cached, see
   `dynamic-model-loading.md`), and other v1 assumptions. Reconcile it with shipped reality (or split the
   historical spec from the current-state docs). **Docs only, low priority.**
+- **Real shadow-table protection (`xShadowName` + `SQLITE_DBCONFIG_DEFENSIVE`).** The shadow tables
+  (`<name>_anki`, `<name>_anki_graph`, `anki_meta`) are ordinary tables today — any SQL can read *and
+  write* them, and a direct write can corrupt vtab invariants (embeddings out of sync, a stale graph).
+  Set the module's `xShadowName` and enable defensive mode so **direct writes are blocked while reads
+  stay open** (the `anki_graph_json`/`anki_graph_dot` exports and the explorer's read-only schema view
+  keep working; reads are open by design). **Verify our own writes survive:** the extension writes these
+  tables via SQL in `xUpdate`/`xSync` — confirm defensive mode treats those as vtab-internal (FTS5 works
+  under it, but our write path differs) before shipping. Currently the tables are only hidden
+  cosmetically by the explorer's schema filter, not protected.
 
 ## Won't do
 - **`omit=1` for proven filters.** Pushed filters use `omit=0` so SQLite re-checks (redundant in the

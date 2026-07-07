@@ -214,9 +214,14 @@ stays single-sourced (no hand-written JS parser to drift):
     "edges": [ { "a": 0, "b": 1, "layer": 0 }, … ] }
   ```
 
-  `node` is the compact internal index; `rowid` **joins back to the table** for a label
-  (the functions return topology only — the app supplies text via
-  `SELECT … FROM <table>_anki WHERE anki_id = ?`). Edges are undirected, de-duplicated
+  `node` is the compact internal index; `rowid` **joins back to the table** for a label.
+  The functions return topology only — the app supplies text from the **public vtab**, not
+  the internal shadow: the graph `rowid` is exactly the vtab's `rowid`, so a single
+  `SELECT rowid, <cols> FROM <table>` scan builds a rowid→label map for the whole graph.
+  (Prefer that one scan over per-node `WHERE rowid = ?` lookups: the vtab doesn't
+  PK-optimize a rowid constraint, so N point lookups scan N times. The shadow's
+  `anki_id` *is* a real primary key if you ever need fast point lookups, but reading the
+  shadow means reaching past the public interface.) Edges are undirected, de-duplicated
   per layer.
 
 - **`anki_graph_dot(table, col)`** → Graphviz DOT (node label = rowid, entry emphasized,

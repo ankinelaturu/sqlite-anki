@@ -82,11 +82,14 @@ test("labels come from the app via a JOIN on rowid", () => {
   try {
     seeded(db);
     const g = JSON.parse(db.selectValue(`SELECT anki_graph_json('t','abcd')`));
-    // Resolve the entry node's rowid → its text, the way the explorer would.
+    // Resolve rowids → text via the PUBLIC vtab (graph rowid == vtab rowid), the
+    // way the explorer should — one scan builds the whole label map.
+    const labels = new Map(
+      db.selectObjects(`SELECT rowid, abcd FROM t`).map((r) => [r.rowid, r.abcd]),
+    );
     const entryRow = g.nodes.find((n) => n.node === g.entry);
-    const text = db.selectValue(`SELECT abcd FROM t_anki WHERE anki_id = ?`, [entryRow.rowid]);
-    assert.equal(typeof text, "string");
-    assert.ok(text.length > 0, "rowid joins back to the row text");
+    assert.ok(labels.has(entryRow.rowid), "entry rowid resolves against the public table");
+    assert.ok(labels.get(entryRow.rowid).length > 0, "rowid joins back to the row text");
   } finally {
     db.close();
   }
