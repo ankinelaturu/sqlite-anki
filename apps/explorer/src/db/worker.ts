@@ -14,6 +14,7 @@ import {
   type ColumnInfo,
   type ImportAnalysis,
   type ImportColumn,
+  type ImportDrops,
   type ImportPlan,
   type ImportTable,
   type InitResult,
@@ -210,6 +211,7 @@ class AnkiWorker implements AnkiWorkerApi {
         isView: t.type === "view",
         rowCount: t.type === "view" ? 0 : rowCountOf(db, t.name),
         columns: t.columns,
+        drops: t.drops,
       }));
       return { tables };
     } finally {
@@ -567,6 +569,54 @@ interface SourceObject {
   sql: string;
   type: string; // 'table' | 'view'
   columns: ImportColumn[];
+  drops: ImportDrops;
+}
+
+const NO_DROPS: ImportDrops = {
+  indexes: 0,
+  triggers: 0,
+  foreignKeys: 0,
+  hasCheck: false,
+  defaults: [],
+  multiColUnique: 0,
+};
+
+/**
+ * Schema objects a table would lose if vectorized (it becomes an `anki` vtab):
+ * explicit indexes, triggers, foreign keys, a `CHECK` constraint, `DEFAULT`s, and
+ * multi-column `UNIQUE`/`PK`. Drives the ImportDialog warning; see docs/limitations.md.
+ */
+function tableDrops(
+  db: Db,
+  table: string,
+  sql: string,
+  info: Array<{ name: string; dflt_value: unknown }>,
+): ImportDrops {
+  const count = (q: string): number =>
+    Number(
+      db.selectValue(q, [table]) as number | bigint | null | undefined,
+    ) || 0;
+  const indexes = count(
+    `SELECT count(*) FROM sqlite_master WHERE type='index' AND tbl_name=? AND sql IS NOT NULL`,
+  );
+  const triggers = count(
+    `SELECT count(*) FROM sqlite_master WHERE type='trigger' AND tbl_name=?`,
+  );
+  const fkRows = db.selectObjects(
+    `PRAGMA foreign_key_list(${quote(table)})`,
+  ) as Array<{ id: number }>;
+  const foreignKeys = new Set(fkRows.map((r) => r.id)).size;
+  const defaults = info.filter((c) => c.dflt_value != null).map((c) => String(c.name));
+  let multiColUnique = 0;
+  for (const ix of db.selectObjects(`PRAGMA index_list(${quote(table)})`) as Array<{
+    name: string;
+    unique: number;
+  }>) {
+    if (Number(ix.unique) !== 1) continue;
+    const parts = db.selectObjects(`PRAGMA index_info(${quote(ix.name)})`);
+    if (parts.length > 1) multiColUnique++;
+  }
+  return { indexes, triggers, foreignKeys, hasCheck: /\bcheck\s*\(/i.test(sql), defaults, multiColUnique };
 }
 
 /** Whether a declared column type has TEXT affinity — a vectorize candidate. */
@@ -614,10 +664,15 @@ function sourceObjects(db: Db): SourceObject[] {
      ORDER BY type, name`,
   ) as Array<{ name: string; sql: string; type: string }>;
   return objs.map((o) => {
-    const info = db.selectObjects(
-      `PRAGMA table_info(${quote(o.name)})`,
-    ) as Array<{ name: string; type: string; notnull: number; pk: number }>;
-    const uniq = o.type === "table" ? uniqueColumns(db, String(o.name), info) : new Set<string>();
+    const info = db.selectObjects(`PRAGMA table_info(${quote(o.name)})`) as Array<{
+      name: string;
+      type: string;
+      notnull: number;
+      pk: number;
+      dflt_value: unknown;
+    }>;
+    const isTable = o.type === "table";
+    const uniq = isTable ? uniqueColumns(db, String(o.name), info) : new Set<string>();
     const columns: ImportColumn[] = info.map((c) => {
       const type = String(c.type ?? "");
       const name = String(c.name);
@@ -636,6 +691,7 @@ function sourceObjects(db: Db): SourceObject[] {
       sql: String(o.sql ?? ""),
       type: String(o.type),
       columns,
+      drops: isTable ? tableDrops(db, String(o.name), String(o.sql ?? ""), info) : NO_DROPS,
     };
   });
 }

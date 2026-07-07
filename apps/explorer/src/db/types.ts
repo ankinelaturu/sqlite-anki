@@ -67,12 +67,30 @@ export interface ImportColumn {
   unique: boolean;
 }
 
+/** Schema objects a table loses when it's vectorized into an `anki` virtual table. */
+export interface ImportDrops {
+  /** Explicit `CREATE INDEX` count (implicit constraint auto-indexes excluded). */
+  indexes: number;
+  /** Triggers defined on the table. */
+  triggers: number;
+  /** Foreign-key constraints. */
+  foreignKeys: number;
+  /** Table has a `CHECK` constraint (best-effort, from its DDL). */
+  hasCheck: boolean;
+  /** Columns with a `DEFAULT` (not applied on a vtab). */
+  defaults: string[];
+  /** Multi-column `UNIQUE`/`PRIMARY KEY` (can't be expressed per-column). */
+  multiColUnique: number;
+}
+
 /** One table or view discovered in an uploaded SQLite file. */
 export interface ImportTable {
   name: string;
   isView: boolean;
   rowCount: number;
   columns: ImportColumn[];
+  /** What this table would lose if vectorized (drives the dialog warning). */
+  drops: ImportDrops;
 }
 
 /** Result of inspecting an uploaded SQLite file's schema. */

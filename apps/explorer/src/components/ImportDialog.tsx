@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { Cpu, Database, Eye, FileUp, Sparkles, Table2 } from "lucide-react";
-import type { ImportAnalysis, ImportColumn, ImportPlan } from "@/db";
+import type { ImportAnalysis, ImportColumn, ImportDrops, ImportPlan } from "@/db";
 import {
   Dialog,
   DialogContent,
@@ -30,6 +30,18 @@ interface ImportDialogProps {
 
 /** `{ tableName: Set<pickedColumn> }` */
 type Picks = Record<string, Set<string>>;
+
+/** Human phrases for the schema objects a table loses when vectorized. */
+function dropPhrases(d: ImportDrops): string[] {
+  const p: string[] = [];
+  if (d.indexes) p.push(`${d.indexes} index${d.indexes > 1 ? "es" : ""}`);
+  if (d.triggers) p.push(`${d.triggers} trigger${d.triggers > 1 ? "s" : ""}`);
+  if (d.foreignKeys) p.push(`${d.foreignKeys} foreign key${d.foreignKeys > 1 ? "s" : ""}`);
+  if (d.multiColUnique) p.push(`${d.multiColUnique} multi-column UNIQUE`);
+  if (d.hasCheck) p.push("CHECK constraints");
+  if (d.defaults.length) p.push(`DEFAULT on ${d.defaults.join(", ")}`);
+  return p;
+}
 
 /**
  * The Import & Vectorize dialog: pick which text columns to embed per table,
@@ -220,6 +232,16 @@ export function ImportDialog({
                             />
                           </div>
                         ))}
+                    </div>
+                  )}
+                  {picked.size > 0 && dropPhrases(t.drops).length > 0 && (
+                    <div className="border-t px-3 py-2.5">
+                      <p className="text-xs text-amber-400">
+                        Vectorizing drops {dropPhrases(t.drops).join(", ")}.{" "}
+                        <span className="text-muted-foreground">
+                          NOT NULL and single-column UNIQUE are kept.
+                        </span>
+                      </p>
                     </div>
                   )}
                 </div>
