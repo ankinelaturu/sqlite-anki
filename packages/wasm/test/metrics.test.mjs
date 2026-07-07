@@ -26,6 +26,10 @@ test("anki_metrics() returns the documented JSON shape", () => {
     "persist_ms",
     "index_rebuild_ms",
     "index_rebuilds",
+    "graph_save_ms",
+    "graph_saves",
+    "graph_load_ms",
+    "graph_loads",
     "candidates",
     "rows_matched",
   ]) {

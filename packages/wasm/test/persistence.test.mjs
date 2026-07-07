@@ -49,6 +49,78 @@ test("rows + embeddings survive close/reopen (search works on reload)", () => {
   }
 });
 
+const metricsSnap = (sqlite3) =>
+  JSON.parse(sqlite3.wasm.cstrToJs(sqlite3.wasm.exports.anki_metrics()));
+
+// Roadmap #2: the built HNSW graph is persisted to `<name>_anki_graph` at commit,
+// so reopening reads it instead of paying a cold O(N) rebuild on the first MATCH.
+test("HNSW graph persists across reopen: first MATCH skips the rebuild", () => {
+  const path = "/graph-persist.db";
+  let db = new sqlite3.oo1.DB(path, "c");
+  db.exec(`CREATE VIRTUAL TABLE docs USING anki(notes TEXT VECTOR);`);
+  db.exec(`INSERT INTO docs(notes) VALUES
+    ('billing and invoice dispute'),('weather forecast tomorrow'),
+    ('refund request for an order'),('sunny skies and a warm wind');`);
+  // Build the in-RAM graph (first MATCH), then a write commits it to the cache.
+  db.selectObjects(`SELECT rowid FROM docs WHERE notes MATCH 'invoice'`);
+  db.exec(`INSERT INTO docs(notes) VALUES('payment overdue notice')`);
+  // The graph cache is a real shadow table we can observe directly.
+  const cached = db.selectValue(
+    `SELECT count(*) FROM "main"."docs_anki_graph" WHERE graph IS NOT NULL`,
+  );
+  db.close();
+  assert.equal(cached, 1, "one vector column's graph persisted to the cache");
+
+  const pre = metricsSnap(sqlite3);
+  db = new sqlite3.oo1.DB(path, "w"); // reopen -> xConnect loads the graph
+  try {
+    const rows = db.selectObjects(
+      `SELECT notes FROM docs WHERE notes MATCH 'invoice payment' ORDER BY notes_score DESC`,
+    );
+    const post = metricsSnap(sqlite3);
+    assert.ok(post.graph_loads - pre.graph_loads >= 1, "graph loaded from cache on reopen");
+    assert.equal(
+      post.index_rebuilds - pre.index_rebuilds,
+      0,
+      "first MATCH after reopen must not rebuild the index",
+    );
+    assert.ok(rows.length >= 1, "search still returns results from the loaded graph");
+    assert.match(rows[0].notes, /invoice|payment/, "top result is semantically right");
+  } finally {
+    db.close();
+  }
+});
+
+// Deletes are compacted out of the serialized graph, so a removed row stays gone
+// after reopen — and still without a rebuild.
+test("a deleted row stays gone after reopen (compacted graph, no rebuild)", () => {
+  const path = "/graph-persist-del.db";
+  let db = new sqlite3.oo1.DB(path, "c");
+  db.exec(`CREATE VIRTUAL TABLE docs USING anki(notes TEXT VECTOR);`);
+  db.exec(`INSERT INTO docs(notes) VALUES
+    ('alpha one two three'),('beta four five six'),
+    ('gamma seven eight nine'),('unique deletion sentinel phrase');`);
+  db.selectObjects(`SELECT rowid FROM docs WHERE notes MATCH 'alpha'`); // build graph
+  db.exec(`DELETE FROM docs WHERE notes = 'unique deletion sentinel phrase'`); // splice + persist
+  db.close();
+
+  const pre = metricsSnap(sqlite3);
+  db = new sqlite3.oo1.DB(path, "w");
+  try {
+    const rows = db.selectObjects(
+      `SELECT notes FROM docs WHERE notes MATCH 'unique deletion sentinel phrase'`,
+    );
+    const post = metricsSnap(sqlite3);
+    assert.equal(post.index_rebuilds - pre.index_rebuilds, 0, "no rebuild after reopen");
+    assert.ok(
+      rows.every((r) => r.notes !== "unique deletion sentinel phrase"),
+      "deleted row must not resurface from the persisted graph",
+    );
+  } finally {
+    db.close();
+  }
+});
+
 // DROP TABLE must not leak the backing store: xDestroy drops `<name>_anki` too.
 test("DROP TABLE removes the shadow table (xDestroy)", () => {
   const db = new sqlite3.oo1.DB(":memory:");
@@ -56,8 +128,10 @@ test("DROP TABLE removes the shadow table (xDestroy)", () => {
     db.exec(`CREATE VIRTUAL TABLE t USING anki(name TEXT, notes TEXT VECTOR);`);
     db.exec(`INSERT INTO t(name,notes) VALUES('a','hello world');`);
     assert.equal(db.selectValue(`SELECT count(*) FROM sqlite_master WHERE name='t_anki'`), 1);
+    assert.equal(db.selectValue(`SELECT count(*) FROM sqlite_master WHERE name='t_anki_graph'`), 1);
     db.exec(`DROP TABLE t`);
     assert.equal(db.selectValue(`SELECT count(*) FROM sqlite_master WHERE name='t_anki'`), 0);
+    assert.equal(db.selectValue(`SELECT count(*) FROM sqlite_master WHERE name='t_anki_graph'`), 0);
   } finally {
     db.close();
   }

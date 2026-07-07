@@ -18,7 +18,7 @@ use crate::match_query::{parse_match, Mode};
 use crate::metrics;
 use crate::{DEFAULT_SIMILARITY_THRESHOLD, HNSW_CANDIDATE_CAP};
 use core::cmp::Ordering;
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ffi::{CStr, CString};
 use std::mem::transmute;
 use std::os::raw::{c_char, c_int, c_void};
@@ -359,6 +359,11 @@ struct TableState {
     indexes: Vec<Option<Hnsw>>,
     /// Set on any write/reload: indexes are stale and rebuilt at the next `MATCH`.
     index_dirty: bool,
+    /// Quoted, db-qualified graph-cache table, e.g. `"main"."customers_anki_graph"`.
+    graph_table: String,
+    /// Set on any write: the persisted graph no longer matches committed data, so
+    /// the next `xSync` must re-persist (if the graph is live) or clear it.
+    graph_disk_stale: bool,
 }
 
 #[repr(C)]
@@ -689,8 +694,10 @@ unsafe fn set_err(pz_err: *mut *mut c_char, msg: &str) {
 /// the layout changes incompatibly; `x_connect` refuses to open an older format.
 /// v2 introduced typed shadow columns; v3 renamed the shadow table to `<name>_anki`,
 /// namespaced internal columns (`anki_id`, `anki_emb_<col>`), and stores data columns
-/// under their real names — see docs/streaming-storage.md.
-const STORAGE_FORMAT: u32 = 3;
+/// under their real names; v4 adds the `<name>_anki_graph` HNSW graph cache created at
+/// `xCreate` (so writes can persist the index without DDL at commit time) — see
+/// docs/streaming-storage.md.
+const STORAGE_FORMAT: u32 = 4;
 
 /// Quoted, db-qualified `anki_meta` table name (database-wide model metadata).
 fn meta_table_ident(db_name: &str) -> String {
@@ -883,6 +890,18 @@ fn data_table_ident(db_name: &str, table: &str) -> String {
         "{}.{}",
         quote_ident(db_name),
         quote_ident(&format!("{table}_anki"))
+    )
+}
+
+/// Quoted, db-qualified HNSW graph-cache table, e.g.
+/// `"main"."customers_anki_graph"`. Sits beside the `<name>_anki` data shadow
+/// (same `<vtabname>_*` shadow convention) and holds one serialized graph per
+/// vector column so open can read the index instead of rebuilding it.
+fn graph_table_ident(db_name: &str, table: &str) -> String {
+    format!(
+        "{}.{}",
+        quote_ident(db_name),
+        quote_ident(&format!("{table}_anki_graph"))
     )
 }
 
@@ -1237,7 +1256,10 @@ unsafe fn new_state(
         .filter_map(|(i, c)| if c.is_vector { Some(i) } else { None })
         .collect();
     let ncol = columns.len();
-    let data_table = data_table_ident(&arg_str(argv, 1), &arg_str(argv, 2));
+    let db_name = arg_str(argv, 1);
+    let table_name = arg_str(argv, 2);
+    let data_table = data_table_ident(&db_name, &table_name);
+    let graph_table = graph_table_ident(&db_name, &table_name);
 
     Some(Box::into_raw(Box::new(TableState {
         columns,
@@ -1250,6 +1272,8 @@ unsafe fn new_state(
         dirty: false,
         indexes: (0..ncol).map(|_| None).collect(),
         index_dirty: true,
+        graph_table,
+        graph_disk_stale: false,
     })))
 }
 
@@ -1302,6 +1326,157 @@ fn index_remove_row(st: &mut TableState, rowid: i64) {
             idx.remove(rowid);
         }
     }
+}
+
+/// Persists each column's live HNSW graph into the `<name>_anki_graph` shadow
+/// table so a later open can [`load_graphs`] instead of rebuilding. Writes one
+/// row per vector column (serialized topology, or NULL for an empty column),
+/// replacing any prior contents so the stored set stays all-or-nothing. Called
+/// from `xSync`, inside the committing transaction, so the graph is durable and
+/// rolled back atomically with the data it describes. Only the topology is
+/// stored — vectors are rehydrated from `anki_emb_<col>` on load.
+///
+/// Requires the indexes to be built and in sync (`!index_dirty`); the caller
+/// enforces that and otherwise [`clear_graphs`] instead.
+unsafe fn save_graphs(st: &mut TableState) -> c_int {
+    let t0 = metrics::now_ms();
+    // The table is created at xCreate (storage format v4), so xSync only does DML —
+    // running DDL inside the committing transaction would be unsafe.
+    if exec(st.db, &format!("DELETE FROM {}", st.graph_table)) != SQLITE_OK {
+        return SQLITE_ERROR;
+    }
+
+    let sql = format!(
+        "INSERT INTO {}(col, graph) VALUES(?, ?)",
+        st.graph_table
+    );
+    for k in 0..st.vector_cols.len() {
+        let ci = st.vector_cols[k];
+        let name = st.columns[ci].name.clone();
+        let blob = st.indexes[ci].as_ref().and_then(|idx| idx.serialize());
+
+        let csql = match CString::new(sql.clone()) {
+            Ok(c) => c,
+            Err(_) => return SQLITE_ERROR,
+        };
+        let mut stmt: *mut sqlite3_stmt = ptr::null_mut();
+        if sqlite3_prepare_v2(st.db, csql.as_ptr(), -1, &mut stmt, ptr::null_mut()) != SQLITE_OK {
+            return SQLITE_ERROR;
+        }
+        sqlite3_bind_text(
+            stmt,
+            1,
+            name.as_ptr() as *const c_char,
+            name.len() as c_int,
+            transient(),
+        );
+        match &blob {
+            Some(b) => {
+                sqlite3_bind_blob(
+                    stmt,
+                    2,
+                    b.as_ptr() as *const c_void,
+                    b.len() as c_int,
+                    transient(),
+                );
+            }
+            None => {
+                sqlite3_bind_null(stmt, 2);
+            }
+        }
+        let rc = finish_write(stmt);
+        if rc != SQLITE_OK {
+            return rc;
+        }
+    }
+    metrics::record_graph_save(metrics::now_ms() - t0);
+    SQLITE_OK
+}
+
+/// Drops any persisted graph, so the next open rebuilds from scratch. Called from
+/// `xSync` when a write happened but no live graph is available to persist —
+/// keeping the invariant that the stored graph, if present, matches committed
+/// data.
+unsafe fn clear_graphs(st: &TableState) {
+    // If the table was never created there is nothing to clear (and the DELETE
+    // would error): guard with IF EXISTS-style tolerance by ignoring failure.
+    let _ = exec(st.db, &format!("DELETE FROM {}", st.graph_table));
+}
+
+/// Loads a persisted graph for every vector column, rehydrating vectors from the
+/// in-RAM cache (populated by `load_all`). Returns `true` only if the store has
+/// a row for **each** vector column and all deserialize — an all-or-nothing load
+/// mirroring [`save_graphs`]. On `true` the caller installs the indexes and skips
+/// the rebuild; on `false` nothing is changed and the usual rebuild-on-first-
+/// `MATCH` path applies. A missing table, stale/corrupt blob, or a referenced
+/// rowid whose vector is gone all yield `false`, never an error.
+unsafe fn load_graphs(st: &mut TableState) -> bool {
+    let t0 = metrics::now_ms();
+    let sql = format!("SELECT col, graph FROM {}", st.graph_table);
+    let csql = match CString::new(sql) {
+        Ok(c) => c,
+        Err(_) => return false,
+    };
+    let mut stmt: *mut sqlite3_stmt = ptr::null_mut();
+    // A missing graph table makes prepare fail — treated as "no persisted graph".
+    if sqlite3_prepare_v2(st.db, csql.as_ptr(), -1, &mut stmt, ptr::null_mut()) != SQLITE_OK {
+        return false;
+    }
+    // col name -> serialized blob (`None` for a NULL = legitimately empty column).
+    let mut stored: HashMap<String, Option<Vec<u8>>> = HashMap::new();
+    while sqlite3_step(stmt) == SQLITE_ROW {
+        let name = match column_to_cell(stmt, 0) {
+            Cell::Text(s) => s,
+            _ => {
+                sqlite3_finalize(stmt);
+                return false;
+            }
+        };
+        let blob = if sqlite3_column_type(stmt, 1) == SQLITE_BLOB {
+            let n = sqlite3_column_bytes(stmt, 1);
+            let p = sqlite3_column_blob(stmt, 1) as *const u8;
+            if p.is_null() || n <= 0 {
+                Some(Vec::new())
+            } else {
+                Some(slice::from_raw_parts(p, n as usize).to_vec())
+            }
+        } else {
+            None // NULL → empty column
+        };
+        stored.insert(name, blob);
+    }
+    sqlite3_finalize(stmt);
+
+    // Build the indexes locally first; only commit them to `st` on full success.
+    let mut new_indexes: Vec<Option<Hnsw>> = (0..st.ncol).map(|_| None).collect();
+    for k in 0..st.vector_cols.len() {
+        let ci = st.vector_cols[k];
+        let name = &st.columns[ci].name;
+        let entry = match stored.get(name) {
+            Some(e) => e,
+            None => return false, // no row for this column → incomplete store
+        };
+        match entry {
+            None => new_indexes[ci] = None, // empty column, no graph
+            Some(b) => {
+                let hnsw = Hnsw::deserialize(b, |id| {
+                    st.rows
+                        .get(&id)
+                        .and_then(|row| row.embeddings.get(ci))
+                        .and_then(|e| e.clone())
+                });
+                match hnsw {
+                    Some(h) => new_indexes[ci] = Some(h),
+                    None => return false, // corrupt/stale → fall back to rebuild
+                }
+            }
+        }
+    }
+
+    st.indexes = new_indexes;
+    st.index_dirty = false;
+    metrics::record_graph_load(metrics::now_ms() - t0);
+    true
 }
 
 /// Brute-force cosine over `rows` for column `col`, pushing rows above the
@@ -1376,6 +1551,18 @@ unsafe extern "C" fn x_create(
     if rc != SQLITE_OK {
         drop(Box::from_raw(state)); // reclaim the leaked state on the error path
         return rc;
+    }
+
+    // Create the HNSW graph cache (`<name>_anki_graph`) up front so persisting the
+    // index at commit (`xSync`) is pure DML — never schema-changing DDL. One row per
+    // vector column; populated on the first write after the index is built.
+    let graph_ddl = format!(
+        "CREATE TABLE IF NOT EXISTS {}(col TEXT PRIMARY KEY, graph BLOB)",
+        (*state).graph_table
+    );
+    if exec(db, &graph_ddl) != SQLITE_OK {
+        drop(Box::from_raw(state));
+        return SQLITE_ERROR;
     }
 
     let meta = meta_table_ident(&arg_str(argv, 1));
@@ -1454,6 +1641,11 @@ unsafe extern "C" fn x_connect(
 
     load_all(&mut *state);
 
+    // Reload the persisted HNSW graph so the first `MATCH` reads it instead of
+    // paying a cold O(N) rebuild. On any miss (no/partial/corrupt cache) this is a
+    // no-op and `index_dirty` stays set, falling back to rebuild-on-first-`MATCH`.
+    load_graphs(&mut *state);
+
     let vt = Box::into_raw(Box::new(AnkiVtab {
         base: zeroed_vtab(),
         state,
@@ -1475,21 +1667,43 @@ unsafe extern "C" fn x_destroy(vtab: *mut sqlite3_vtab) -> c_int {
     let vt = Box::from_raw(vtab as *mut AnkiVtab);
     let st = Box::from_raw(vt.state);
     exec(st.db, &format!("DROP TABLE IF EXISTS {}", st.data_table));
+    exec(st.db, &format!("DROP TABLE IF EXISTS {}", st.graph_table));
     drop(st);
     drop(vt);
     SQLITE_OK
 }
 
-// Transaction hooks. Providing xBegin enrolls the vtab so xCommit/xRollback are
-// delivered. Writes go straight to the shadow table (rolled back with the
-// connection), so commit needs nothing; rollback only has to invalidate the
-// in-memory cache, which is reloaded lazily on the next xFilter.
+// Transaction hooks. Providing xBegin enrolls the vtab so xSync/xCommit/xRollback
+// are delivered. Data writes go straight to the shadow table (rolled back with the
+// connection); xSync additionally persists the HNSW graph cache inside the same
+// transaction so it stays consistent. Rollback only has to invalidate the in-memory
+// cache, which is reloaded lazily on the next xFilter.
 
 unsafe extern "C" fn x_begin(_vtab: *mut sqlite3_vtab) -> c_int {
     SQLITE_OK
 }
 
-unsafe extern "C" fn x_sync(_vtab: *mut sqlite3_vtab) -> c_int {
+unsafe extern "C" fn x_sync(vtab: *mut sqlite3_vtab) -> c_int {
+    // Persist the HNSW graph as part of the committing transaction, so on disk it
+    // is always consistent with (and rolled back atomically alongside) the data.
+    let vt = &*(vtab as *mut AnkiVtab);
+    let st = &mut *vt.state;
+    if !st.graph_disk_stale {
+        return SQLITE_OK; // no write this txn → stored graph already current
+    }
+    let rc = if !st.index_dirty {
+        // The graph is built and kept in sync by incremental writes → persist it.
+        save_graphs(st)
+    } else {
+        // No live graph to persist (never built, or invalidated by rollback /
+        // REPLACE / IGNORE): drop any stale cache so the next open rebuilds.
+        clear_graphs(st);
+        SQLITE_OK
+    };
+    if rc != SQLITE_OK {
+        return rc;
+    }
+    st.graph_disk_stale = false;
     SQLITE_OK
 }
 
@@ -1964,6 +2178,9 @@ unsafe extern "C" fn x_update(
             if !st.index_dirty {
                 index_remove_row(st, id);
             }
+            // Data changed → the persisted graph is now stale; xSync will refresh
+            // or clear it.
+            st.graph_disk_stale = true;
         }
         return SQLITE_OK;
     }
@@ -2062,6 +2279,8 @@ unsafe extern "C" fn x_update(
     if rowid >= st.next_rowid {
         st.next_rowid = rowid + 1;
     }
+    // Data changed → the persisted graph is now stale; xSync refreshes or clears it.
+    st.graph_disk_stale = true;
     if !p_rowid.is_null() {
         *p_rowid = rowid; // report the rowid SQLite should associate with the row
     }

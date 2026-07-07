@@ -58,6 +58,10 @@ the JS wall-clock around the call).
   "persist_ms": 8.1,         // total shadow-table write time
   "index_rebuild_ms": 50.0,  // total HNSW index (re)build time
   "index_rebuilds": 2,       // number of rebuilds
+  "graph_save_ms": 3.2,      // total time persisting HNSW graphs to the cache
+  "graph_saves": 4,          // number of graph-cache writes (at commit/xSync)
+  "graph_load_ms": 1.1,      // total time loading persisted graphs on open
+  "graph_loads": 1,          // number of graph-cache loads (skipped rebuilds)
   "candidates": 300,         // total rows whose cosine was computed during searches
   "rows_matched": 30         // total rows emitted by MATCH scans
 }
@@ -68,6 +72,9 @@ Notes:
   embeddings (MATCH). Use `embed_calls` to attribute.
 - `index_rebuild_ms` is the lazy HNSW rebuild that fires on the first MATCH after
   a write — worth showing separately, since it's a periodic spike, not per-row.
+- `graph_loads` counts opens that read the persisted `<name>_anki_graph` cache
+  instead of rebuilding; a load means the following first MATCH does **not** add to
+  `index_rebuilds`. `graph_saves` counts persists at commit (`xSync`).
 - `candidates` ≈ work done by the search: rows scanned (exact/brute) or candidates
   returned (HNSW).
 

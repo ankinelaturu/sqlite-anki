@@ -697,6 +697,35 @@ splice the one changed row and leave the index clean. So the first `MATCH` after
 pays one honest bulk build; every write after that is ~O(log N). A metrics regression test nails it down:
 after that first build, more writes and another `MATCH` must record **zero** rebuilds.
 
+## Not rebuilding what we already built
+`Jul 07, 2026`
+
+Incremental insertion keeps the graph fresh *within* a session, but every fresh open still paid the
+full O(N) build on the first semantic query — the graph lived only in WASM RAM. So the natural next
+step: write it to disk and read it back.
+
+The trick is *what* to write. A node's vector is the expensive part, but it's already on disk in the
+`anki_emb_<col>` blobs — so we persist only the **topology** (the adjacency lists, the entry point,
+the level structure) and rehydrate each node's vector from the shadow table on load. Two subtleties
+shaped the serializer. First, **tombstones**: a deleted row's vector is gone from the shadow, so a
+persisted graph can't reference it — serialization compacts the dead nodes out, remapping indices and
+re-picking a live entry point. Second, **trust**: the loader parses an on-disk blob, and a truncated
+or corrupt one must never panic (under `panic = abort` that kills the whole database). So the reader
+is fully bounds-checked and allocation-bounded; anything it dislikes returns `None`, and the caller
+quietly falls back to a rebuild. The graph blob carries its own version tag, independent of the
+shadow's storage format.
+
+The other half was *when* to write. The answer came from mirroring how the data itself persists:
+the graph is saved in `xSync`, inside the committing transaction, so it's durable and rolled back
+atomically with the rows it describes. Every write marks the cache stale; at commit we either
+re-serialize the live graph or, if there's nothing trustworthy to save (a rollback, a REPLACE that
+moved rows behind our back), clear the cache so the next open rebuilds. The invariant that makes it
+safe to trust on load: after any commit, the stored graph either reflects committed data or is
+absent — never stale-but-present. This did bump the storage format to v4; a table's graph cache is
+created up front at `xCreate` precisely so that committing never has to run schema-changing DDL. The
+payoff shows up as a number that *doesn't* move: reopen a database, run the first `MATCH`, and the
+rebuild counter stays flat.
+
 ## This document
 `Jul 05, 2026`
 

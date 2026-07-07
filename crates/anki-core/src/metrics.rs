@@ -17,6 +17,10 @@ struct Metrics {
     persist_ms: f64,
     index_rebuild_ms: f64,
     index_rebuilds: u64,
+    graph_save_ms: f64,
+    graph_saves: u64,
+    graph_load_ms: f64,
+    graph_loads: u64,
     candidates: u64,
     rows_matched: u64,
 }
@@ -29,6 +33,10 @@ const ZERO: Metrics = Metrics {
     persist_ms: 0.0,
     index_rebuild_ms: 0.0,
     index_rebuilds: 0,
+    graph_save_ms: 0.0,
+    graph_saves: 0,
+    graph_load_ms: 0.0,
+    graph_loads: 0,
     candidates: 0,
     rows_matched: 0,
 };
@@ -94,10 +102,25 @@ pub fn record_index_rebuild(ms: f64) {
     m.index_rebuilds += 1;
 }
 
+/// One persist of an HNSW graph to the `<name>_anki_graph` shadow table.
+pub fn record_graph_save(ms: f64) {
+    let mut m = METRICS.lock();
+    m.graph_save_ms += ms;
+    m.graph_saves += 1;
+}
+
+/// One successful load of a persisted HNSW graph on open (skips a rebuild).
+pub fn record_graph_load(ms: f64) {
+    let mut m = METRICS.lock();
+    m.graph_load_ms += ms;
+    m.graph_loads += 1;
+}
+
 fn to_json(m: &Metrics) -> String {
     format!(
         "{{\"embed_ms\":{:.3},\"embed_calls\":{},\"search_ms\":{:.3},\"search_ops\":{},\
          \"persist_ms\":{:.3},\"index_rebuild_ms\":{:.3},\"index_rebuilds\":{},\
+         \"graph_save_ms\":{:.3},\"graph_saves\":{},\"graph_load_ms\":{:.3},\"graph_loads\":{},\
          \"candidates\":{},\"rows_matched\":{}}}",
         m.embed_ms,
         m.embed_calls,
@@ -106,6 +129,10 @@ fn to_json(m: &Metrics) -> String {
         m.persist_ms,
         m.index_rebuild_ms,
         m.index_rebuilds,
+        m.graph_save_ms,
+        m.graph_saves,
+        m.graph_load_ms,
+        m.graph_loads,
         m.candidates,
         m.rows_matched,
     )

@@ -7,6 +7,14 @@ full rationale and design. Add new entries at the top.
 ## 2026-07-07
 
 ### Performance
+- **The HNSW graph is persisted and reloaded on open.** The built index is serialized (topology
+  only — vectors are rehydrated from the existing `anki_emb_<col>` blobs, tombstones compacted out)
+  into a new `<name>_anki_graph` shadow table, persisted at commit (`xSync`, atomically with the
+  data). On reopen the **first `MATCH` reads the graph instead of rebuilding it** (O(N)), removing
+  the open-time CPU spike. All-or-nothing load with a full safety net: a missing/stale/corrupt cache
+  just falls back to the rebuild path. New `graph_saves`/`graph_loads` metrics. Complements
+  incremental insertion — writes keep the graph fresh, persistence avoids the cold rebuild. See
+  roadmap Done in [docs/TODO.md](docs/TODO.md).
 - **HNSW indexes update incrementally on write.** Once a column's index is built, each
   `INSERT`/`UPDATE`/`DELETE` splices the single row into the live graph (`Hnsw::add`, ~O(log N))
   or tombstones it (`Hnsw::remove`, O(1)) instead of dirtying the whole index and forcing the next
@@ -24,6 +32,11 @@ full rationale and design. Add new entries at the top.
   and stay dropped.
 - **Import drop-warning** — the Import & Vectorize dialog now lists which indexes, triggers,
   foreign keys, `DEFAULT`s, and table-level constraints a table loses when you tick it to vectorize.
+
+### Changed
+- **Storage format v3 → v4.** Adds the `<name>_anki_graph` HNSW graph cache (created at table
+  creation). DBs written by an older format still hit the existing "rebuild required" guard on open;
+  rebuild via Import & Vectorize or by re-populating the demo.
 
 ### Docs
 - Added [docs/limitations.md](docs/limitations.md) — a living list of by-design limits (vtab

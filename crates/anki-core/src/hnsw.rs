@@ -20,6 +20,37 @@ const M: usize = 16;
 const M0: usize = 2 * M;
 /// Candidate list size during construction.
 const EF_CONSTRUCTION: usize = 100;
+/// Version tag of the serialized-graph blob ([`Hnsw::serialize`]). Independent
+/// of the shadow-table `storage_format`: the persisted graph is an optional
+/// cache, so a version mismatch just falls back to a rebuild rather than
+/// refusing to open the table. Bump on any layout change.
+const GRAPH_FORMAT: u32 = 1;
+
+/// Little-endian cursor over a byte slice for [`Hnsw::deserialize`]. Every read
+/// is bounds-checked and returns `None` past the end, so a truncated or corrupt
+/// blob can never panic (fatal under `panic = abort`) or over-read.
+struct Reader<'a> {
+    b: &'a [u8],
+    pos: usize,
+}
+
+impl Reader<'_> {
+    fn take(&mut self, n: usize) -> Option<&[u8]> {
+        let end = self.pos.checked_add(n)?;
+        let s = self.b.get(self.pos..end)?;
+        self.pos = end;
+        Some(s)
+    }
+    fn u32(&mut self) -> Option<u32> {
+        Some(u32::from_le_bytes(self.take(4)?.try_into().ok()?))
+    }
+    fn u64(&mut self) -> Option<u64> {
+        Some(u64::from_le_bytes(self.take(8)?.try_into().ok()?))
+    }
+    fn i64(&mut self) -> Option<i64> {
+        Some(i64::from_le_bytes(self.take(8)?.try_into().ok()?))
+    }
+}
 
 fn dot(a: &[f32], b: &[f32]) -> f32 {
     let n = a.len().min(b.len());
@@ -123,6 +154,150 @@ impl Hnsw {
         if let Some(node) = self.id_to_node.remove(&id) {
             self.dead[node as usize] = true;
         }
+    }
+
+    /// Serializes the graph *topology* to a versioned little-endian blob so it
+    /// can be persisted and reloaded instead of rebuilt on the next open (see
+    /// docs/streaming-storage.md, roadmap #2 in docs/TODO.md). The stored
+    /// vectors are **not** written — they already live in the shadow table's
+    /// `anki_emb_<col>` blobs and are rehydrated by [`Hnsw::deserialize`].
+    ///
+    /// Tombstoned nodes are compacted out here (dead nodes are dropped, live
+    /// node indices are remapped, and a live top-level node becomes the entry),
+    /// since a deleted rowid's vector is gone from the shadow and can't be
+    /// rehydrated. Returns `None` if no live nodes remain.
+    ///
+    /// # Blob layout
+    ///
+    /// All integers little-endian. A fixed 24-byte header, then one
+    /// variable-length record per node (and, within it, per level):
+    ///
+    /// | Section                  | Field        | Type           | Notes                                  |
+    /// |--------------------------|--------------|----------------|----------------------------------------|
+    /// | Header                   | `version`    | `u32`          | `GRAPH_FORMAT`                         |
+    /// |                          | `node_count` | `u32`          | number of live nodes                   |
+    /// |                          | `max_level`  | `u32`          | top layer index                        |
+    /// |                          | `entry`      | `u32`          | entry node index, or `u32::MAX` = none |
+    /// |                          | `rng`        | `u64`          | SplitMix64 state                       |
+    /// | Per node (×`node_count`) | `id`         | `i64`          | rowid                                  |
+    /// |                          | `levels`     | `u32`          | number of layers this node is on       |
+    /// | Per level (×`levels`)    | `degree`     | `u32`          | neighbor count at this layer           |
+    /// |                          | `neighbors`  | `u32`×`degree` | neighbor **node indices** (not rowids) |
+    pub fn serialize(&self) -> Option<Vec<u8>> {
+        // Map each live (non-dead) node to a compact new index.
+        let mut remap = vec![u32::MAX; self.ids.len()];
+        let mut live: Vec<u32> = Vec::new();
+        for n in 0..self.ids.len() as u32 {
+            if !self.dead[n as usize] {
+                remap[n as usize] = live.len() as u32;
+                live.push(n);
+            }
+        }
+        if live.is_empty() {
+            return None;
+        }
+
+        // Re-pick the entry as a surviving node with the greatest level; the old
+        // entry may itself have been tombstoned. Any top-layer node is a valid
+        // HNSW entry point.
+        let mut new_entry = 0u32;
+        let mut new_max_level = 0usize;
+        for (new_i, &old) in live.iter().enumerate() {
+            let lvl = self.neighbors[old as usize].len().saturating_sub(1);
+            if lvl >= new_max_level {
+                new_max_level = lvl;
+                new_entry = new_i as u32;
+            }
+        }
+
+        let mut buf: Vec<u8> = Vec::new();
+        buf.extend_from_slice(&GRAPH_FORMAT.to_le_bytes());
+        buf.extend_from_slice(&(live.len() as u32).to_le_bytes());
+        buf.extend_from_slice(&(new_max_level as u32).to_le_bytes());
+        buf.extend_from_slice(&new_entry.to_le_bytes());
+        buf.extend_from_slice(&self.rng.to_le_bytes());
+        for &old in &live {
+            buf.extend_from_slice(&self.ids[old as usize].to_le_bytes());
+            let levels = &self.neighbors[old as usize];
+            buf.extend_from_slice(&(levels.len() as u32).to_le_bytes());
+            for lvl in levels {
+                // Drop neighbors that were tombstoned; remap the survivors.
+                let kept: Vec<u32> = lvl
+                    .iter()
+                    .filter_map(|&nb| match remap.get(nb as usize) {
+                        Some(&r) if r != u32::MAX => Some(r),
+                        _ => None,
+                    })
+                    .collect();
+                buf.extend_from_slice(&(kept.len() as u32).to_le_bytes());
+                for &nb in &kept {
+                    buf.extend_from_slice(&nb.to_le_bytes());
+                }
+            }
+        }
+        Some(buf)
+    }
+
+    /// Rebuilds an index from a [`Hnsw::serialize`] blob, rehydrating each node's
+    /// vector via `vec_for_id` (which reads the shadow table's `anki_emb_<col>`
+    /// blob for a rowid). Returns `None` on any version mismatch, truncation, or
+    /// out-of-range index, or if a referenced rowid's vector is missing — the
+    /// caller then falls back to a full rebuild. Parsing is fully bounds-checked
+    /// and allocation is bounded by the actual buffer length: a corrupt blob can
+    /// only yield `None`, never a panic (which under `panic = abort` would kill
+    /// the whole wasm instance) or a runaway allocation.
+    pub fn deserialize(
+        bytes: &[u8],
+        mut vec_for_id: impl FnMut(i64) -> Option<Vec<f32>>,
+    ) -> Option<Hnsw> {
+        let mut r = Reader { b: bytes, pos: 0 };
+        if r.u32()? != GRAPH_FORMAT {
+            return None;
+        }
+        let n = r.u32()? as usize;
+        let max_level = r.u32()? as usize;
+        let entry_raw = r.u32()?;
+        let rng = r.u64()?;
+        if n == 0 {
+            return None;
+        }
+
+        let mut idx = Hnsw::new(rng);
+        idx.max_level = max_level;
+        idx.entry = if entry_raw == u32::MAX { None } else { Some(entry_raw) };
+        for node in 0..n {
+            let id = r.i64()?;
+            let vector = vec_for_id(id)?;
+            let nlevels = r.u32()? as usize;
+            let mut levels: Vec<Vec<u32>> = Vec::new();
+            for _ in 0..nlevels {
+                let deg = r.u32()? as usize;
+                let mut nbrs: Vec<u32> = Vec::new();
+                for _ in 0..deg {
+                    let nb = r.u32()?;
+                    if nb as usize >= n {
+                        return None; // neighbor index out of range → corrupt
+                    }
+                    nbrs.push(nb);
+                }
+                levels.push(nbrs);
+            }
+            idx.vectors.push(vector);
+            idx.ids.push(id);
+            idx.neighbors.push(levels);
+            idx.dead.push(false);
+            idx.id_to_node.insert(id, node as u32);
+        }
+        // Structural sanity: the entry (if any) and max_level must be in range.
+        match idx.entry {
+            Some(e) if e as usize >= n => return None,
+            _ => {}
+        }
+        if max_level >= n && n > 0 {
+            // max_level is a layer index; it can't exceed the node count.
+            return None;
+        }
+        Some(idx)
     }
 
     /// Returns the `k` approximate nearest rowids to `query` as `(rowid, cosine
@@ -501,6 +676,95 @@ mod tests {
         }
         let got = idx.search(&points[0].1, 5, 64);
         assert!(got.is_empty(), "expected no results after removing every row");
+    }
+
+    /// Builds an `id -> vector` lookup mirroring what the shadow table's
+    /// `anki_emb_<col>` blobs provide at load time.
+    fn vec_lookup(points: &[(i64, Vec<f32>)]) -> HashMap<i64, Vec<f32>> {
+        points.iter().cloned().collect()
+    }
+
+    #[test]
+    fn serialize_roundtrip_preserves_search() {
+        // A graph reloaded from its serialized topology (with vectors rehydrated
+        // from the id->vector map) must return the same exact matches as the
+        // original — proving persistence can replace a cold rebuild on open.
+        let dim = 48;
+        let points = gen_points(300, dim, 0x5EED);
+        let idx = Hnsw::build(&points).expect("index");
+        let blob = idx.serialize().expect("serialized");
+
+        let map = vec_lookup(&points);
+        let reloaded = Hnsw::deserialize(&blob, |id| map.get(&id).cloned()).expect("deserialized");
+
+        for step in (0..points.len()).step_by(13) {
+            let (id, ref v) = points[step];
+            let a = idx.search(v, 5, 64);
+            let b = reloaded.search(v, 5, 64);
+            assert_eq!(b[0].0, id, "reloaded graph lost exact match {id}");
+            assert_eq!(
+                a.iter().map(|x| x.0).collect::<Vec<_>>(),
+                b.iter().map(|x| x.0).collect::<Vec<_>>(),
+                "reloaded ranking diverged from the original for query {id}",
+            );
+        }
+    }
+
+    #[test]
+    fn serialize_compacts_tombstones() {
+        // Removed rows must be compacted out of the serialized blob: their
+        // vectors are gone from the shadow, so deserialize must never ask for
+        // them (the lookup returns None for removed ids) yet still succeed.
+        let dim = 32;
+        let points = gen_points(200, dim, 0xC0FFEE);
+        let mut idx = Hnsw::build(&points).expect("index");
+        let removed: Vec<i64> = (0..200).step_by(3).map(|i| points[i].0).collect();
+        for id in &removed {
+            idx.remove(*id);
+        }
+        let blob = idx.serialize().expect("serialized");
+
+        // Lookup only knows the surviving rows.
+        let live: HashMap<i64, Vec<f32>> = points
+            .iter()
+            .filter(|(id, _)| !removed.contains(id))
+            .cloned()
+            .collect();
+        let reloaded =
+            Hnsw::deserialize(&blob, |id| live.get(&id).cloned()).expect("deserialized live-only");
+
+        for id in &removed {
+            let (_, ref v) = points[*id as usize];
+            let got = reloaded.search(v, 10, 64);
+            assert!(got.iter().all(|(rid, _)| rid != id), "removed {id} came back");
+        }
+        // A surviving row is still retrievable by its own vector.
+        let survivor = points.iter().find(|(id, _)| !removed.contains(id)).unwrap();
+        assert_eq!(reloaded.search(&survivor.1, 3, 64)[0].0, survivor.0);
+    }
+
+    #[test]
+    fn deserialize_rejects_corrupt_input() {
+        let points = gen_points(40, 16, 0xDEAD);
+        let idx = Hnsw::build(&points).expect("index");
+        let map = vec_lookup(&points);
+        let good = idx.serialize().expect("serialized");
+
+        // Truncated at every prefix length → None, never a panic.
+        for cut in 0..good.len() {
+            assert!(
+                Hnsw::deserialize(&good[..cut], |id| map.get(&id).cloned()).is_none(),
+                "truncated blob of len {cut} should be rejected",
+            );
+        }
+        // Wrong version tag.
+        let mut bad_ver = good.clone();
+        bad_ver[0] ^= 0xFF;
+        assert!(Hnsw::deserialize(&bad_ver, |id| map.get(&id).cloned()).is_none());
+        // Empty buffer.
+        assert!(Hnsw::deserialize(&[], |id| map.get(&id).cloned()).is_none());
+        // A missing vector (lookup can't rehydrate a referenced rowid) → None.
+        assert!(Hnsw::deserialize(&good, |_| None::<Vec<f32>>).is_none());
     }
 
     #[test]

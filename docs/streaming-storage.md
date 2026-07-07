@@ -315,6 +315,35 @@ The existing correctness suites are the specification and **must keep passing** 
 - **Migration guard:** opening a pre-format DB fails with the clear "rebuild required"
   error.
 
+## HNSW graph cache (storage format v4)
+
+The streaming redesign keeps only rowid + embeddings + the HNSW graph in RAM, and the
+graph is *rebuilt* from the `anki_emb_<col>` blobs on the first `MATCH` after open —
+an O(N) CPU spike. Format **v4** removes that spike by persisting the built graph:
+
+- A second shadow table, **`<name>_anki_graph(col TEXT PRIMARY KEY, graph BLOB)`**, one
+  row per vector column, is created at `xCreate` (up front, so persisting later never
+  needs schema-changing DDL).
+- **What's stored is topology only** — adjacency lists, entry point, levels — *not* the
+  vectors, which already live in `anki_emb_<col>` and are rehydrated on load. Tombstoned
+  (deleted) nodes are compacted out during serialization, since their vectors are gone
+  from the shadow. The blob carries its own version tag, independent of `storage_format`.
+- **When:** persisted in `xSync`, inside the committing transaction, so the cache is
+  durable and rolled back atomically with the data. Each write marks the cache stale; at
+  commit we re-serialize the live graph, or clear the cache when there's nothing
+  trustworthy to save (post-rollback, or a `REPLACE`/`IGNORE` that moved rows behind the
+  vtab's back). Invariant: **after any commit the stored graph reflects committed data or
+  is absent — never stale-but-present.**
+- **On open:** `xConnect` loads it after `load_all`; a successful all-or-nothing load
+  skips the rebuild. Any miss — no cache, a missing column, a corrupt/stale blob, or a
+  referenced rowid whose vector is gone — falls back to the existing rebuild-on-first-
+  `MATCH` path. The deserializer is fully bounds-checked and allocation-bounded, so a
+  corrupt blob can only yield "rebuild", never a panic (fatal under `panic = abort`).
+
+Complements incremental insertion: writes keep the in-RAM graph fresh (~O(log N)),
+persistence avoids the cold rebuild on the next open. Together: never a full rebuild in
+the steady state.
+
 ## Open questions
 
 - Index management for filtered shadow columns — automatic, heuristic, or explicit?
