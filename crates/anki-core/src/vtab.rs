@@ -60,6 +60,25 @@ const SQLITE_INDEX_CONSTRAINT_GE: u8 = 32;
 const SQLITE_INDEX_CONSTRAINT_MATCH: u8 = 64;
 const SQLITE_INDEX_CONSTRAINT_NE: u8 = 68;
 
+// Conflict-resolution modes returned by `sqlite3_vtab_on_conflict`
+// (SQLITE_ABORT = 4 is the default and maps to the `_` arm below).
+const SQLITE_ROLLBACK: c_int = 1;
+const SQLITE_IGNORE: c_int = 2;
+const SQLITE_FAIL: c_int = 3;
+const SQLITE_REPLACE: c_int = 5;
+
+/// The `INSERT OR <x>` / `UPDATE OR <x>` keyword for a conflict-resolution mode.
+/// Anything unexpected (incl. `SQLITE_ABORT`) maps to `ABORT`, the SQL default.
+fn conflict_keyword(mode: c_int) -> &'static str {
+    match mode {
+        SQLITE_ROLLBACK => "ROLLBACK",
+        SQLITE_FAIL => "FAIL",
+        SQLITE_IGNORE => "IGNORE",
+        SQLITE_REPLACE => "REPLACE",
+        _ => "ABORT",
+    }
+}
+
 /// True for the comparison ops we evaluate as a pre-filter.
 fn is_filter_op(op: u8) -> bool {
     matches!(
@@ -243,6 +262,10 @@ extern "C" {
         n: c_int,
         d: SqliteDestructor,
     );
+
+    // The conflict-resolution mode of the SQL that triggered the current xUpdate
+    // (e.g. `INSERT OR REPLACE`); one of SQLITE_ROLLBACK/ABORT/FAIL/IGNORE/REPLACE.
+    fn sqlite3_vtab_on_conflict(db: *mut sqlite3) -> c_int;
 
     // Persistence: SQL against the shadow data table on the same connection.
     fn sqlite3_exec(
@@ -983,37 +1006,21 @@ unsafe fn column_to_cell(stmt: *mut sqlite3_stmt, idx: c_int) -> Cell {
     }
 }
 
-/// Upserts one row into the shadow table. Embeddings are stored as little-endian
-/// `f32` BLOBs in the `anki_emb_<col>` columns.
-unsafe fn persist_row(
+/// Binds the row's `cells` then its vector-column `embeddings` into `stmt`, starting
+/// at 1-based parameter index `start`. Returns the next free index.
+unsafe fn bind_row_values(
+    stmt: *mut sqlite3_stmt,
     st: &TableState,
-    rowid: i64,
     cells: &[Cell],
     embeddings: &[Option<Vec<f32>>],
+    start: c_int,
 ) -> c_int {
-    let cols = data_columns(&st.columns);
-    let placeholders = vec!["?"; cols.len()].join(", ");
-    let sql = format!(
-        "INSERT OR REPLACE INTO {}({}) VALUES({})",
-        st.data_table,
-        cols.join(", "),
-        placeholders
-    );
-    let csql = match CString::new(sql) {
-        Ok(c) => c,
-        Err(_) => return SQLITE_ERROR,
-    };
-    let mut stmt: *mut sqlite3_stmt = ptr::null_mut();
-    if sqlite3_prepare_v2(st.db, csql.as_ptr(), -1, &mut stmt, ptr::null_mut()) != SQLITE_OK {
-        return SQLITE_ERROR;
+    let mut idx = start;
+    for cell in cells.iter().take(st.ncol) {
+        bind_cell(stmt, idx, cell);
+        idx += 1;
     }
-
-    sqlite3_bind_int64(stmt, 1, rowid);
-    for i in 0..st.ncol {
-        bind_cell(stmt, (2 + i) as c_int, &cells[i]);
-    }
-    for (k, &vi) in st.vector_cols.iter().enumerate() {
-        let idx = (2 + st.ncol + k) as c_int;
+    for &vi in &st.vector_cols {
         match embeddings.get(vi).and_then(|e| e.as_ref()) {
             Some(e) => {
                 let blob = emb_to_blob(e);
@@ -1029,15 +1036,87 @@ unsafe fn persist_row(
                 sqlite3_bind_null(stmt, idx);
             }
         }
+        idx += 1;
     }
+    idx
+}
 
+/// `SQLITE_DONE` → OK; otherwise propagate the real result code (e.g. a
+/// `SQLITE_CONSTRAINT_*` for a UNIQUE/CHECK/NOT NULL violation) so the failure
+/// surfaces as a constraint error, not a generic "SQL logic error".
+unsafe fn finish_write(stmt: *mut sqlite3_stmt) -> c_int {
     let rc = sqlite3_step(stmt);
     sqlite3_finalize(stmt);
     if rc == SQLITE_DONE {
         SQLITE_OK
     } else {
-        SQLITE_ERROR
+        rc
     }
+}
+
+/// Inserts one new row into the shadow table with the caller-supplied conflict mode
+/// (`INSERT OR <conflict>`). Embeddings are little-endian `f32` BLOBs in the
+/// `anki_emb_<col>` columns.
+unsafe fn insert_row(
+    st: &TableState,
+    rowid: i64,
+    cells: &[Cell],
+    embeddings: &[Option<Vec<f32>>],
+    conflict: &str,
+) -> c_int {
+    let cols = data_columns(&st.columns);
+    let placeholders = vec!["?"; cols.len()].join(", ");
+    let sql = format!(
+        "INSERT OR {} INTO {}({}) VALUES({})",
+        conflict,
+        st.data_table,
+        cols.join(", "),
+        placeholders
+    );
+    let csql = match CString::new(sql) {
+        Ok(c) => c,
+        Err(_) => return SQLITE_ERROR,
+    };
+    let mut stmt: *mut sqlite3_stmt = ptr::null_mut();
+    if sqlite3_prepare_v2(st.db, csql.as_ptr(), -1, &mut stmt, ptr::null_mut()) != SQLITE_OK {
+        return SQLITE_ERROR;
+    }
+    sqlite3_bind_int64(stmt, 1, rowid);
+    bind_row_values(stmt, st, cells, embeddings, 2);
+    finish_write(stmt)
+}
+
+/// Updates the shadow row identified by `anki_id = rowid` in place, with the
+/// caller-supplied conflict mode (`UPDATE OR <conflict>`).
+unsafe fn update_row(
+    st: &TableState,
+    rowid: i64,
+    cells: &[Cell],
+    embeddings: &[Option<Vec<f32>>],
+    conflict: &str,
+) -> c_int {
+    let cols = data_columns(&st.columns);
+    // Every column except the `anki_id` PK is assigned; the PK is the WHERE key.
+    let set = cols[1..]
+        .iter()
+        .map(|c| format!("{c}=?"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let sql = format!(
+        "UPDATE OR {} {} SET {} WHERE anki_id = ?",
+        conflict, st.data_table, set
+    );
+    let csql = match CString::new(sql) {
+        Ok(c) => c,
+        Err(_) => return SQLITE_ERROR,
+    };
+    let mut stmt: *mut sqlite3_stmt = ptr::null_mut();
+    if sqlite3_prepare_v2(st.db, csql.as_ptr(), -1, &mut stmt, ptr::null_mut()) != SQLITE_OK {
+        return SQLITE_ERROR;
+    }
+    let next = bind_row_values(stmt, st, cells, embeddings, 1);
+    sqlite3_bind_int64(stmt, next, rowid);
+    finish_write(stmt)
 }
 
 unsafe fn delete_row(st: &TableState, rowid: i64) -> c_int {
@@ -1881,6 +1960,11 @@ unsafe extern "C" fn x_update(
     }
 
     let is_insert = sqlite3_value_type(old) == SQLITE_NULL;
+    let oldid = if is_insert {
+        None
+    } else {
+        Some(sqlite3_value_int64(old))
+    };
     // Use the rowid SQLite supplies, or assign the next one for a bare INSERT.
     let rowid = if sqlite3_value_type(new_rowid_v) != SQLITE_NULL {
         sqlite3_value_int64(new_rowid_v)
@@ -1888,32 +1972,45 @@ unsafe extern "C" fn x_update(
         st.next_rowid
     };
 
-    // Persist to the shadow table first; only mutate the cache on success so a
-    // failed write leaves cache and store consistent.
+    // Honor the conflict clause the triggering SQL used (INSERT OR REPLACE, etc.).
+    let mode = sqlite3_vtab_on_conflict(st.db);
+    let conflict = conflict_keyword(mode);
+
+    // An UPDATE that moves the rowid: drop the old row first, so the re-insert is
+    // clean and can't self-conflict on a UNIQUE column it keeps.
+    if let Some(o) = oldid {
+        if o != rowid {
+            let _ = delete_row(st, o);
+            st.rows.remove(&o);
+        }
+    }
+
+    // Persist to the shadow first; only mutate the cache on success so a failed write
+    // leaves cache and store consistent. In-place UPDATE (same rowid) → UPDATE; an
+    // INSERT or rowid-moving UPDATE → INSERT.
+    let in_place = oldid == Some(rowid);
     let t_persist = metrics::now_ms();
-    let rc = persist_row(st, rowid, &cells, &embeddings);
+    let rc = if in_place {
+        update_row(st, rowid, &cells, &embeddings, conflict)
+    } else {
+        insert_row(st, rowid, &cells, &embeddings, conflict)
+    };
     metrics::record_persist(metrics::now_ms() - t_persist);
     if rc != SQLITE_OK {
         return rc;
     }
 
-    // UPDATE that moves the rowid: drop the old entry first.
-    if !is_insert {
-        let oldid = sqlite3_value_int64(old);
-        if oldid != rowid {
-            let _ = delete_row(st, oldid);
-            st.rows.remove(&oldid);
-        }
-    }
-
-    // Cache only the embeddings + bookkeeping (index rebuilt lazily on query). The
-    // user column values (`cells`) were just written to the shadow table by
-    // persist_row and are served from there on read — not cached in RAM.
+    // Cache the embeddings + bookkeeping (index rebuilt lazily on query). REPLACE and
+    // IGNORE can delete/skip a row behind the vtab's back, so mark the cache dirty to
+    // resync from the shadow (source of truth) on the next query.
     st.rows.insert(rowid, Row { embeddings });
     if rowid >= st.next_rowid {
         st.next_rowid = rowid + 1;
     }
     st.index_dirty = true;
+    if mode == SQLITE_REPLACE || mode == SQLITE_IGNORE {
+        st.dirty = true;
+    }
     if !p_rowid.is_null() {
         *p_rowid = rowid; // report the rowid SQLite should associate with the row
     }
