@@ -278,15 +278,19 @@ class AnkiWorker implements AnkiWorkerApi {
           // anki column uses the renamed name; data is still read from the old name.
           const rn = plan.renames?.[t.name] ?? {};
           const target = (c: string) => rn[c] ?? c;
-          // Carry column constraints the shadow can enforce (NOT NULL + single-col
-          // UNIQUE/PK). DEFAULT/CHECK/table-level constraints don't come — see
-          // docs/limitations.md.
+          // Carry the column constraints the shadow can enforce: NOT NULL, single-col
+          // UNIQUE/PK, and column-level CHECK. CHECK is skipped when the table has a
+          // reserved-name rename (its expression may reference the old name). DEFAULT,
+          // table-level, and index/trigger/FK constraints don't come — see limitations.md.
+          const checks = Object.keys(rn).length ? new Map<string, string>() : columnChecks(t.sql);
           const decl = t.columns
             .map((c) => {
               const parts = [quote(target(c.name))];
               if (c.type) parts.push(c.type);
               if (c.notNull) parts.push("NOT NULL");
               if (c.unique) parts.push("UNIQUE");
+              const chk = checks.get(c.name);
+              if (chk) parts.push(chk);
               if (picks.has(c.name)) parts.push("VECTOR");
               return parts.join(" ");
             })
@@ -616,12 +620,183 @@ function tableDrops(
     const parts = db.selectObjects(`PRAGMA index_info(${quote(ix.name)})`);
     if (parts.length > 1) multiColUnique++;
   }
-  return { indexes, triggers, foreignKeys, hasCheck: /\bcheck\s*\(/i.test(sql), defaults, multiColUnique };
+  return { indexes, triggers, foreignKeys, hasCheck: hasTableLevelCheck(sql), defaults, multiColUnique };
 }
 
 /** Whether a declared column type has TEXT affinity — a vectorize candidate. */
 function isTextLike(type: string): boolean {
   return type === "" || /char|clob|text/i.test(type);
+}
+
+// --- Minimal CREATE TABLE parsing (for CHECK, which no PRAGMA exposes) ---
+
+/**
+ * If `s[i]` opens a quoted string/identifier (`'` `"` `` ` `` or `[`), returns the index
+ * just past its closing delimiter (handling doubled-char escapes like `''`); otherwise
+ * returns `i` unchanged. The shared primitive that makes the scanners below quote-safe.
+ */
+function skipQuoted(s: string, i: number): number {
+  const c = s[i];
+  const close = c === "[" ? "]" : c === "'" || c === '"' || c === "`" ? c : "";
+  if (!close) return i;
+  i++;
+  while (i < s.length) {
+    if (s[i] === close) {
+      if (close !== "]" && s[i + 1] === close) {
+        i += 2;
+        continue;
+      }
+      return i + 1;
+    }
+    i++;
+  }
+  return i;
+}
+
+/** The text inside the outermost `(...)` of a CREATE TABLE statement, or `""`. */
+function tableBody(sql: string): string {
+  let i = 0,
+    depth = 0,
+    start = -1;
+  while (i < sql.length) {
+    const j = skipQuoted(sql, i);
+    if (j !== i) {
+      i = j;
+      continue;
+    }
+    if (sql[i] === "(") {
+      if (depth === 0) start = i + 1;
+      depth++;
+    } else if (sql[i] === ")") {
+      depth--;
+      if (depth === 0 && start >= 0) return sql.slice(start, i);
+    }
+    i++;
+  }
+  return "";
+}
+
+/** Splits a table body into top-level defs on commas at paren-depth 0 (quote-safe). */
+function splitDefs(body: string): string[] {
+  const defs: string[] = [];
+  let i = 0,
+    depth = 0,
+    last = 0;
+  while (i < body.length) {
+    const j = skipQuoted(body, i);
+    if (j !== i) {
+      i = j;
+      continue;
+    }
+    const ch = body[i];
+    if (ch === "(") depth++;
+    else if (ch === ")") depth--;
+    else if (ch === "," && depth === 0) {
+      defs.push(body.slice(last, i));
+      last = i + 1;
+    }
+    i++;
+  }
+  defs.push(body.slice(last));
+  return defs;
+}
+
+/** The first identifier of a column def, unquoted (`""` if none). */
+function firstIdent(def: string): string {
+  const s = def.replace(/^\s+/, "");
+  const c = s[0];
+  if (c === '"' || c === "`" || c === "[") {
+    const close = c === "[" ? "]" : c;
+    let out = "";
+    let i = 1;
+    while (i < s.length) {
+      if (s[i] === close) {
+        if (close !== "]" && s[i + 1] === close) {
+          out += close;
+          i += 2;
+          continue;
+        }
+        break;
+      }
+      out += s[i];
+      i++;
+    }
+    return out;
+  }
+  return s.match(/^[A-Za-z_][A-Za-z0-9_$]*/)?.[0] ?? "";
+}
+
+/** True if a top-level def is a table-level constraint (not a column definition). */
+function isTableConstraint(def: string): boolean {
+  return /^\s*(constraint|primary|unique|check|foreign)\b/i.test(def);
+}
+
+/**
+ * Column-name → its column-level `CHECK(...)` clause(s), parsed from a CREATE TABLE
+ * statement. Table-level CHECKs are excluded (they can't be attributed to one column,
+ * and the `anki(col …)` DSL is per-column). Keys are unquoted, to match `table_info`.
+ */
+function columnChecks(sql: string): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const def of splitDefs(tableBody(sql))) {
+    if (isTableConstraint(def) || !def.trim()) continue;
+    const name = firstIdent(def);
+    if (!name) continue;
+    const checks: string[] = [];
+    let i = 0;
+    while (i < def.length) {
+      const j = skipQuoted(def, i);
+      if (j !== i) {
+        i = j;
+        continue;
+      }
+      // `CHECK` at a word boundary, followed by a balanced (...) group.
+      if (
+        /^check/i.test(def.slice(i, i + 5)) &&
+        !/[A-Za-z0-9_]/.test(def[i - 1] ?? " ")
+      ) {
+        let k = i + 5;
+        while (k < def.length && /\s/.test(def[k])) k++;
+        if (def[k] === "(") {
+          let depth = 0,
+            m = k;
+          while (m < def.length) {
+            const n = skipQuoted(def, m);
+            if (n !== m) {
+              m = n;
+              continue;
+            }
+            if (def[m] === "(") depth++;
+            else if (def[m] === ")" && --depth === 0) {
+              m++;
+              break;
+            }
+            m++;
+          }
+          checks.push(`CHECK${def.slice(k, m)}`);
+          i = m;
+          continue;
+        }
+      }
+      i++;
+    }
+    if (checks.length) out.set(name, checks.join(" "));
+  }
+  return out;
+}
+
+/**
+ * True if the table has a **table-level** CHECK — one not attached to a single column
+ * (bare `CHECK(...)` or `CONSTRAINT <name> CHECK(...)` in the column list). Column-level
+ * CHECKs are carried; table-level ones can't be (the anki DSL is per-column), so only
+ * these should be reported as dropped.
+ */
+function hasTableLevelCheck(sql: string): boolean {
+  const namedConstraint =
+    /^constraint\s+(?:"(?:[^"]|"")*"|`(?:[^`]|``)*`|\[[^\]]*\]|[A-Za-z_]\w*)\s+/i;
+  return splitDefs(tableBody(sql)).some((d) =>
+    /^check\b/i.test(d.trim().replace(namedConstraint, "")),
+  );
 }
 
 /**
@@ -770,8 +945,9 @@ ${rows.join("\n")}
 
 > Rebuilt from an uploaded SQLite file. Plain-copied tables keep their original
 > schema, indexes, and triggers; vectorized tables became \`anki\` virtual tables,
-> which keep \`NOT NULL\` + single-column \`UNIQUE\`/\`PK\` but drop indexes, triggers,
-> foreign keys, \`DEFAULT\`, and \`CHECK\` (see docs/limitations.md).
+> which keep \`NOT NULL\`, single-column \`UNIQUE\`/\`PK\`, and column \`CHECK\` but drop
+> indexes, triggers, foreign keys, \`DEFAULT\`, and table-level constraints (see
+> docs/limitations.md).
 `;
 }
 

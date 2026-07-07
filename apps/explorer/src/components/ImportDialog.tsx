@@ -38,7 +38,7 @@ function dropPhrases(d: ImportDrops): string[] {
   if (d.triggers) p.push(`${d.triggers} trigger${d.triggers > 1 ? "s" : ""}`);
   if (d.foreignKeys) p.push(`${d.foreignKeys} foreign key${d.foreignKeys > 1 ? "s" : ""}`);
   if (d.multiColUnique) p.push(`${d.multiColUnique} multi-column UNIQUE`);
-  if (d.hasCheck) p.push("CHECK constraints");
+  if (d.hasCheck) p.push("table-level CHECK");
   if (d.defaults.length) p.push(`DEFAULT on ${d.defaults.join(", ")}`);
   return p;
 }

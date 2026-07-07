@@ -74,12 +74,14 @@ dropping a vectorized table's indexes/triggers/constraints is a real footgun.
   `constraints.test.mjs`. **DEFAULT** is a genuine vtab limitation (SQLite ignores a vtab's declared
   defaults). **Index** on the vtab is blocked by SQLite (→ shadow-side index = "index filtered
   shadow columns"). **FK / triggers** can't (cache desync / blocked) → companion strategy.
-- **Constraint carry on import — Layer 2 DONE (2026-07-07), except CHECK.** `rebuildImport`
-  reconstructs **NOT NULL + single-column UNIQUE/PK** (from `table_info`/`index_list`/`index_info`)
-  and re-declares them on the vectorized table, where they enforce via the shadow. **Remaining
-  follow-up: carry CHECK** — needs parsing the source `CREATE TABLE` sql (not exposed by any PRAGMA);
-  table-level UNIQUE/CHECK can't be expressed in the per-column `anki(col …)` DSL. Everything not
-  carried is surfaced by the dialog warning.
+- **Constraint carry on import — Layer 2 DONE (2026-07-07).** `rebuildImport` reconstructs
+  **NOT NULL + single-column UNIQUE/PK** (from `table_info`/`index_list`/`index_info`) and
+  **column-level CHECK** (parsed from the source `CREATE TABLE` DDL — no PRAGMA exposes it — via
+  a quote/paren-aware scanner in `worker.ts`) and re-declares them on the vectorized table, where
+  they enforce via the shadow. CHECK is skipped for a table with a reserved-name rename (its
+  expression may reference the old name). Only **table-level** constraints (multi-column UNIQUE/PK,
+  table-level CHECK) can't be carried — the per-column `anki(col …)` DSL can't express them; these
+  are surfaced by the dialog warning.
 - **Real column names via an `anki_` prefix — DONE (2026-07-06, storage-format v3).** Shadow
   table `<name>_anki`, internal columns `anki_id` / `anki_emb_<col>`, data columns stored under
   their real names. Greenfield: `xCreate` hard-errors on a reserved-prefix or duplicate column

@@ -75,7 +75,7 @@ export interface ImportDrops {
   triggers: number;
   /** Foreign-key constraints. */
   foreignKeys: number;
-  /** Table has a `CHECK` constraint (best-effort, from its DDL). */
+  /** Table has a *table-level* `CHECK` (column-level CHECKs are carried, not dropped). */
   hasCheck: boolean;
   /** Columns with a `DEFAULT` (not applied on a vtab). */
   defaults: string[];
