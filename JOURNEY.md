@@ -624,6 +624,54 @@ back). `DEFAULT` is the one casualty: SQLite ignores a vtab's declared defaults 
 omitted column from an explicit NULL, so it's documented as a limitation. Carrying these onto
 *imported* vectorized tables (Layer 2) is next.
 
+## Carrying constraints onto imported tables (Layer 2)
+
+Greenfield tables now enforced their constraints; the next question was whether a table you
+*import and vectorize* could keep them too.
+
+### Reconstruct what the shadow can enforce
+`Jul 07, 2026`
+Import had been synthesizing the `anki` decl from `PRAGMA table_info` — name + type only — so a
+vectorized table silently lost every constraint. But the same shadow-passthrough that made greenfield
+work means we just have to *put the constraint back in the decl*. `rebuildImport` now reconstructs
+**NOT NULL** (from `table_info`) and **single-column UNIQUE / PRIMARY KEY** (from `index_list`/
+`index_info`, plus the `INTEGER PRIMARY KEY` rowid case that has no index) and re-declares them —
+where they enforce via the shadow, exactly like greenfield. Multi-column and table-level constraints
+can't come: the `anki(col …)` DSL is per-column.
+
+### Tell the truth about what's dropped
+`Jul 07, 2026`
+Some things genuinely can't survive vectorization — indexes, triggers, FKs, DEFAULT, table-level
+constraints. Rather than drop them quietly, `analyzeImport` now gathers each table's *droppables*
+(an `ImportDrops`) and the dialog shows an amber line under any table you tick to vectorize:
+"Vectorizing drops 2 indexes, 1 trigger, 1 foreign key… NOT NULL and single-column UNIQUE are kept."
+And to stop rediscovering these limits every conversation, we wrote them down — `docs/limitations.md`,
+a living list of the by-design drops (vtab limits, import, storage format), linked from the docs map.
+
+### Parse CHECK out of the DDL
+`Jul 07, 2026`
+CHECK was the hard one — no PRAGMA exposes it; it lives only in the source `CREATE TABLE` text. So we
+wrote a small **quote- and paren-aware scanner** (`skipQuoted` → `tableBody`/`splitDefs`/`columnChecks`)
+that pulls each column's `CHECK(...)` from the DDL, correctly handling commas and strings *inside* the
+expression, nested parens, quoted names, `DEFAULT` alongside, and false matches like a column named
+`paycheck`. Carried CHECKs enforce via the shadow (real column names make the expression valid). One
+deliberate skip: if the table has a reserved-name rename, its CHECKs are dropped, since the expression
+could reference the old name. With that, only *table-level* constraints remain uncarryable.
+
+## Sharpening the road ahead
+`Jul 07, 2026`
+
+With the constraint story complete, we reshuffled the roadmap into ordered phases (HNSW incremental
+insertion → persist the graph → session query-embedding cache → per-DB config + a core/frontend split
+for a future CLI → int8 RAM reduction → a "rebuild required" migration UX → the CLI itself). A few
+decisions worth remembering: **int8 quantization becomes opt-in per DB** — it rides the same
+`anki_meta` rails as per-DB model selection (chosen at create, fixed for the DB's life), and we'll
+*measure* recall before trusting it. And the **companion-table** strategy — keep a constraint-heavy
+table plain, vectorize into a trigger-synced sidecar — stays low-priority and belongs to the shared
+core, not the CLI. Crucially it isn't "sqlite-vec codegen": even the companion auto-embeds inside the
+database with generated sync, so the app never runs a model or hand-syncs. In-place stays the star;
+companion is the faithful retrofit.
+
 ## This document
 `Jul 05, 2026`
 
