@@ -68,13 +68,17 @@ dropping a vectorized table's indexes/triggers/constraints is a real footgun.
   only for *retrofitting* existing tables, where it's the same structure done for you.
 - **Dialog transparency** (near-term, explorer): until the companion strategy exists, warn in
   ImportDialog which indexes/triggers/constraints a table loses when you tick it to vectorize.
-- **Constraint pushdown onto the shadow table.** The shadow table is a real table and every vtab
-  write flows through it, so a constraint declared there actually enforces on the vtab. Recover
-  **UNIQUE** (unique index), **NOT NULL**, **CHECK** (needs expr rewrite unless columns are
-  named), **DEFAULT** (in the declared vtab schema), and **index speed** (index on the shadow
-  column — same as the query-perf "index filtered shadow columns" item). **FK and triggers can't**
-  be recovered cleanly (FK cascades / triggers modify the shadow behind the vtab and desync its
-  in-RAM cache) → those need the companion strategy.
+- **Constraint enforcement — Layer 1 DONE (2026-07-06, greenfield).** The declared type flows into
+  the shadow `CREATE`, so **UNIQUE / CHECK / NOT NULL** enforce on writes; the write path honors the
+  SQL conflict clause via `sqlite3_vtab_on_conflict` (`INSERT OR REPLACE`/`OR IGNORE`/plain). See
+  `constraints.test.mjs`. **DEFAULT** is a genuine vtab limitation (SQLite ignores a vtab's declared
+  defaults). **Index** on the vtab is blocked by SQLite (→ shadow-side index = "index filtered
+  shadow columns"). **FK / triggers** can't (cache desync / blocked) → companion strategy.
+- **Constraint carry on import — Layer 2 PENDING.** `rebuildImport` builds the anki decl from
+  `PRAGMA table_info` (name+type only), dropping constraints. Carry NOT NULL + single-col UNIQUE
+  (from `table_info`/`index_list`; easy/moderate) and CHECK (parse the source `CREATE TABLE` sql;
+  hard); table-level UNIQUE/CHECK can't be expressed in the `anki(col …)` DSL. Warn for the rest
+  (index/trigger/FK/DEFAULT) — see Dialog transparency above.
 - **Real column names via an `anki_` prefix — DONE (2026-07-06, storage-format v3).** Shadow
   table `<name>_anki`, internal columns `anki_id` / `anki_emb_<col>`, data columns stored under
   their real names. Greenfield: `xCreate` hard-errors on a reserved-prefix or duplicate column
