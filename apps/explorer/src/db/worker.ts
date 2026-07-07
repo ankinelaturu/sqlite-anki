@@ -276,11 +276,17 @@ class AnkiWorker implements AnkiWorkerApi {
           // anki column uses the renamed name; data is still read from the old name.
           const rn = plan.renames?.[t.name] ?? {};
           const target = (c: string) => rn[c] ?? c;
+          // Carry column constraints the shadow can enforce (NOT NULL + single-col
+          // UNIQUE/PK). DEFAULT/CHECK/table-level constraints don't come — see
+          // docs/limitations.md.
           const decl = t.columns
             .map((c) => {
-              const nm = target(c.name);
-              const base = c.type ? `${quote(nm)} ${c.type}` : quote(nm);
-              return picks.has(c.name) ? `${base} VECTOR` : base;
+              const parts = [quote(target(c.name))];
+              if (c.type) parts.push(c.type);
+              if (c.notNull) parts.push("NOT NULL");
+              if (c.unique) parts.push("UNIQUE");
+              if (picks.has(c.name)) parts.push("VECTOR");
+              return parts.join(" ");
             })
             .join(", ");
           dst.exec(`CREATE VIRTUAL TABLE ${quote(t.name)} USING anki(${decl})`);
@@ -568,6 +574,36 @@ function isTextLike(type: string): boolean {
   return type === "" || /char|clob|text/i.test(type);
 }
 
+/**
+ * Column names carrying a **single-column** uniqueness guarantee on a table:
+ * a single-column PRIMARY KEY (incl. `INTEGER PRIMARY KEY`, which has no index),
+ * or any single-column unique index (a `UNIQUE` constraint or `CREATE UNIQUE INDEX`).
+ * These carry onto a vectorized table as a `UNIQUE` column; multi-column ones can't
+ * (the `anki(col …)` DSL is per-column).
+ */
+function uniqueColumns(
+  db: Db,
+  table: string,
+  info: Array<{ name: string; pk: number }>,
+): Set<string> {
+  const uniq = new Set<string>();
+  const pkCols = info.filter((c) => Number(c.pk) > 0);
+  if (pkCols.length === 1) uniq.add(String(pkCols[0].name));
+  const idxList = db.selectObjects(`PRAGMA index_list(${quote(table)})`) as Array<{
+    name: string;
+    unique: number;
+    partial?: number;
+  }>;
+  for (const ix of idxList) {
+    if (Number(ix.unique) !== 1 || Number(ix.partial) === 1) continue;
+    const parts = db.selectObjects(
+      `PRAGMA index_info(${quote(ix.name)})`,
+    ) as Array<{ name: string | null }>;
+    if (parts.length === 1 && parts[0].name) uniq.add(String(parts[0].name));
+  }
+  return uniq;
+}
+
 /** Reads the user tables/views (skipping sqlite-anki internals) with columns. */
 function sourceObjects(db: Db): SourceObject[] {
   const objs = db.selectObjects(
@@ -578,10 +614,11 @@ function sourceObjects(db: Db): SourceObject[] {
      ORDER BY type, name`,
   ) as Array<{ name: string; sql: string; type: string }>;
   return objs.map((o) => {
-    const cols = db.selectObjects(
+    const info = db.selectObjects(
       `PRAGMA table_info(${quote(o.name)})`,
-    ) as Array<{ name: string; type: string }>;
-    const columns: ImportColumn[] = cols.map((c) => {
+    ) as Array<{ name: string; type: string; notnull: number; pk: number }>;
+    const uniq = o.type === "table" ? uniqueColumns(db, String(o.name), info) : new Set<string>();
+    const columns: ImportColumn[] = info.map((c) => {
       const type = String(c.type ?? "");
       const name = String(c.name);
       return {
@@ -590,6 +627,8 @@ function sourceObjects(db: Db): SourceObject[] {
         textLike: isTextLike(type),
         isBlob: /blob/i.test(type),
         reserved: /^anki_/i.test(name),
+        notNull: Number(c.notnull) === 1,
+        unique: uniq.has(name),
       };
     });
     return {
@@ -675,7 +714,8 @@ ${rows.join("\n")}
 
 > Rebuilt from an uploaded SQLite file. Plain-copied tables keep their original
 > schema, indexes, and triggers; vectorized tables became \`anki\` virtual tables,
-> which can't carry indexes, triggers, or table constraints.
+> which keep \`NOT NULL\` + single-column \`UNIQUE\`/\`PK\` but drop indexes, triggers,
+> foreign keys, \`DEFAULT\`, and \`CHECK\` (see docs/limitations.md).
 `;
 }
 

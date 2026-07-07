@@ -61,6 +61,10 @@ export interface ImportColumn {
   isBlob: boolean;
   /** Name uses the reserved `anki_` prefix — must be renamed before vectorizing. */
   reserved: boolean;
+  /** Source column is `NOT NULL` — carried onto vectorized tables (enforced via shadow). */
+  notNull: boolean;
+  /** Source column has a single-column `UNIQUE`/`PRIMARY KEY` — carried onto vectorized tables. */
+  unique: boolean;
 }
 
 /** One table or view discovered in an uploaded SQLite file. */

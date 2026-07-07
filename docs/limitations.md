@@ -40,9 +40,11 @@ enforcing them; FTS5 rejects some as its own policy). They ride on the real shad
 
 When you **vectorize** a table, it becomes an `anki` vtab and inherits all of the above:
 
-- **Dropped:** indexes, triggers, foreign keys, `DEFAULT`, `CHECK`, and all column constraints
-  (`NOT NULL`, `UNIQUE`). *(Carrying `NOT NULL` + single-column `UNIQUE`/`PK` onto vectorized
-  tables is Layer 2, in progress; `CHECK` and table-level constraints stay dropped.)*
+- **Carried:** `NOT NULL` and single-column `UNIQUE`/`PRIMARY KEY` — reconstructed from
+  `PRAGMA table_info`/`index_list` and re-declared on the vectorized table, where they enforce via
+  the shadow.
+- **Dropped:** indexes, triggers, foreign keys, `DEFAULT`, `CHECK`, and table-level constraints
+  (multi-column `UNIQUE`/`PK`) — the `anki(col …)` DSL is per-column, and the rest are vtab limits.
 - **Kept:** **plain-copied** tables (not vectorized) keep everything — their original
   `CREATE TABLE` (constraints + FKs), plus replayed secondary indexes and triggers.
 
