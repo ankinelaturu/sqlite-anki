@@ -45,9 +45,9 @@ The streaming redesign (see `streaming-storage.md`, shipped) already cut RAM to
   `sqlite_master` for plain tables and views (INSTEAD OF) — created *last*, after all data,
   so a trigger neither fires on the copied rows nor references a missing target. SQLite
   forbids triggers on virtual tables, so triggers on vectorized tables are dropped.
-- **Dialog transparency** — warn in ImportDialog which indexes/triggers/constraints a table
-  will lose when you tick it to vectorize. (Now the only remaining import-fidelity gap that's
-  actually fixable — the rest are inherent vtab limits.)
+- **Dialog transparency — DONE (2026-07-07).** ImportDialog warns, under any table ticked to
+  vectorize, which schema objects it drops (indexes/triggers/FKs/CHECK/DEFAULT/multi-col UNIQUE),
+  noting NOT NULL + single-column UNIQUE are kept. (`analyzeImport` → `ImportDrops`.)
 - **Per-import model switching** — currently one model per session.
 
 ## Future direction: native CLI + faithful (companion) import
@@ -66,19 +66,20 @@ dropping a vectorized table's indexes/triggers/constraints is a real footgun.
 - **Framing:** greenfield (new table) stays a single `USING anki` table — simpler than the
   hand-rolled companion+vectors pattern other extensions require. The companion strategy is
   only for *retrofitting* existing tables, where it's the same structure done for you.
-- **Dialog transparency** (near-term, explorer): until the companion strategy exists, warn in
-  ImportDialog which indexes/triggers/constraints a table loses when you tick it to vectorize.
+- **Dialog transparency — DONE (2026-07-07)** (see import-fidelity section above): the near-term
+  warning is shipped; the companion strategy remains the faithful long-term path.
 - **Constraint enforcement — Layer 1 DONE (2026-07-06, greenfield).** The declared type flows into
   the shadow `CREATE`, so **UNIQUE / CHECK / NOT NULL** enforce on writes; the write path honors the
   SQL conflict clause via `sqlite3_vtab_on_conflict` (`INSERT OR REPLACE`/`OR IGNORE`/plain). See
   `constraints.test.mjs`. **DEFAULT** is a genuine vtab limitation (SQLite ignores a vtab's declared
   defaults). **Index** on the vtab is blocked by SQLite (→ shadow-side index = "index filtered
   shadow columns"). **FK / triggers** can't (cache desync / blocked) → companion strategy.
-- **Constraint carry on import — Layer 2 PENDING.** `rebuildImport` builds the anki decl from
-  `PRAGMA table_info` (name+type only), dropping constraints. Carry NOT NULL + single-col UNIQUE
-  (from `table_info`/`index_list`; easy/moderate) and CHECK (parse the source `CREATE TABLE` sql;
-  hard); table-level UNIQUE/CHECK can't be expressed in the `anki(col …)` DSL. Warn for the rest
-  (index/trigger/FK/DEFAULT) — see Dialog transparency above.
+- **Constraint carry on import — Layer 2 DONE (2026-07-07), except CHECK.** `rebuildImport`
+  reconstructs **NOT NULL + single-column UNIQUE/PK** (from `table_info`/`index_list`/`index_info`)
+  and re-declares them on the vectorized table, where they enforce via the shadow. **Remaining
+  follow-up: carry CHECK** — needs parsing the source `CREATE TABLE` sql (not exposed by any PRAGMA);
+  table-level UNIQUE/CHECK can't be expressed in the per-column `anki(col …)` DSL. Everything not
+  carried is surfaced by the dialog warning.
 - **Real column names via an `anki_` prefix — DONE (2026-07-06, storage-format v3).** Shadow
   table `<name>_anki`, internal columns `anki_id` / `anki_emb_<col>`, data columns stored under
   their real names. Greenfield: `xCreate` hard-errors on a reserved-prefix or duplicate column
