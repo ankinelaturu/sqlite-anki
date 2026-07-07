@@ -63,6 +63,49 @@ test("counters advance for insert (embed + persist) and search", () => {
   }
 });
 
+test("writes after the first MATCH splice in incrementally (no full rebuild)", () => {
+  // Roadmap #1: once the HNSW index is live, an INSERT/UPDATE/DELETE splices the
+  // single row in instead of dirtying the whole index. So the *first* MATCH
+  // rebuilds, but subsequent write→MATCH cycles must not rebuild again — while
+  // still returning the freshly written rows.
+  const db = new sqlite3.oo1.DB(":memory:");
+  try {
+    db.exec(`CREATE VIRTUAL TABLE docs USING anki(notes TEXT VECTOR);`);
+    db.exec(`INSERT INTO docs(notes) VALUES('billing support request'),('weather forecast');`);
+
+    // First MATCH builds the index (rebuild happens here).
+    const a = snap();
+    db.selectObjects(`SELECT rowid FROM docs WHERE notes MATCH 'billing'`);
+    const b = snap();
+    assert.ok(b.index_rebuilds - a.index_rebuilds >= 1, "first MATCH builds the index");
+
+    // Now write more rows and re-query: the index is live, so these splice in.
+    db.exec(`INSERT INTO docs(notes) VALUES('refund and invoice dispute'),('sunny skies tomorrow');`);
+    const c = snap();
+    const rows = db.selectObjects(
+      `SELECT notes FROM docs WHERE notes MATCH 'invoice payment' ORDER BY notes_score DESC`,
+    );
+    const d = snap();
+    assert.equal(d.index_rebuilds - c.index_rebuilds, 0, "no full rebuild after incremental write");
+    assert.equal(d.search_ops - c.search_ops, 1, "the search still ran via HNSW");
+    // The row inserted after the index was built is retrievable.
+    assert.equal(rows[0].notes, "refund and invoice dispute", "incrementally-added row is found");
+
+    // A DELETE also splices (tombstone) without a rebuild, and drops the row.
+    db.exec(`DELETE FROM docs WHERE notes = 'refund and invoice dispute'`);
+    const e = snap();
+    const after = db.selectObjects(`SELECT notes FROM docs WHERE notes MATCH 'invoice payment'`);
+    const f = snap();
+    assert.equal(f.index_rebuilds - e.index_rebuilds, 0, "no rebuild after incremental delete");
+    assert.ok(
+      after.every((r) => r.notes !== "refund and invoice dispute"),
+      "deleted row is gone from results",
+    );
+  } finally {
+    db.close();
+  }
+});
+
 test("exact mode records a search but no index rebuild", () => {
   const db = new sqlite3.oo1.DB(":memory:");
   try {

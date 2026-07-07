@@ -3,7 +3,7 @@
 //! A pure-Rust, single-threaded HNSW (Hierarchical Navigable Small World) graph
 //! built for `wasm32-unknown-emscripten`. The `hnsw_rs` crate was evaluated but
 //! pulls `rayon`/`num_cpus`/`mmap-rs`, which don't fit a single-threaded,
-//! no-pthread WASM build (see `docs/DESIGN.md` §9 friction note).
+//! no-pthread WASM build (see `docs/design-choices.md` §7 and `docs/DESIGN.md` §9).
 //!
 //! Vectors are assumed L2-normalized (the embedder normalizes), so cosine
 //! similarity is the dot product and distance is `1 - dot`. One index is built
@@ -12,6 +12,7 @@
 
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
+use std::collections::HashMap;
 
 /// Max neighbors per node above layer 0 (DESIGN: `M = 16`).
 const M: usize = 16;
@@ -63,6 +64,13 @@ pub struct Hnsw {
     ids: Vec<i64>,
     /// `neighbors[node][level]` = neighbor node ids at that level.
     neighbors: Vec<Vec<Vec<u32>>>,
+    /// Tombstones: `dead[node]` marks a removed node. Dead nodes stay wired into
+    /// the graph as routing hops (so it stays connected) but are filtered out of
+    /// `search` results. `rebuild`/`build` compacts them away.
+    dead: Vec<bool>,
+    /// Live rowid -> node id, for O(1) incremental `remove`. Holds only live
+    /// nodes; a re-added rowid overwrites its previous (now-dead) node.
+    id_to_node: HashMap<i64, u32>,
     entry: Option<u32>,
     max_level: usize,
     ml: f64,
@@ -75,6 +83,8 @@ impl Hnsw {
             vectors: Vec::new(),
             ids: Vec::new(),
             neighbors: Vec::new(),
+            dead: Vec::new(),
+            id_to_node: HashMap::new(),
             entry: None,
             max_level: 0,
             ml: 1.0 / (M as f64).ln(),
@@ -95,8 +105,29 @@ impl Hnsw {
         Some(idx)
     }
 
+    /// Incrementally inserts a single `(rowid, vector)` into the live graph
+    /// (~O(log N)), so a write need not trigger a full [`Hnsw::build`]. If
+    /// `id` is already present, its prior node is tombstoned first so the rowid
+    /// resolves to exactly one live node. Manages its own `visited` scratch.
+    pub fn add(&mut self, id: i64, vector: Vec<f32>) {
+        self.remove(id);
+        let mut visited = vec![false; self.vectors.len() + 1];
+        self.insert(id, vector, &mut visited);
+    }
+
+    /// Tombstones the node for `id` (O(1) via `id_to_node`); a no-op if absent.
+    /// The node stays wired in as a routing hop but is excluded from `search`
+    /// results. Tombstones accumulate until the next full [`Hnsw::build`]
+    /// (rebuild) compacts them out.
+    pub fn remove(&mut self, id: i64) {
+        if let Some(node) = self.id_to_node.remove(&id) {
+            self.dead[node as usize] = true;
+        }
+    }
+
     /// Returns the `k` approximate nearest rowids to `query` as `(rowid, cosine
     /// similarity)`, best-first. `ef` is the search beam width (`>= k`).
+    /// Tombstoned nodes are traversed for routing but never returned.
     pub fn search(&self, query: &[f32], k: usize, ef: usize) -> Vec<(i64, f32)> {
         let mut ep = match self.entry {
             Some(e) => e,
@@ -111,6 +142,7 @@ impl Hnsw {
         }
         let w = self.search_layer(query, &[ep], ef.max(k), 0, &mut visited);
         w.into_iter()
+            .filter(|(_, n)| !self.dead[*n as usize])
             .take(k)
             .map(|(d, n)| (self.ids[n as usize], 1.0 - d))
             .collect()
@@ -137,6 +169,8 @@ impl Hnsw {
         self.vectors.push(vec);
         self.ids.push(id);
         self.neighbors.push((0..=level).map(|_| Vec::new()).collect());
+        self.dead.push(false);
+        self.id_to_node.insert(id, node);
         if visited.len() < self.vectors.len() {
             visited.resize(self.vectors.len(), false);
         }
@@ -380,5 +414,111 @@ mod tests {
         assert_eq!(got.len(), 1);
         assert_eq!(got[0].0, 7);
         assert!((got[0].1 - 1.0).abs() < 1e-5);
+    }
+
+    /// Deterministic pseudo-random vector generator for the incremental tests.
+    fn gen_points(n: usize, dim: usize, seed: u64) -> Vec<(i64, Vec<f32>)> {
+        let mut rng = seed;
+        let mut next = move || {
+            rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            ((rng >> 33) as f32 / (1u64 << 31) as f32) * 2.0 - 1.0
+        };
+        (0..n)
+            .map(|i| (i as i64, norm((0..dim).map(|_| next()).collect())))
+            .collect()
+    }
+
+    #[test]
+    fn incremental_add_matches_build() {
+        // A graph grown one node at a time via `add` should retrieve exact
+        // matches just like one built in bulk — `build` is `insert` looped, and
+        // `add` is the same splice with its own scratch.
+        let dim = 48;
+        let points = gen_points(300, dim, 0xA11CE);
+        // Seed with one point so the index exists, then splice the rest in.
+        let mut idx = Hnsw::build(&points[..1]).expect("index");
+        for (id, v) in &points[1..] {
+            idx.add(*id, v.clone());
+        }
+        for step in (0..points.len()).step_by(11) {
+            let (id, ref v) = points[step];
+            let got = idx.search(v, 5, 64);
+            assert_eq!(got[0].0, id, "exact match {id} not retrieved after incremental add");
+            assert!((got[0].1 - 1.0).abs() < 1e-4);
+        }
+    }
+
+    #[test]
+    fn remove_excludes_row() {
+        // A removed rowid must never appear in results, even when we query with
+        // its own stored vector.
+        let dim = 32;
+        let points = gen_points(200, dim, 0xBEEF);
+        let mut idx = Hnsw::build(&points).expect("index");
+        let (victim_id, ref victim_v) = points[57];
+        idx.remove(victim_id);
+        let got = idx.search(victim_v, 10, 64);
+        assert!(got.iter().all(|(id, _)| *id != victim_id), "removed row still returned");
+        // A live neighbor should still be reachable.
+        assert!(!got.is_empty(), "graph unreachable after a single removal");
+    }
+
+    #[test]
+    fn add_after_remove_updates_row() {
+        // Update semantics (remove + re-add with a new vector): the row is found
+        // by its new vector, not by its old one.
+        let dim = 32;
+        let points = gen_points(200, dim, 0xF00D);
+        let mut idx = Hnsw::build(&points).expect("index");
+        let id = points[42].0;
+        let old_v = points[42].1.clone();
+        // A fresh, well-separated vector for the same rowid.
+        let new_v = norm({
+            let mut v = vec![0.0f32; dim];
+            v[0] = 1.0;
+            v
+        });
+        idx.remove(id);
+        idx.add(id, new_v.clone());
+
+        let by_new = idx.search(&new_v, 3, 64);
+        assert_eq!(by_new[0].0, id, "row not retrieved by its new vector");
+        assert!((by_new[0].1 - 1.0).abs() < 1e-4);
+
+        let by_old = idx.search(&old_v, 5, 64);
+        assert!(
+            by_old.iter().all(|(rid, _)| *rid != id) || by_old[0].0 != id,
+            "old vector should no longer resolve to the updated row as top match"
+        );
+    }
+
+    #[test]
+    fn remove_all_returns_empty() {
+        let points = gen_points(50, 16, 0x1357);
+        let mut idx = Hnsw::build(&points).expect("index");
+        for (id, _) in &points {
+            idx.remove(*id);
+        }
+        let got = idx.search(&points[0].1, 5, 64);
+        assert!(got.is_empty(), "expected no results after removing every row");
+    }
+
+    #[test]
+    fn add_replaces_duplicate_id() {
+        // Re-`add`ing an existing rowid tombstones the old node so the rowid
+        // resolves to exactly one (the newest) node.
+        let dim = 16;
+        let mut idx = Hnsw::build(&gen_points(20, dim, 0x2468)).expect("index");
+        let new_v = norm({
+            let mut v = vec![0.0f32; dim];
+            v[dim - 1] = 1.0;
+            v
+        });
+        idx.add(5, new_v.clone());
+        idx.add(5, new_v.clone()); // add again with same id
+        let got = idx.search(&new_v, 10, 32);
+        let count = got.iter().filter(|(id, _)| *id == 5).count();
+        assert_eq!(count, 1, "duplicate rowid returned more than once");
+        assert_eq!(got[0].0, 5);
     }
 }

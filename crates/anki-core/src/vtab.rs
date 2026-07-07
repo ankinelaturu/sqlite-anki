@@ -1275,6 +1275,35 @@ unsafe fn rebuild_indexes(st: &mut TableState) {
     metrics::record_index_rebuild(metrics::now_ms() - t0);
 }
 
+/// Incrementally splices one row's embeddings into each column's live HNSW index
+/// (~O(log N) per column), avoiding a full [`rebuild_indexes`] on the next
+/// `MATCH`. Only called when the indexes are already built and in sync
+/// (`!index_dirty`). If a column's index doesn't exist yet (all prior rows had
+/// NULL embeddings for it), it's created from this single point.
+fn index_add_row(st: &mut TableState, rowid: i64, embeddings: &[Option<Vec<f32>>]) {
+    for k in 0..st.vector_cols.len() {
+        let ci = st.vector_cols[k];
+        if let Some(emb) = embeddings.get(ci).and_then(|e| e.as_ref()) {
+            match &mut st.indexes[ci] {
+                Some(idx) => idx.add(rowid, emb.clone()),
+                None => st.indexes[ci] = Hnsw::build(&[(rowid, emb.clone())]),
+            }
+        }
+    }
+}
+
+/// Tombstones `rowid` in each column's live HNSW index (O(1) per column). The
+/// counterpart to [`index_add_row`]; a no-op for columns whose index is `None`
+/// or that never held this rowid.
+fn index_remove_row(st: &mut TableState, rowid: i64) {
+    for k in 0..st.vector_cols.len() {
+        let ci = st.vector_cols[k];
+        if let Some(idx) = st.indexes[ci].as_mut() {
+            idx.remove(rowid);
+        }
+    }
+}
+
 /// Brute-force cosine over `rows` for column `col`, pushing rows above the
 /// similarity threshold into `results`. With `filter`, only rows passing it are
 /// considered (the relational pre-filter). No candidate cap — exact + complete.
@@ -1908,7 +1937,9 @@ unsafe extern "C" fn x_rowid(cur: *mut sqlite3_vtab_cursor, p: *mut sqlite3_int6
 ///   - `argv[0]` non-NULL     → UPDATE the row `argv[0]` (rowid may change to
 ///                              `argv[1]`).
 /// On insert/update we (re-)embed each `TEXT VECTOR` column, write through to
-/// the shadow table, update the cache, and mark the HNSW index dirty.
+/// the shadow table, update the cache, and splice the row into the live HNSW
+/// indexes (falling back to a full rebuild when they aren't yet in sync — see
+/// `index_add_row` / `rebuild_indexes`).
 unsafe extern "C" fn x_update(
     vtab: *mut sqlite3_vtab,
     argc: c_int,
@@ -1928,7 +1959,11 @@ unsafe extern "C" fn x_update(
                 return rc;
             }
             st.rows.remove(&id);
-            st.index_dirty = true;
+            // Splice the deletion into the live indexes; if a rebuild is already
+            // pending it will drop the row anyway, so skip the tombstone.
+            if !st.index_dirty {
+                index_remove_row(st, id);
+            }
         }
         return SQLITE_OK;
     }
@@ -2000,16 +2035,32 @@ unsafe extern "C" fn x_update(
         return rc;
     }
 
-    // Cache the embeddings + bookkeeping (index rebuilt lazily on query). REPLACE and
-    // IGNORE can delete/skip a row behind the vtab's back, so mark the cache dirty to
-    // resync from the shadow (source of truth) on the next query.
+    // Keep the HNSW indexes in sync with this write.
+    if mode == SQLITE_REPLACE || mode == SQLITE_IGNORE {
+        // REPLACE/IGNORE can delete/skip a row behind the vtab's back, so we
+        // can't splice a single row reliably: mark the cache dirty to resync
+        // from the shadow (source of truth) and fully rebuild on the next query.
+        st.dirty = true;
+        st.index_dirty = true;
+    } else if !st.index_dirty {
+        // Indexes are live and in sync → splice this row incrementally. Clear
+        // any prior entry for this rowid (in-place update) and the moved-from
+        // rowid, then add the new embeddings.
+        if let Some(o) = oldid {
+            if o != rowid {
+                index_remove_row(st, o);
+            }
+        }
+        index_remove_row(st, rowid);
+        index_add_row(st, rowid, &embeddings);
+    }
+    // else: a full rebuild is already pending (first build / post-rollback); it
+    // will include this row, so incremental work would be wasted.
+
+    // Cache the embeddings + rowid bookkeeping.
     st.rows.insert(rowid, Row { embeddings });
     if rowid >= st.next_rowid {
         st.next_rowid = rowid + 1;
-    }
-    st.index_dirty = true;
-    if mode == SQLITE_REPLACE || mode == SQLITE_IGNORE {
-        st.dirty = true;
     }
     if !p_rowid.is_null() {
         *p_rowid = rowid; // report the rowid SQLite should associate with the row

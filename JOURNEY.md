@@ -672,6 +672,31 @@ core, not the CLI. Crucially it isn't "sqlite-vec codegen": even the companion a
 database with generated sync, so the app never runs a model or hand-syncs. In-place stays the star;
 companion is the faithful retrofit.
 
+## Keeping the graph fresh without rebuilding it
+`Jul 07, 2026`
+
+First stop on the sharpened road: HNSW incremental insertion. The index was cheap to *reason* about —
+every write just flipped an `index_dirty` flag, and the next `MATCH` rebuilt the whole graph from
+scratch. Correct, but O(N) on every search-after-write, which is exactly the shape of our two busiest
+workloads: the demo populate and Import & Vectorize both insert row by row, each one re-dirtying the
+index.
+
+The fix was hiding in plain sight. `Hnsw::build` was already just `insert` looped over every point, so
+the single-node splice logic — descend the layers, connect to M neighbors, prune — already existed; it
+was only ever called internally. We promoted it to a public `add(id, vec)` (managing its own scratch)
+and paired it with a `remove(id)` that *tombstones* rather than surgically unstitches: a removed node
+keeps routing traffic through the graph (so it stays connected) but is filtered out of results, and the
+next full rebuild compacts the dead weight away. An `id_to_node` map makes removal O(1).
+
+Then the judgment call in `x_update`: **when** to splice versus rebuild. The answer fell out of the
+existing invariants. If the index is already dirty (never built, or a rollback just invalidated it), a
+rebuild is coming anyway — a bulk build beats N incremental adds, so we let it ride. If a `REPLACE` or
+`IGNORE` conflict might have deleted a row behind the vtab's back, we can't trust a single-row splice, so
+we fall back to the full resync we already do. Otherwise — the common case, a live and in-sync index — we
+splice the one changed row and leave the index clean. So the first `MATCH` after creating a table still
+pays one honest bulk build; every write after that is ~O(log N). A metrics regression test nails it down:
+after that first build, more writes and another `MATCH` must record **zero** rebuilds.
+
 ## This document
 `Jul 05, 2026`
 

@@ -6,6 +6,15 @@ full rationale and design. Add new entries at the top.
 
 ## 2026-07-07
 
+### Performance
+- **HNSW indexes update incrementally on write.** Once a column's index is built, each
+  `INSERT`/`UPDATE`/`DELETE` splices the single row into the live graph (`Hnsw::add`, ~O(log N))
+  or tombstones it (`Hnsw::remove`, O(1)) instead of dirtying the whole index and forcing the next
+  `MATCH` to rebuild it (O(N)). The first `MATCH` after create still bulk-builds; that path stays
+  the fallback for post-rollback and `REPLACE`/`IGNORE` resync, and compacts away tombstones. Cuts
+  write→search latency on incrementally-growing tables (demo build, Import & Vectorize). See
+  roadmap #1 in [docs/TODO.md](docs/TODO.md).
+
 ### Added
 - **Import carries enforceable constraints** onto vectorized tables — `NOT NULL` and
   single-column `UNIQUE`/`PRIMARY KEY` (reconstructed from `PRAGMA table_info`/`index_list`), and

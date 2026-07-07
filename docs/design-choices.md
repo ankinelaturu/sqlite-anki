@@ -107,3 +107,21 @@ data-egress question to every write and every query. In-process keeps the system
 self-contained: the data, the index, and the model are all in the page. (The model
 *file* is downloaded and loaded at startup rather than baked into the build — see
 [dynamic-model-loading.md](./dynamic-model-loading.md).)
+
+## 7. The nearest-neighbor index is our own small module
+
+The approximate-nearest-neighbor index (HNSW) is implemented in-tree
+([`crates/anki-core/src/hnsw.rs`](../crates/anki-core/src/hnsw.rs)), not pulled from a
+dependency.
+
+**Why.** The index has to link into the same single-threaded, no-pthread WebAssembly
+module as SQLite and the embedder. The general-purpose ANN crates are built for a
+different world: `hnsw_rs` reaches for `rayon`/`num_cpus` (thread-pool parallelism) and
+`mmap-rs` (memory-mapped vector files), and `usearch`'s core is C++ — each of which fights
+that target rather than fitting it. What we actually need is narrow: a graph over
+fixed-dimension, L2-normalized vectors where cosine similarity is just a dot product, with
+build, search, and incremental add/remove. Owning a small module for exactly that keeps the
+linked `sqlite3.wasm` lean, keeps every panic path across the FFI boundary in view (a panic
+there aborts the whole instance), and lets the index evolve with the virtual table — for
+example splicing single rows in on write instead of rebuilding. The cost we accept is
+maintaining the graph algorithm ourselves; at the scope we need, that has been a good trade.

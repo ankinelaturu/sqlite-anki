@@ -447,11 +447,11 @@ Because the virtual table module owns `MATCH`, HNSW drives row production direct
 
 Exact brute-force similarity is O(n) per query. HNSW (Hierarchical Navigable Small World) provides fast approximate nearest-neighbor search, suitable for interactive browser use.
 
-### Chosen crate: `hnsw_rs`
+### In-tree HNSW (no external crate)
 
-v1 uses **[hnsw_rs](https://crates.io/crates/hnsw_rs)** — pure Rust HNSW with a straightforward `wasm32-unknown-unknown` story. [usearch](https://crates.io/crates/usearch) is excellent on native/desktop but its C++ core makes browser WASM integration harder; it is not used in v1.
+We ship a compact, dependency-free HNSW implemented in-tree (`crates/anki-core/src/hnsw.rs`) rather than depending on an ANN crate. **[hnsw_rs](https://crates.io/crates/hnsw_rs)** was evaluated but pulls `rayon` / `num_cpus` / `mmap-rs`, which don't fit our single-threaded, no-pthread `wasm32-unknown-emscripten` target; **[usearch](https://crates.io/crates/usearch)** is excellent on native/desktop but its C++ core makes browser-WASM integration harder. The in-tree index is a small module over fixed-dimension, L2-normalized vectors (so cosine similarity is the dot product), which keeps the linked `sqlite3.wasm` small and every panic path across the FFI boundary auditable.
 
-One `hnsw_rs` index is maintained per `TEXT VECTOR` column per virtual table. Indexes are serialized to the database backing store and rebuilt on load if needed.
+One index is maintained per `TEXT VECTOR` column per virtual table. Today it lives in RAM and is (re)built from the in-memory embedding cache: the first `MATCH` after a change bulk-builds via `Hnsw::build`, and subsequent writes splice single rows in incrementally (`Hnsw::add` / `Hnsw::remove`, ~O(log N)) instead of forcing a full rebuild. Persisting the graph to the backing store — so open / first-`MATCH` *reads* it instead of rebuilding — is planned; see roadmap #1 in `TODO.md`.
 
 ### Fixed internal parameters (v1)
 
@@ -484,7 +484,7 @@ Example: HNSW may retrieve 256 candidates, 40 pass the ≥ 0.5 threshold, `LIMIT
 | Extension API | `sqlite3_ext` / `ext-sqlite3-rs` | Virtual table module, SQL functions |
 | ONNX inference | **[Tract](https://github.com/sonos/tract)** (`tract-onnx`) | Pure Rust; single WASM module with SQLite |
 | Tokenization | **tokenizers** | HuggingFace-compatible `tokenizer.json` |
-| HNSW | **hnsw_rs** | Per-column approximate nearest-neighbor index |
+| HNSW | **in-tree** (`hnsw.rs`) | Per-column approximate nearest-neighbor index |
 | Model | **quantized `model.onnx`** | Pinned in `models/all-MiniLM-L6-v2/` |
 
 Tract is chosen over ONNX Runtime (`ort`) because it compiles cleanly to `wasm32-unknown-unknown` without a separate Emscripten C++ WASM module or JS bridge.
@@ -699,7 +699,7 @@ sqlite-anki/
 ├── package.json                  # pnpm workspace root
 ├── pnpm-workspace.yaml
 ├── crates/
-│   ├── anki-core/                # vtab module, Tract embedder, hnsw_rs
+│   ├── anki-core/                # vtab module, Tract embedder, in-tree HNSW
 │   └── anki-wasm/         # include_bytes! model; links into SQLite WASM
 ├── wasm/
 │   ├── sqlite3_wasm_extra_init.c
@@ -820,7 +820,7 @@ Locked-in choices for implementation:
 | Extension API | `sqlite3_ext` | Virtual table module |
 | ONNX runtime | **Tract** | Pure Rust; `wasm32-unknown-unknown` |
 | Tokenizer | **tokenizers** | `tokenizer.json` from HuggingFace |
-| ANN index | **hnsw_rs** | Pure Rust; avoids C++/WASM friction |
+| ANN index | **in-tree HNSW** | Dependency-free; avoids rayon/mmap in WASM |
 | Default model | Quantized **all-MiniLM-L6-v2** ONNX | 384d; ~20–25 MB; good browser default |
 | Model delivery | Pre-bundled per WASM package | No install step |
 | DB persistence | **OPFS** | Browser durability |
@@ -835,7 +835,7 @@ Validate the risky parts before building the full virtual table:
 
 1. Rust `wasm32` crate with `include_bytes!("model.onnx")` + `tokenizer.json`
 2. Tract: embed one fixed string → 384-dim vector
-3. hnsw_rs: insert a few vectors → query top-5
+3. in-tree HNSW: insert a few vectors → query top-5
 4. Optional: link into minimal SQLite WASM build
 
 ### v0.1 — minimal virtual table
@@ -867,7 +867,7 @@ Validate the risky parts before building the full virtual table:
 
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
-| Language | Rust | WASM-friendly; Tract + hnsw_rs in one module |
+| Language | Rust | WASM-friendly; Tract + in-tree HNSW in one module |
 | SQLite distribution | Official WASM | OPFS, workers, long-term support |
 | Extension loading | Static link | Only option in browser |
 | User DDL (v1) | `CREATE VIRTUAL TABLE ... USING anki` | Planner-integrated `MATCH` + HNSW |
@@ -880,7 +880,7 @@ Validate the risky parts before building the full virtual table:
 | Result count | SQL `LIMIT` | Standard, user-controlled |
 | Configuration | No PRAGMAs | Extensions cannot add PRAGMAs without custom VFS |
 | ONNX runtime | Tract | Pure Rust WASM |
-| HNSW | hnsw_rs | Pure Rust WASM |
+| HNSW | in-tree (`hnsw.rs`) | Dependency-free pure Rust; no rayon/mmap |
 | v1 model delivery | Pre-bundled per WASM | Simplest; no install step |
 | DB persistence | OPFS | Required for browser v1 |
 | Threading | Worker | Sync inference blocks; keep off main thread |
@@ -920,7 +920,7 @@ Validate the risky parts before building the full virtual table:
 | sqlite-vec WASM | https://alexgarcia.xyz/sqlite-vec/wasm.html |
 | sqlite-rust-wasm | https://github.com/tantaman/sqlite-rust-wasm |
 | Tract (Rust ONNX) | https://github.com/sonos/tract |
-| hnsw_rs | https://crates.io/crates/hnsw_rs |
+| hnsw_rs (evaluated, not used) | https://crates.io/crates/hnsw_rs |
 | all-MiniLM-L6-v2 | https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2 |
 
 ---
