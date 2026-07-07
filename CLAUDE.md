@@ -66,6 +66,6 @@ The ONNX model is **never** compiled into the wasm — the wasm links a full ONN
 
 ## Docs map
 
-`docs/DESIGN.md` (full spec), `design-choices.md` (rationale), `dynamic-model-loading.md` (runtime model path), `match-dsl.md` (MATCH syntax), `hybrid-filtering.md` (WHERE + MATCH pushdown correctness), `query-planning.md` (vtab planning), `metrics.md` (`anki_metrics()`), `our-findings.md` (perf/size profiling), `build-variants.md` (engine/threading builds), `streaming-storage.md` (design: cut WASM RAM by streaming shadow-table data instead of full materialization), `TODO.md` (deferred follow-up work / roadmap).
+`docs/DESIGN.md` (full spec), `design-choices.md` (rationale), `dynamic-model-loading.md` (runtime model path), `match-dsl.md` (MATCH syntax), `hybrid-filtering.md` (WHERE + MATCH pushdown correctness), `query-planning.md` (vtab planning), `metrics.md` (`anki_metrics()`), `our-findings.md` (perf/size profiling), `build-variants.md` (engine/threading builds), `streaming-storage.md` (design: cut WASM RAM by streaming shadow-table data instead of full materialization), `limitations.md` (known by-design limits: vtab constraints, imports, storage format), `TODO.md` (deferred follow-up work / roadmap).
 
 Repo-root `CHANGELOG.md` tracks notable changes over time (date-sectioned, newest first, links to the docs above) — add a new entry at the top when landing a notable change. Repo-root `JOURNEY.md` is the narrative companion — the *why* and the story, one section per step in chronological order; append a new section at the bottom as the story continues.
