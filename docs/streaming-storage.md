@@ -315,13 +315,13 @@ The existing correctness suites are the specification and **must keep passing** 
 - **Migration guard:** opening a pre-format DB fails with the clear "rebuild required"
   error.
 
-## HNSW graph cache (storage format v4)
+## HNSW graph cache (storage format v5)
 
 The streaming redesign keeps only rowid + embeddings + the HNSW graph in RAM, and the
 graph is *rebuilt* from the `anki_emb_<col>` blobs on the first `MATCH` after open —
-an O(N) CPU spike. Format **v4** removes that spike by persisting the built graph:
+an O(N) CPU spike. Format **v5** removes that spike by persisting the built graph:
 
-- A second shadow table, **`<name>_anki_graph(col TEXT PRIMARY KEY, graph BLOB)`**, one
+- A second shadow table, **`<name>_anki_hnsw(col TEXT PRIMARY KEY, graph BLOB)`**, one
   row per vector column, is created at `xCreate` (up front, so persisting later never
   needs schema-changing DDL).
 - **What's stored is topology only** — adjacency lists, entry point, levels — *not* the

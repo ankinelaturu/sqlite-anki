@@ -726,6 +726,29 @@ created up front at `xCreate` precisely so that committing never has to run sche
 payoff shows up as a number that *doesn't* move: reopen a database, run the first `MATCH`, and the
 rebuild counter stays flat.
 
+## Naming the shadows
+`Jul 07, 2026`
+
+Persisting the graph added a second shadow table, `<name>_anki_graph`, next to the data shadow
+`<name>_anki` — and that asymmetry immediately bit us. The explorer hides internals with a
+`NOT LIKE` filter, and `%_anki` (ends in "anki") couldn't also catch `_anki_graph`, so the cache
+table leaked into the schema view. The fix wasn't another `NOT LIKE` clause; it was to make the
+naming *systematic*. We renamed the shadows to the parallel `<name>_anki_data` and
+`<name>_anki_hnsw` (and the exporters to `anki_hnsw_json` / `anki_hnsw_dot`), so every per-table
+internal shares one `<name>_anki_*` shape. Now the explorer filter is a single `%_anki_%` rule that
+covers today's tables and tomorrow's (int8 will add more), and the whole class of "forgot to update
+the filter" bugs is gone. `hnsw` over `graph`, too — it's the precise term the rest of the code uses.
+
+The one deliberate *in*consistency is the columns: they stay prefix-namespaced (`anki_id`,
+`anki_emb_<col>`), not `<col>_anki_emb`. That's not laziness — it's that tables and columns follow
+different correct conventions. Shadow *tables* take SQLite's `<owner>_<suffix>` shadow convention, so
+owner-first (`customers_anki_data`) is idiomatic. *Columns* have no owner-prefix convention; you just
+want to reserve an identifier namespace, and a prefix (`anki_`, exactly like `sqlite_`) is the clean
+way — enforced as "no user column may start with `anki_`." And `anki_id` has no source column, so it
+*must* be a prefix; making the embedding columns match keeps the internal columns uniform among
+themselves. Same `anki` namespace throughout; the placement just follows the convention that fits.
+Storage format bumped v4 → v5.
+
 ## This document
 `Jul 05, 2026`
 

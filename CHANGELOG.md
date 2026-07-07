@@ -9,7 +9,7 @@ full rationale and design. Add new entries at the top.
 ### Performance
 - **The HNSW graph is persisted and reloaded on open.** The built index is serialized (topology
   only — vectors are rehydrated from the existing `anki_emb_<col>` blobs, tombstones compacted out)
-  into a new `<name>_anki_graph` shadow table, persisted at commit (`xSync`, atomically with the
+  into a new `<name>_anki_hnsw` shadow table, persisted at commit (`xSync`, atomically with the
   data). On reopen the **first `MATCH` reads the graph instead of rebuilding it** (O(N)), removing
   the open-time CPU spike. All-or-nothing load with a full safety net: a missing/stale/corrupt cache
   just falls back to the rebuild path. New `graph_saves`/`graph_loads` metrics. Complements
@@ -24,9 +24,9 @@ full rationale and design. Add new entries at the top.
   roadmap #1 in [docs/TODO.md](docs/TODO.md).
 
 ### Added
-- **`anki_graph_json(table, col)` / `anki_graph_dot(table, col)` SQL functions** export the
+- **`anki_hnsw_json(table, col)` / `anki_hnsw_dot(table, col)` SQL functions** export the
   persisted HNSW graph topology for a vector column (nodes + per-layer edges, rowids for labels;
-  or Graphviz DOT) so the app can visualize the index. Decoded in Rust from the `<table>_anki_graph`
+  or Graphviz DOT) so the app can visualize the index. Decoded in Rust from the `<table>_anki_hnsw`
   cache (single source of truth for the blob format); `NULL` when no graph is cached. See
   [docs/hnsw.md](docs/hnsw.md).
 - **Import carries enforceable constraints** onto vectorized tables — `NOT NULL` and
@@ -39,9 +39,14 @@ full rationale and design. Add new entries at the top.
   foreign keys, `DEFAULT`s, and table-level constraints a table loses when you tick it to vectorize.
 
 ### Changed
-- **Storage format v3 → v4.** Adds the `<name>_anki_graph` HNSW graph cache (created at table
-  creation). DBs written by an older format still hit the existing "rebuild required" guard on open;
-  rebuild via Import & Vectorize or by re-populating the demo.
+- **Storage format v3 → v4.** Adds the HNSW graph cache table (created at table creation). DBs
+  written by an older format still hit the existing "rebuild required" guard on open; rebuild via
+  Import & Vectorize or by re-populating the demo.
+- **Storage format v4 → v5 — parallel shadow-table names.** Renamed the per-table shadows to
+  `<name>_anki_data` (rows + embeddings) and `<name>_anki_hnsw` (graph cache), and the export
+  functions to `anki_hnsw_json` / `anki_hnsw_dot`. All per-table internals now share the
+  `<name>_anki_*` shape, so the explorer hides them with one rule and future shadow tables fit the
+  scheme. (Column names — `anki_id`, `anki_emb_<col>` — keep the reserved `anki_` prefix.)
 
 ### Docs
 - Added [docs/limitations.md](docs/limitations.md) — a living list of by-design limits (vtab

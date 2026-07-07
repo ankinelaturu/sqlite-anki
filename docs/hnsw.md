@@ -128,8 +128,8 @@ node whose neighbors were all deleted can get stranded), which the occasional re
 
 The built graph normally lives only in WASM RAM and is rebuilt from the shadow table's
 `anki_emb_<col>` blobs on the first `MATCH` after open — an O(N) CPU spike. `serialize` /
-`deserialize` remove that spike by caching the graph to disk (storage format v4; see
-[streaming-storage.md](./streaming-storage.md)).
+`deserialize` remove that spike by caching the graph to the `<name>_anki_hnsw` shadow
+table (storage format v5; see [streaming-storage.md](./streaming-storage.md)).
 
 **Topology only.** `serialize` writes the graph structure — ids, adjacency, entry, levels,
 `rng` — but **not the vectors**, which already sit in `anki_emb_<col>`. On load,
@@ -203,10 +203,10 @@ never on the hot path**, only the fallback.
 
 Two scalar SQL functions export the graph so the app can visualize it (e.g. the
 explorer's "Show HNSW graph" on a vector field). Both take `(table, col)`, read the
-**persisted** `<table>_anki_graph` cache, and decode it in Rust — so the blob format
+**persisted** `<table>_anki_hnsw` cache, and decode it in Rust — so the blob format
 stays single-sourced (no hand-written JS parser to drift):
 
-- **`anki_graph_json(table, col)`** → a JSON object:
+- **`anki_hnsw_json(table, col)`** → a JSON object:
 
   ```json
   { "entry": 0, "max_level": 1,
@@ -224,7 +224,7 @@ stays single-sourced (no hand-written JS parser to drift):
   shadow means reaching past the public interface.) Edges are undirected, de-duplicated
   per layer.
 
-- **`anki_graph_dot(table, col)`** → Graphviz DOT (node label = rowid, entry emphasized,
+- **`anki_hnsw_dot(table, col)`** → Graphviz DOT (node label = rowid, entry emphasized,
   edges colored by layer) for a quick static render.
 
 Both return **`NULL`** when there's no graph to show — no cache row yet, an empty

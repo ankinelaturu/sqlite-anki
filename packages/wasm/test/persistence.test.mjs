@@ -2,7 +2,7 @@
  * Persistence via the per-table shadow table.
  *
  * Each `anki` virtual table is backed by a real, hidden SQLite table
- * (`<name>_anki`) that stores the column values AND the embeddings (as
+ * (`<name>_anki_data`) that stores the column values AND the embeddings (as
  * little-endian f32 BLOBs). The in-memory state is just a cache:
  *  - `xUpdate` write-through persists every change to the shadow table.
  *  - `xConnect` (reopen) reloads rows + embeddings from it.
@@ -33,7 +33,7 @@ test("rows + embeddings survive close/reopen (search works on reload)", () => {
     ('Acme','potential upsell opportunity'),
     ('Beta','support ticket about billing');`);
   // The shadow table is a real table we can count directly — proves write-through.
-  const shadow = db.selectValue(`SELECT count(*) FROM "main"."customers_anki"`);
+  const shadow = db.selectValue(`SELECT count(*) FROM "main"."customers_anki_data"`);
   db.close();
   assert.equal(shadow, 2, "write-through to shadow table");
 
@@ -52,7 +52,7 @@ test("rows + embeddings survive close/reopen (search works on reload)", () => {
 const metricsSnap = (sqlite3) =>
   JSON.parse(sqlite3.wasm.cstrToJs(sqlite3.wasm.exports.anki_metrics()));
 
-// Roadmap #2: the built HNSW graph is persisted to `<name>_anki_graph` at commit,
+// Roadmap #2: the built HNSW graph is persisted to `<name>_anki_hnsw` at commit,
 // so reopening reads it instead of paying a cold O(N) rebuild on the first MATCH.
 test("HNSW graph persists across reopen: first MATCH skips the rebuild", () => {
   const path = "/graph-persist.db";
@@ -66,7 +66,7 @@ test("HNSW graph persists across reopen: first MATCH skips the rebuild", () => {
   db.exec(`INSERT INTO docs(notes) VALUES('payment overdue notice')`);
   // The graph cache is a real shadow table we can observe directly.
   const cached = db.selectValue(
-    `SELECT count(*) FROM "main"."docs_anki_graph" WHERE graph IS NOT NULL`,
+    `SELECT count(*) FROM "main"."docs_anki_hnsw" WHERE graph IS NOT NULL`,
   );
   db.close();
   assert.equal(cached, 1, "one vector column's graph persisted to the cache");
@@ -121,17 +121,17 @@ test("a deleted row stays gone after reopen (compacted graph, no rebuild)", () =
   }
 });
 
-// DROP TABLE must not leak the backing store: xDestroy drops `<name>_anki` too.
+// DROP TABLE must not leak the backing store: xDestroy drops `<name>_anki_data` too.
 test("DROP TABLE removes the shadow table (xDestroy)", () => {
   const db = new sqlite3.oo1.DB(":memory:");
   try {
     db.exec(`CREATE VIRTUAL TABLE t USING anki(name TEXT, notes TEXT VECTOR);`);
     db.exec(`INSERT INTO t(name,notes) VALUES('a','hello world');`);
-    assert.equal(db.selectValue(`SELECT count(*) FROM sqlite_master WHERE name='t_anki'`), 1);
-    assert.equal(db.selectValue(`SELECT count(*) FROM sqlite_master WHERE name='t_anki_graph'`), 1);
+    assert.equal(db.selectValue(`SELECT count(*) FROM sqlite_master WHERE name='t_anki_data'`), 1);
+    assert.equal(db.selectValue(`SELECT count(*) FROM sqlite_master WHERE name='t_anki_hnsw'`), 1);
     db.exec(`DROP TABLE t`);
-    assert.equal(db.selectValue(`SELECT count(*) FROM sqlite_master WHERE name='t_anki'`), 0);
-    assert.equal(db.selectValue(`SELECT count(*) FROM sqlite_master WHERE name='t_anki_graph'`), 0);
+    assert.equal(db.selectValue(`SELECT count(*) FROM sqlite_master WHERE name='t_anki_data'`), 0);
+    assert.equal(db.selectValue(`SELECT count(*) FROM sqlite_master WHERE name='t_anki_hnsw'`), 0);
   } finally {
     db.close();
   }

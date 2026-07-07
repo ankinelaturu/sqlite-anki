@@ -47,7 +47,7 @@ The streaming redesign (`streaming-storage.md`) already cut RAM to **rowid + emb
 The storage-format guard hard-fails opening older-format DBs with a raw error. Show a friendly
 message that offers to rebuild (Import & Vectorize / re-populate demo) — the pre-1.0 migration story.
 Build it **once, after the format-bumping features settle** (#2 per-DB model, #3 int8; persist-graph
-already bumped to v4), so it's written against a stable format instead of revised each bump.
++ shadow-table rename already bumped to v5), so it's written against a stable format instead of revised each bump.
 
 ### 5. Native CLI + interactive import
 - A native macOS/Windows **CLI** reusing `anki-core` + the `anki` vtab (link into a native SQLite
@@ -79,10 +79,10 @@ already bumped to v4), so it's written against a stable format instead of revise
   `dynamic-model-loading.md`), and other v1 assumptions. Reconcile it with shipped reality (or split the
   historical spec from the current-state docs). **Docs only, low priority.**
 - **Real shadow-table protection (`xShadowName` + `SQLITE_DBCONFIG_DEFENSIVE`).** The shadow tables
-  (`<name>_anki`, `<name>_anki_graph`, `anki_meta`) are ordinary tables today — any SQL can read *and
+  (`<name>_anki_data`, `<name>_anki_hnsw`, `anki_meta`) are ordinary tables today — any SQL can read *and
   write* them, and a direct write can corrupt vtab invariants (embeddings out of sync, a stale graph).
   Set the module's `xShadowName` and enable defensive mode so **direct writes are blocked while reads
-  stay open** (the `anki_graph_json`/`anki_graph_dot` exports and the explorer's read-only schema view
+  stay open** (the `anki_hnsw_json`/`anki_hnsw_dot` exports and the explorer's read-only schema view
   keep working; reads are open by design). **Verify our own writes survive:** the extension writes these
   tables via SQL in `xUpdate`/`xSync` — confirm defensive mode treats those as vtab-internal (FTS5 works
   under it, but our write path differs) before shipping. Currently the tables are only hidden
@@ -94,9 +94,15 @@ already bumped to v4), so it's written against a stable format instead of revise
   the payoff, and needs exhaustive parity tests. Dropped.
 
 ## Done
+- **Parallel shadow-table names — DONE (2026-07-07, storage format v5).** Renamed the per-table
+  shadows to `<name>_anki_data` (rows + embeddings) and `<name>_anki_hnsw` (graph cache), and the
+  export functions to `anki_hnsw_json` / `anki_hnsw_dot`, so every per-table internal shares the
+  `<name>_anki_*` shape. The explorer's schema filter collapses to one `%_anki_%` rule (was an
+  enumerated, leak-prone list), and future shadow tables fit the scheme. Column names keep the
+  reserved `anki_` prefix (`anki_id`, `anki_emb_<col>`) — different convention, see `hnsw.md`.
 - **Persist the HNSW graph — DONE (2026-07-07, storage format v4).** The built graph is serialized
   (topology only — vectors are rehydrated from `anki_emb_<col>`, tombstones compacted out) into a
-  new `<name>_anki_graph` shadow table, one row per vector column. Created at `xCreate`; persisted in
+  new `<name>_anki_hnsw` shadow table, one row per vector column. Created at `xCreate`; persisted in
   `xSync` (atomic with the committing txn) whenever a write left a live graph, else the cache is
   cleared; loaded in `xConnect` after `load_all`, so the **first `MATCH` after open reads the graph
   instead of rebuilding** (O(N) spike gone). All-or-nothing load; any miss/corruption/stale rowid

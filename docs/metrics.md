@@ -72,7 +72,7 @@ Notes:
   embeddings (MATCH). Use `embed_calls` to attribute.
 - `index_rebuild_ms` is the lazy HNSW rebuild that fires on the first MATCH after
   a write — worth showing separately, since it's a periodic spike, not per-row.
-- `graph_loads` counts opens that read the persisted `<name>_anki_graph` cache
+- `graph_loads` counts opens that read the persisted `<name>_anki_hnsw` cache
   instead of rebuilding; a load means the following first MATCH does **not** add to
   `index_rebuilds`. `graph_saves` counts persists at commit (`xSync`).
 - `candidates` ≈ work done by the search: rows scanned (exact/brute) or candidates

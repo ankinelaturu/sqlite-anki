@@ -102,7 +102,7 @@ pub fn record_index_rebuild(ms: f64) {
     m.index_rebuilds += 1;
 }
 
-/// One persist of an HNSW graph to the `<name>_anki_graph` shadow table.
+/// One persist of an HNSW graph to the `<name>_anki_hnsw` shadow table.
 pub fn record_graph_save(ms: f64) {
     let mut m = METRICS.lock();
     m.graph_save_ms += ms;

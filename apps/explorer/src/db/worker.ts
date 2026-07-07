@@ -402,7 +402,7 @@ class AnkiWorker implements AnkiWorkerApi {
       `SELECT name, sql, type FROM sqlite_master
        WHERE type IN ('table', 'view')
          AND name NOT LIKE 'sqlite_%' AND name NOT LIKE 'anki_%'
-         AND name NOT LIKE '%_anki'
+         AND name NOT LIKE '%_anki_%'
        ORDER BY name`,
     ) as Array<{ name: string; sql: string; type: string }>;
 
@@ -835,7 +835,7 @@ function sourceObjects(db: Db): SourceObject[] {
     `SELECT name, sql, type FROM sqlite_master
      WHERE type IN ('table', 'view')
        AND name NOT LIKE 'sqlite_%' AND name NOT LIKE 'anki_%'
-       AND name NOT LIKE '%_anki'
+       AND name NOT LIKE '%_anki_%'
      ORDER BY type, name`,
   ) as Array<{ name: string; sql: string; type: string }>;
   return objs.map((o) => {

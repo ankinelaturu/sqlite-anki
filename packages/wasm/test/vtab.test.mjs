@@ -201,7 +201,7 @@ test("large non-vector column round-trips from disk alongside MATCH", async () =
   }
 });
 
-// Data columns are stored under their REAL names in the shadow table (`<t>_anki`),
+// Data columns are stored under their REAL names in the shadow table (`<t>_anki_data`),
 // with internal columns namespaced `anki_`. So a column named `id` or `c0` — which
 // the old positional scheme existed to avoid — now round-trips fine.
 test("real column names (incl 'id'/'c0') round-trip; shadow uses them", async () => {
@@ -217,7 +217,7 @@ test("real column names (incl 'id'/'c0') round-trip; shadow uses them", async ()
     assert.equal(row.c0, "legacy");
     assert.equal(db.selectValue(`SELECT id FROM docs WHERE body MATCH 'cloud database'`), "X-1");
     // The shadow table carries the real names + `anki_` internals, in order.
-    const cols = db.selectObjects(`PRAGMA table_info("docs_anki")`).map((c) => c.name);
+    const cols = db.selectObjects(`PRAGMA table_info("docs_anki_data")`).map((c) => c.name);
     assert.deepEqual(cols, ["anki_id", "id", "c0", "body", "anki_emb_body"]);
   } finally {
     db.close();

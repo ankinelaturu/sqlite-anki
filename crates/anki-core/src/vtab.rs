@@ -352,7 +352,7 @@ struct TableState {
     next_rowid: i64,
     /// Connection used to read/write the persistent shadow table.
     db: *mut sqlite3,
-    /// Quoted, db-qualified shadow table name, e.g. `"main"."customers_anki"`.
+    /// Quoted, db-qualified shadow table name, e.g. `"main"."customers_anki_data"`.
     data_table: String,
     /// Set on `xRollback`: the cache may diverge from the rolled-back shadow
     /// table, so reload it lazily at the next `xFilter`.
@@ -361,8 +361,8 @@ struct TableState {
     indexes: Vec<Option<Hnsw>>,
     /// Set on any write/reload: indexes are stale and rebuilt at the next `MATCH`.
     index_dirty: bool,
-    /// Quoted, db-qualified graph-cache table, e.g. `"main"."customers_anki_graph"`.
-    graph_table: String,
+    /// Quoted, db-qualified graph-cache table, e.g. `"main"."customers_anki_hnsw"`.
+    hnsw_table: String,
     /// Set on any write: the persisted graph no longer matches committed data, so
     /// the next `xSync` must re-persist (if the graph is live) or clear it.
     graph_disk_stale: bool,
@@ -390,7 +390,7 @@ struct AnkiCursor {
     /// Columns with an active `MATCH` (in plan order); empty when none.
     /// each `<col>_score` column maps back to one of these.
     match_cols: Vec<usize>,
-    /// Reused `SELECT <cols> FROM <name>_anki WHERE anki_id=?` for serving user columns
+    /// Reused `SELECT <cols> FROM <name>_anki_data WHERE anki_id=?` for serving user columns
     /// on demand (xColumn). NULL until first used; finalized in x_close.
     row_stmt: *mut sqlite3_stmt,
     /// rowid whose values are cached in `row_cells` (`0` = none; rowids are ≥ 1).
@@ -692,14 +692,14 @@ unsafe fn set_err(pz_err: *mut *mut c_char, msg: &str) {
     *pz_err = p as *mut c_char;
 }
 
-/// On-disk storage-format version of the shadow table (`<name>_anki`). Bumped when
-/// the layout changes incompatibly; `x_connect` refuses to open an older format.
-/// v2 introduced typed shadow columns; v3 renamed the shadow table to `<name>_anki`,
-/// namespaced internal columns (`anki_id`, `anki_emb_<col>`), and stores data columns
-/// under their real names; v4 adds the `<name>_anki_graph` HNSW graph cache created at
-/// `xCreate` (so writes can persist the index without DDL at commit time) — see
-/// docs/streaming-storage.md.
-const STORAGE_FORMAT: u32 = 4;
+/// On-disk storage-format version of the per-table shadow tables. Bumped when the
+/// layout changes incompatibly; `x_connect` refuses to open an older format.
+/// v2 introduced typed shadow columns; v3 gave the shadow real column names
+/// (`anki_id`, `anki_emb_<col>`, data columns under their real names); v4 added the
+/// HNSW graph cache; v5 renamed the shadow tables to the parallel `<name>_anki_data`
+/// (rows + embeddings) and `<name>_anki_hnsw` (graph cache), both created at `xCreate`
+/// so writes persist the index without DDL at commit time — see docs/streaming-storage.md.
+const STORAGE_FORMAT: u32 = 5;
 
 /// Quoted, db-qualified `anki_meta` table name (database-wide model metadata).
 fn meta_table_ident(db_name: &str) -> String {
@@ -885,25 +885,25 @@ unsafe fn arg_str(argv: *const *const c_char, i: isize) -> String {
     }
 }
 
-/// Quoted, db-qualified shadow table name, e.g. `"main"."customers_anki"`. The
-/// `_anki` suffix follows SQLite's `<vtabname>_<suffix>` shadow-table convention.
+/// Quoted, db-qualified shadow table name, e.g. `"main"."customers_anki_data"`. The
+/// `_anki_data` suffix follows SQLite's `<vtabname>_<suffix>` shadow-table convention.
 fn data_table_ident(db_name: &str, table: &str) -> String {
     format!(
         "{}.{}",
         quote_ident(db_name),
-        quote_ident(&format!("{table}_anki"))
+        quote_ident(&format!("{table}_anki_data"))
     )
 }
 
 /// Quoted, db-qualified HNSW graph-cache table, e.g.
-/// `"main"."customers_anki_graph"`. Sits beside the `<name>_anki` data shadow
+/// `"main"."customers_anki_hnsw"`. Sits beside the `<name>_anki_data` data shadow
 /// (same `<vtabname>_*` shadow convention) and holds one serialized graph per
 /// vector column so open can read the index instead of rebuilding it.
-fn graph_table_ident(db_name: &str, table: &str) -> String {
+fn hnsw_table_ident(db_name: &str, table: &str) -> String {
     format!(
         "{}.{}",
         quote_ident(db_name),
-        quote_ident(&format!("{table}_anki_graph"))
+        quote_ident(&format!("{table}_anki_hnsw"))
     )
 }
 
@@ -1261,7 +1261,7 @@ unsafe fn new_state(
     let db_name = arg_str(argv, 1);
     let table_name = arg_str(argv, 2);
     let data_table = data_table_ident(&db_name, &table_name);
-    let graph_table = graph_table_ident(&db_name, &table_name);
+    let hnsw_table = hnsw_table_ident(&db_name, &table_name);
 
     Some(Box::into_raw(Box::new(TableState {
         columns,
@@ -1274,7 +1274,7 @@ unsafe fn new_state(
         dirty: false,
         indexes: (0..ncol).map(|_| None).collect(),
         index_dirty: true,
-        graph_table,
+        hnsw_table,
         graph_disk_stale: false,
     })))
 }
@@ -1330,7 +1330,7 @@ fn index_remove_row(st: &mut TableState, rowid: i64) {
     }
 }
 
-/// Persists each column's live HNSW graph into the `<name>_anki_graph` shadow
+/// Persists each column's live HNSW graph into the `<name>_anki_hnsw` shadow
 /// table so a later open can [`load_graphs`] instead of rebuilding. Writes one
 /// row per vector column (serialized topology, or NULL for an empty column),
 /// replacing any prior contents so the stored set stays all-or-nothing. Called
@@ -1344,13 +1344,13 @@ unsafe fn save_graphs(st: &mut TableState) -> c_int {
     let t0 = metrics::now_ms();
     // The table is created at xCreate (storage format v4), so xSync only does DML —
     // running DDL inside the committing transaction would be unsafe.
-    if exec(st.db, &format!("DELETE FROM {}", st.graph_table)) != SQLITE_OK {
+    if exec(st.db, &format!("DELETE FROM {}", st.hnsw_table)) != SQLITE_OK {
         return SQLITE_ERROR;
     }
 
     let sql = format!(
         "INSERT INTO {}(col, graph) VALUES(?, ?)",
-        st.graph_table
+        st.hnsw_table
     );
     for k in 0..st.vector_cols.len() {
         let ci = st.vector_cols[k];
@@ -1402,7 +1402,7 @@ unsafe fn save_graphs(st: &mut TableState) -> c_int {
 unsafe fn clear_graphs(st: &TableState) {
     // If the table was never created there is nothing to clear (and the DELETE
     // would error): guard with IF EXISTS-style tolerance by ignoring failure.
-    let _ = exec(st.db, &format!("DELETE FROM {}", st.graph_table));
+    let _ = exec(st.db, &format!("DELETE FROM {}", st.hnsw_table));
 }
 
 /// Loads a persisted graph for every vector column, rehydrating vectors from the
@@ -1414,7 +1414,7 @@ unsafe fn clear_graphs(st: &TableState) {
 /// rowid whose vector is gone all yield `false`, never an error.
 unsafe fn load_graphs(st: &mut TableState) -> bool {
     let t0 = metrics::now_ms();
-    let sql = format!("SELECT col, graph FROM {}", st.graph_table);
+    let sql = format!("SELECT col, graph FROM {}", st.hnsw_table);
     let csql = match CString::new(sql) {
         Ok(c) => c,
         Err(_) => return false,
@@ -1547,7 +1547,7 @@ unsafe extern "C" fn x_create(
         None => return SQLITE_ERROR,
     };
 
-    // Create the persistent shadow table (`<name>_anki`) backing this vtab.
+    // Create the persistent shadow table (`<name>_anki_data`) backing this vtab.
     let ddl = build_ddl(&(*state).data_table, &(*state).columns);
     let rc = exec(db, &ddl);
     if rc != SQLITE_OK {
@@ -1555,12 +1555,12 @@ unsafe extern "C" fn x_create(
         return rc;
     }
 
-    // Create the HNSW graph cache (`<name>_anki_graph`) up front so persisting the
+    // Create the HNSW graph cache (`<name>_anki_hnsw`) up front so persisting the
     // index at commit (`xSync`) is pure DML — never schema-changing DDL. One row per
     // vector column; populated on the first write after the index is built.
     let graph_ddl = format!(
         "CREATE TABLE IF NOT EXISTS {}(col TEXT PRIMARY KEY, graph BLOB)",
-        (*state).graph_table
+        (*state).hnsw_table
     );
     if exec(db, &graph_ddl) != SQLITE_OK {
         drop(Box::from_raw(state));
@@ -1669,7 +1669,7 @@ unsafe extern "C" fn x_destroy(vtab: *mut sqlite3_vtab) -> c_int {
     let vt = Box::from_raw(vtab as *mut AnkiVtab);
     let st = Box::from_raw(vt.state);
     exec(st.db, &format!("DROP TABLE IF EXISTS {}", st.data_table));
-    exec(st.db, &format!("DROP TABLE IF EXISTS {}", st.graph_table));
+    exec(st.db, &format!("DROP TABLE IF EXISTS {}", st.hnsw_table));
     drop(st);
     drop(vt);
     SQLITE_OK
@@ -2314,13 +2314,13 @@ unsafe extern "C" fn anki_dim_fn(
 }
 
 /// Reads the **persisted** HNSW graph blob for `table`.`col` from the
-/// `<table>_anki_graph` cache. Returns `None` when there's no non-empty blob to
+/// `<table>_anki_hnsw` cache. Returns `None` when there's no non-empty blob to
 /// decode — no cache row yet, a `NULL` (empty-column) blob, or a query error.
 /// This reads the on-disk cache (populated at commit), not the live in-RAM
 /// index; the two match after a build has been committed.
 unsafe fn read_graph_blob(db: *mut sqlite3, table: &str, col: &str) -> Option<Vec<u8>> {
-    let graph_table = quote_ident(&format!("{table}_anki_graph"));
-    let sql = format!("SELECT graph FROM {graph_table} WHERE col = ?");
+    let hnsw_table = quote_ident(&format!("{table}_anki_hnsw"));
+    let sql = format!("SELECT graph FROM {hnsw_table} WHERE col = ?");
     let csql = CString::new(sql).ok()?;
     let mut stmt: *mut sqlite3_stmt = ptr::null_mut();
     if sqlite3_prepare_v2(db, csql.as_ptr(), -1, &mut stmt, ptr::null_mut()) != SQLITE_OK {
@@ -2375,10 +2375,10 @@ unsafe fn graph_export(
     }
 }
 
-/// `anki_graph_json(table, col)` — the persisted HNSW graph for a vector column
+/// `anki_hnsw_json(table, col)` — the persisted HNSW graph for a vector column
 /// as JSON (`{entry, max_level, nodes:[{node,rowid,level}], edges:[{a,b,layer}]}`),
 /// or `NULL` if none is cached. `rowid` joins back to `table` for labels.
-unsafe extern "C" fn anki_graph_json_fn(
+unsafe extern "C" fn anki_hnsw_json_fn(
     ctx: *mut sqlite3_context,
     argc: c_int,
     argv: *mut *mut sqlite3_value,
@@ -2386,9 +2386,9 @@ unsafe extern "C" fn anki_graph_json_fn(
     graph_export(ctx, argc, argv, |idx| idx.to_json());
 }
 
-/// `anki_graph_dot(table, col)` — the persisted HNSW graph as Graphviz DOT, or
+/// `anki_hnsw_dot(table, col)` — the persisted HNSW graph as Graphviz DOT, or
 /// `NULL` if none is cached. Node labels are rowids; edges are colored by layer.
-unsafe extern "C" fn anki_graph_dot_fn(
+unsafe extern "C" fn anki_hnsw_dot_fn(
     ctx: *mut sqlite3_context,
     argc: c_int,
     argv: *mut *mut sqlite3_value,
@@ -2472,15 +2472,15 @@ pub unsafe extern "C" fn anki_register_vtab(db: *mut sqlite3) -> c_int {
     if rc != SQLITE_OK {
         return rc;
     }
-    // anki_graph_json(table, col) / anki_graph_dot(table, col) export the persisted
+    // anki_hnsw_json(table, col) / anki_hnsw_dot(table, col) export the persisted
     // HNSW graph topology for a vector column (for the explorer's graph view).
     let rc = sqlite3_create_function_v2(
         db,
-        b"anki_graph_json\0".as_ptr() as *const c_char,
+        b"anki_hnsw_json\0".as_ptr() as *const c_char,
         2,
         SQLITE_UTF8,
         ptr::null_mut(),
-        Some(anki_graph_json_fn),
+        Some(anki_hnsw_json_fn),
         None,
         None,
         None,
@@ -2490,11 +2490,11 @@ pub unsafe extern "C" fn anki_register_vtab(db: *mut sqlite3) -> c_int {
     }
     sqlite3_create_function_v2(
         db,
-        b"anki_graph_dot\0".as_ptr() as *const c_char,
+        b"anki_hnsw_dot\0".as_ptr() as *const c_char,
         2,
         SQLITE_UTF8,
         ptr::null_mut(),
-        Some(anki_graph_dot_fn),
+        Some(anki_hnsw_dot_fn),
         None,
         None,
         None,

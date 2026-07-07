@@ -1,7 +1,7 @@
 /**
- * Graph export SQL functions: `anki_graph_json(table, col)` and
- * `anki_graph_dot(table, col)` expose the persisted HNSW graph topology so the
- * app (explorer) can visualize it. They read the `<table>_anki_graph` cache and
+ * Graph export SQL functions: `anki_hnsw_json(table, col)` and
+ * `anki_hnsw_dot(table, col)` expose the persisted HNSW graph topology so the
+ * app (explorer) can visualize it. They read the `<table>_anki_hnsw` cache and
  * decode it in Rust — a single source of truth for the blob format.
  */
 import { test, before } from "node:test";
@@ -29,11 +29,11 @@ function seeded(db) {
   db.exec(`UPDATE t SET abcd = abcd WHERE rowid = 1`); // commit → persists at xSync
 }
 
-test("anki_graph_json returns the persisted topology", () => {
+test("anki_hnsw_json returns the persisted topology", () => {
   const db = new sqlite3.oo1.DB(":memory:");
   try {
     seeded(db);
-    const json = db.selectValue(`SELECT anki_graph_json('t','abcd')`);
+    const json = db.selectValue(`SELECT anki_hnsw_json('t','abcd')`);
     assert.equal(typeof json, "string", "returns a JSON string once persisted");
     const g = JSON.parse(json);
 
@@ -43,7 +43,7 @@ test("anki_graph_json returns the persisted topology", () => {
     assert.ok(g.max_level >= 0);
 
     // Every node carries a compact index, a rowid, and a level.
-    const rowids = new Set(db.selectObjects(`SELECT anki_id AS id FROM t_anki`).map((r) => r.id));
+    const rowids = new Set(db.selectObjects(`SELECT anki_id AS id FROM t_anki_data`).map((r) => r.id));
     for (const n of g.nodes) {
       assert.equal(typeof n.node, "number");
       assert.ok(rowids.has(n.rowid), `node rowid ${n.rowid} exists in the table`);
@@ -62,11 +62,11 @@ test("anki_graph_json returns the persisted topology", () => {
   }
 });
 
-test("anki_graph_dot returns Graphviz DOT with a label per node", () => {
+test("anki_hnsw_dot returns Graphviz DOT with a label per node", () => {
   const db = new sqlite3.oo1.DB(":memory:");
   try {
     seeded(db);
-    const dot = db.selectValue(`SELECT anki_graph_dot('t','abcd')`);
+    const dot = db.selectValue(`SELECT anki_hnsw_dot('t','abcd')`);
     assert.equal(typeof dot, "string");
     assert.ok(dot.startsWith("graph hnsw {"), "is a DOT graph");
     assert.ok(dot.trimEnd().endsWith("}"));
@@ -81,7 +81,7 @@ test("labels come from the app via a JOIN on rowid", () => {
   const db = new sqlite3.oo1.DB(":memory:");
   try {
     seeded(db);
-    const g = JSON.parse(db.selectValue(`SELECT anki_graph_json('t','abcd')`));
+    const g = JSON.parse(db.selectValue(`SELECT anki_hnsw_json('t','abcd')`));
     // Resolve rowids → text via the PUBLIC vtab (graph rowid == vtab rowid), the
     // way the explorer should — one scan builds the whole label map.
     const labels = new Map(
@@ -101,10 +101,10 @@ test("NULL when there is no persisted graph or the target is unknown", () => {
     db.exec(`CREATE VIRTUAL TABLE t USING anki(abcd TEXT VECTOR);`);
     db.exec(`INSERT INTO t(abcd) VALUES('hello world')`);
     // No search has built/persisted a graph yet.
-    assert.equal(db.selectValue(`SELECT anki_graph_json('t','abcd')`), null, "no cache yet → NULL");
-    // Unknown table (no _anki_graph) and unknown column → NULL, not an error.
-    assert.equal(db.selectValue(`SELECT anki_graph_json('nope','abcd')`), null);
-    assert.equal(db.selectValue(`SELECT anki_graph_dot('t','not_a_col')`), null);
+    assert.equal(db.selectValue(`SELECT anki_hnsw_json('t','abcd')`), null, "no cache yet → NULL");
+    // Unknown table (no _anki_hnsw) and unknown column → NULL, not an error.
+    assert.equal(db.selectValue(`SELECT anki_hnsw_json('nope','abcd')`), null);
+    assert.equal(db.selectValue(`SELECT anki_hnsw_dot('t','not_a_col')`), null);
   } finally {
     db.close();
   }
