@@ -262,6 +262,8 @@ extern "C" {
         n: c_int,
         d: SqliteDestructor,
     );
+    // The connection a scalar function is running on (for nested reads).
+    fn sqlite3_context_db_handle(ctx: *mut sqlite3_context) -> *mut sqlite3;
 
     // The conflict-resolution mode of the SQL that triggered the current xUpdate
     // (e.g. `INSERT OR REPLACE`); one of SQLITE_ROLLBACK/ABORT/FAIL/IGNORE/REPLACE.
@@ -2311,6 +2313,89 @@ unsafe extern "C" fn anki_dim_fn(
     }
 }
 
+/// Reads the **persisted** HNSW graph blob for `table`.`col` from the
+/// `<table>_anki_graph` cache. Returns `None` when there's no non-empty blob to
+/// decode — no cache row yet, a `NULL` (empty-column) blob, or a query error.
+/// This reads the on-disk cache (populated at commit), not the live in-RAM
+/// index; the two match after a build has been committed.
+unsafe fn read_graph_blob(db: *mut sqlite3, table: &str, col: &str) -> Option<Vec<u8>> {
+    let graph_table = quote_ident(&format!("{table}_anki_graph"));
+    let sql = format!("SELECT graph FROM {graph_table} WHERE col = ?");
+    let csql = CString::new(sql).ok()?;
+    let mut stmt: *mut sqlite3_stmt = ptr::null_mut();
+    if sqlite3_prepare_v2(db, csql.as_ptr(), -1, &mut stmt, ptr::null_mut()) != SQLITE_OK {
+        return None; // no such table (not an anki table / no graph cache)
+    }
+    let ccol = match CString::new(col) {
+        Ok(c) => c,
+        Err(_) => {
+            sqlite3_finalize(stmt);
+            return None;
+        }
+    };
+    sqlite3_bind_text(stmt, 1, ccol.as_ptr(), col.len() as c_int, transient());
+    let mut out = None;
+    if sqlite3_step(stmt) == SQLITE_ROW && sqlite3_column_type(stmt, 0) == SQLITE_BLOB {
+        let n = sqlite3_column_bytes(stmt, 0);
+        let p = sqlite3_column_blob(stmt, 0) as *const u8;
+        if !p.is_null() && n > 0 {
+            out = Some(slice::from_raw_parts(p, n as usize).to_vec());
+        }
+    }
+    sqlite3_finalize(stmt);
+    out
+}
+
+/// Decodes the persisted graph for `argv[0]`.`argv[1]` and hands it to `render`.
+/// Returns `NULL` (via the context) when there's no graph to show or it can't be
+/// decoded — the caller (app) treats that as "no graph yet; run a search".
+unsafe fn graph_export(
+    ctx: *mut sqlite3_context,
+    argc: c_int,
+    argv: *mut *mut sqlite3_value,
+    render: impl Fn(&Hnsw) -> String,
+) {
+    if argc < 2 {
+        sqlite3_result_null(ctx);
+        return;
+    }
+    let table = value_to_string(*argv.offset(0));
+    let col = value_to_string(*argv.offset(1));
+    let (table, col) = match (table, col) {
+        (Some(t), Some(c)) if !t.is_empty() && !c.is_empty() => (t, c),
+        _ => {
+            sqlite3_result_null(ctx);
+            return;
+        }
+    };
+    let db = sqlite3_context_db_handle(ctx);
+    match read_graph_blob(db, &table, &col).and_then(|b| Hnsw::deserialize_topology(&b)) {
+        Some(idx) => result_text(ctx, &render(&idx)),
+        None => sqlite3_result_null(ctx),
+    }
+}
+
+/// `anki_graph_json(table, col)` — the persisted HNSW graph for a vector column
+/// as JSON (`{entry, max_level, nodes:[{node,rowid,level}], edges:[{a,b,layer}]}`),
+/// or `NULL` if none is cached. `rowid` joins back to `table` for labels.
+unsafe extern "C" fn anki_graph_json_fn(
+    ctx: *mut sqlite3_context,
+    argc: c_int,
+    argv: *mut *mut sqlite3_value,
+) {
+    graph_export(ctx, argc, argv, |idx| idx.to_json());
+}
+
+/// `anki_graph_dot(table, col)` — the persisted HNSW graph as Graphviz DOT, or
+/// `NULL` if none is cached. Node labels are rowids; edges are colored by layer.
+unsafe extern "C" fn anki_graph_dot_fn(
+    ctx: *mut sqlite3_context,
+    argc: c_int,
+    argv: *mut *mut sqlite3_value,
+) {
+    graph_export(ctx, argc, argv, |idx| idx.to_dot());
+}
+
 static ANKI_MODULE: sqlite3_module = sqlite3_module {
     iVersion: 2,
     xCreate: Some(x_create),
@@ -2373,13 +2458,43 @@ pub unsafe extern "C" fn anki_register_vtab(db: *mut sqlite3) -> c_int {
     if rc != SQLITE_OK {
         return rc;
     }
-    sqlite3_create_function_v2(
+    let rc = sqlite3_create_function_v2(
         db,
         b"anki_dim\0".as_ptr() as *const c_char,
         0,
         SQLITE_UTF8,
         ptr::null_mut(),
         Some(anki_dim_fn),
+        None,
+        None,
+        None,
+    );
+    if rc != SQLITE_OK {
+        return rc;
+    }
+    // anki_graph_json(table, col) / anki_graph_dot(table, col) export the persisted
+    // HNSW graph topology for a vector column (for the explorer's graph view).
+    let rc = sqlite3_create_function_v2(
+        db,
+        b"anki_graph_json\0".as_ptr() as *const c_char,
+        2,
+        SQLITE_UTF8,
+        ptr::null_mut(),
+        Some(anki_graph_json_fn),
+        None,
+        None,
+        None,
+    );
+    if rc != SQLITE_OK {
+        return rc;
+    }
+    sqlite3_create_function_v2(
+        db,
+        b"anki_graph_dot\0".as_ptr() as *const c_char,
+        2,
+        SQLITE_UTF8,
+        ptr::null_mut(),
+        Some(anki_graph_dot_fn),
         None,
         None,
         None,

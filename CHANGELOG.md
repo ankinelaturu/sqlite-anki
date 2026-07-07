@@ -24,6 +24,11 @@ full rationale and design. Add new entries at the top.
   roadmap #1 in [docs/TODO.md](docs/TODO.md).
 
 ### Added
+- **`anki_graph_json(table, col)` / `anki_graph_dot(table, col)` SQL functions** export the
+  persisted HNSW graph topology for a vector column (nodes + per-layer edges, rowids for labels;
+  or Graphviz DOT) so the app can visualize the index. Decoded in Rust from the `<table>_anki_graph`
+  cache (single source of truth for the blob format); `NULL` when no graph is cached. See
+  [docs/hnsw.md](docs/hnsw.md).
 - **Import carries enforceable constraints** onto vectorized tables — `NOT NULL` and
   single-column `UNIQUE`/`PRIMARY KEY` (reconstructed from `PRAGMA table_info`/`index_list`), and
   **column-level `CHECK`** (parsed from the source `CREATE TABLE` DDL via a quote/paren-aware

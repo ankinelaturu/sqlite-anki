@@ -199,6 +199,39 @@ The steady state, combining incremental insert and persistence: writes keep the 
 fresh (~O(log N) each), commits persist it, and opens reload it — so a **full rebuild is
 never on the hot path**, only the fallback.
 
+## Inspecting the graph (SQL functions)
+
+Two scalar SQL functions export the graph so the app can visualize it (e.g. the
+explorer's "Show HNSW graph" on a vector field). Both take `(table, col)`, read the
+**persisted** `<table>_anki_graph` cache, and decode it in Rust — so the blob format
+stays single-sourced (no hand-written JS parser to drift):
+
+- **`anki_graph_json(table, col)`** → a JSON object:
+
+  ```json
+  { "entry": 0, "max_level": 1,
+    "nodes": [ { "node": 0, "rowid": 2, "level": 1 }, … ],
+    "edges": [ { "a": 0, "b": 1, "layer": 0 }, … ] }
+  ```
+
+  `node` is the compact internal index; `rowid` **joins back to the table** for a label
+  (the functions return topology only — the app supplies text via
+  `SELECT … FROM <table>_anki WHERE anki_id = ?`). Edges are undirected, de-duplicated
+  per layer.
+
+- **`anki_graph_dot(table, col)`** → Graphviz DOT (node label = rowid, entry emphasized,
+  edges colored by layer) for a quick static render.
+
+Both return **`NULL`** when there's no graph to show — no cache row yet, an empty
+(all-NULL) column, an unknown table/column, or an undecodable blob. Because they read the
+*persisted* cache (written at commit), a graph appears after it has been built (a `MATCH`)
+and committed; a freshly-inserted-but-never-searched table returns `NULL` until then. The
+app treats `NULL` as "no graph yet — run a search."
+
+Tombstoned nodes are omitted from both exports (they're compacted out of the persisted
+blob anyway). Implemented by `Hnsw::to_json` / `to_dot` / `deserialize_topology` in
+`hnsw.rs` and registered next to `anki_model()` / `anki_dim()` in `vtab.rs`.
+
 ## Assumptions and limits
 
 - **Normalized vectors.** Cosine = dot product only holds for L2-normalized inputs; the

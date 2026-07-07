@@ -13,6 +13,7 @@
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 use std::collections::HashMap;
+use std::collections::HashSet;
 
 /// Max neighbors per node above layer 0 (DESIGN: `M = 16`).
 const M: usize = 16;
@@ -298,6 +299,120 @@ impl Hnsw {
             return None;
         }
         Some(idx)
+    }
+
+    /// Like [`Hnsw::deserialize`] but for callers that only need the *topology*
+    /// (visualization / debugging via [`Hnsw::to_json`] / [`Hnsw::to_dot`]) and
+    /// have no vectors to rehydrate. Node vectors are left empty, so the result
+    /// must not be used for `search` — only for reading `ids`/`neighbors`/entry.
+    pub fn deserialize_topology(bytes: &[u8]) -> Option<Hnsw> {
+        Hnsw::deserialize(bytes, |_| Some(Vec::new()))
+    }
+
+    /// Exports the graph topology as JSON for visualization/debugging:
+    /// `{"entry":<node|null>,"max_level":M,"nodes":[{"node","rowid","level"},…],
+    /// "edges":[{"a","b","layer"},…]}`. `node` is the compact internal index;
+    /// `rowid` joins back to the table for a label. Tombstoned nodes and their
+    /// edges are omitted; edges are undirected and de-duplicated per layer
+    /// (`a < b`). Output is deterministic. Vectors are not needed, so this works
+    /// on a graph loaded via [`Hnsw::deserialize_topology`].
+    pub fn to_json(&self) -> String {
+        let mut s = String::from("{");
+        match self.entry {
+            Some(e) if !self.dead[e as usize] => s.push_str(&format!("\"entry\":{e},")),
+            _ => s.push_str("\"entry\":null,"),
+        }
+        s.push_str(&format!("\"max_level\":{},\"nodes\":[", self.max_level));
+        let mut first = true;
+        for n in 0..self.ids.len() {
+            if self.dead[n] {
+                continue;
+            }
+            if !first {
+                s.push(',');
+            }
+            first = false;
+            let level = self.neighbors[n].len().saturating_sub(1);
+            s.push_str(&format!(
+                "{{\"node\":{},\"rowid\":{},\"level\":{}}}",
+                n, self.ids[n], level
+            ));
+        }
+        s.push_str("],\"edges\":[");
+        first = true;
+        let mut seen: HashSet<(u32, u32, usize)> = HashSet::new();
+        for n in 0..self.ids.len() {
+            if self.dead[n] {
+                continue;
+            }
+            for (layer, nbrs) in self.neighbors[n].iter().enumerate() {
+                for &m in nbrs {
+                    if self.dead[m as usize] {
+                        continue;
+                    }
+                    let (a, b) = ((n as u32).min(m), (n as u32).max(m));
+                    if a == b || !seen.insert((a, b, layer)) {
+                        continue;
+                    }
+                    if !first {
+                        s.push(',');
+                    }
+                    first = false;
+                    s.push_str(&format!("{{\"a\":{a},\"b\":{b},\"layer\":{layer}}}"));
+                }
+            }
+        }
+        s.push_str("]}");
+        s
+    }
+
+    /// Exports the graph as Graphviz DOT (undirected) for a quick render. Node
+    /// labels are rowids; the entry node is emphasized; each edge is colored by
+    /// its highest layer so the sparse upper-layer "express lanes" stand out.
+    /// Tombstoned nodes are omitted; output is deterministic (edges sorted).
+    pub fn to_dot(&self) -> String {
+        let mut s = String::from("graph hnsw {\n  node [shape=circle fontsize=10];\n");
+        for n in 0..self.ids.len() {
+            if self.dead[n] {
+                continue;
+            }
+            if self.entry == Some(n as u32) {
+                s.push_str(&format!(
+                    "  {n} [label=\"{}\" color=\"#c0392b\" penwidth=2];\n",
+                    self.ids[n]
+                ));
+            } else {
+                s.push_str(&format!("  {n} [label=\"{}\"];\n", self.ids[n]));
+            }
+        }
+        // Collapse multi-layer edges to one, keyed by the highest layer they span.
+        let mut edge_layer: HashMap<(u32, u32), usize> = HashMap::new();
+        for n in 0..self.ids.len() {
+            if self.dead[n] {
+                continue;
+            }
+            for (layer, nbrs) in self.neighbors[n].iter().enumerate() {
+                for &m in nbrs {
+                    if self.dead[m as usize] {
+                        continue;
+                    }
+                    let (a, b) = ((n as u32).min(m), (n as u32).max(m));
+                    if a == b {
+                        continue;
+                    }
+                    let e = edge_layer.entry((a, b)).or_insert(0);
+                    *e = (*e).max(layer);
+                }
+            }
+        }
+        let mut edges: Vec<((u32, u32), usize)> = edge_layer.into_iter().collect();
+        edges.sort_unstable();
+        for ((a, b), layer) in edges {
+            let (color, pw) = if layer == 0 { ("#cccccc", 1) } else { ("#2c7fb8", 2) };
+            s.push_str(&format!("  {a} -- {b} [color=\"{color}\" penwidth={pw}];\n"));
+        }
+        s.push_str("}\n");
+        s
     }
 
     /// Returns the `k` approximate nearest rowids to `query` as `(rowid, cosine
@@ -765,6 +880,40 @@ mod tests {
         assert!(Hnsw::deserialize(&[], |id| map.get(&id).cloned()).is_none());
         // A missing vector (lookup can't rehydrate a referenced rowid) → None.
         assert!(Hnsw::deserialize(&good, |_| None::<Vec<f32>>).is_none());
+    }
+
+    #[test]
+    fn topology_export_json_and_dot() {
+        let points = gen_points(30, 16, 0x7A11);
+        let idx = Hnsw::build(&points).expect("index");
+
+        let json = idx.to_json();
+        assert!(json.starts_with('{') && json.ends_with('}'));
+        assert!(json.contains("\"nodes\":[") && json.contains("\"edges\":["));
+        assert_eq!(json.matches("\"node\":").count(), 30, "one entry per node");
+
+        let dot = idx.to_dot();
+        assert!(dot.starts_with("graph hnsw {"));
+        assert!(dot.trim_end().ends_with('}'));
+        assert_eq!(dot.matches("[label=").count(), 30, "one label per node");
+
+        // Round-trips through the serialized blob → topology-only → same shape.
+        let blob = idx.serialize().expect("blob");
+        let topo = Hnsw::deserialize_topology(&blob).expect("topo");
+        assert_eq!(topo.to_json().matches("\"node\":").count(), 30);
+    }
+
+    #[test]
+    fn topology_export_omits_tombstones() {
+        let points = gen_points(20, 16, 0x9E9E);
+        let mut idx = Hnsw::build(&points).expect("index");
+        idx.remove(points[3].0);
+        idx.remove(points[7].0);
+
+        let json = idx.to_json();
+        assert_eq!(json.matches("\"node\":").count(), 18, "two nodes tombstoned out");
+        assert!(!json.contains(&format!("\"rowid\":{},", points[3].0)));
+        assert!(!json.contains(&format!("\"rowid\":{},", points[7].0)));
     }
 
     #[test]
