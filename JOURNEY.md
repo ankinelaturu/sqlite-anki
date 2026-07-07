@@ -570,9 +570,64 @@ enforcement is off by default in browser SQLite anyway.
 Added [CHANGELOG.md](CHANGELOG.md) — the terse, date-sectioned ledger, curated from this same
 history. The companion to this narrative.
 
+## Revisiting import: don't drop what a plain table can keep
+
+The Import & Vectorize follow-up — a table you *didn't* vectorize shouldn't lose its schema objects
+just because it lives next to one you did.
+
+### Replay indexes for plain tables
+`Jul 05, 2026`
+`rebuildImport` now replays each `CREATE INDEX` from the source for plain-copied tables (skipping the
+implicit PK/UNIQUE auto-indexes). Vectorized tables became `anki` vtabs, which SQLite won't index, so
+theirs are necessarily dropped.
+
+### Replay triggers, too
+`Jul 06, 2026`
+Same for `CREATE TRIGGER` (plain tables + INSTEAD OF on views) — created *last*, after all data, so a
+trigger never fires on the copied rows nor references a missing target. Triggers on vtabs are
+forbidden, so vectorized tables' triggers are dropped.
+
+## Real shadow column names via an `anki_` prefix
+`Jul 06, 2026`
+
+A long design conversation crystallized here. The shadow table stored data columns *positionally*
+(`c0, c1, …`) purely to avoid colliding with the internal `id` — but that forced ugly caveats (a
+`CHECK(price > 0)` would reference `price` while the column was `c3`; errors read `_data.c2`, not
+`.sku`). The fix: namespace *our* columns with `anki_` (`anki_id`, `anki_emb_<col>`), reserve that
+prefix from user names, and store data columns under their **real names**. The shadow table went
+`<name>_data` → `<name>_anki` — a *suffix* deliberately, to keep SQLite's `<vtab>_<suffix>`
+shadow-table convention (and the future option of `xShadowName` + defensive-mode protection).
+Storage-format bumped to v3; pre-v3 DBs fail to open with "rebuild required." This turned out to be
+the enabler for everything below.
+
+## Revisiting the import dialog: reserved-name renames
+`Jul 06, 2026`
+
+Since a vectorized table becomes a vtab that reserves `anki_`, a source column named `anki_*` on such
+a table must be renamed. `analyzeImport` flags them; the dialog shows an inline rename and blocks the
+rebuild until resolved (greenfield just hard-errors at `CREATE`). Plain-copied tables keep any name.
+
+## Constraints, almost for free — pushing them onto the shadow
+`Jul 06, 2026`
+
+Then a realization. SQLite blocks `CREATE INDEX` / `CREATE TRIGGER` / `ALTER TABLE` on a virtual table
+*before the module is ever consulted* (`build.c`: "virtual tables may not be indexed") — those are
+genuinely out. But **constraints are a choice**: nothing in SQLite forbids a vtab from enforcing them
+(FTS5 rejects some as its own policy). And they were *already* half-working — the declared column type
+flows straight into the real shadow table, so `CHECK` / `NOT NULL` were being enforced (and `CHECK`
+only worked at all thanks to the real column names). The gap was `UNIQUE`: `persist_row` used
+`INSERT OR REPLACE`, which silently *replaced* a duplicate instead of rejecting — and ignored the
+user's conflict clause entirely. The fix split the write into `INSERT OR <mode>` / `UPDATE OR <mode>`,
+reading `sqlite3_vtab_on_conflict` so `INSERT OR REPLACE` replaces, `OR IGNORE` skips, and plain
+`INSERT` rejects — with a cache resync after REPLACE/IGNORE (they can change a row behind the vtab's
+back). `DEFAULT` is the one casualty: SQLite ignores a vtab's declared defaults and we can't tell an
+omitted column from an explicit NULL, so it's documented as a limitation. Carrying these onto
+*imported* vectorized tables (Layer 2) is next.
+
 ## This document
 `Jul 05, 2026`
 
 The narrative you're reading — the "why," kept separate from the changelog so each can do its own job.
-Written, then restructured to group consecutive commits under one section with per-commit sub-sections.
+Written, then restructured to group consecutive commits under one section with per-commit sub-sections;
+later moved to the repo root beside the CHANGELOG, with per-commit hashes trimmed to just dates.
 Add new sections at the bottom as the story continues.
