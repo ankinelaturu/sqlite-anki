@@ -4,6 +4,39 @@ Notable changes to sqlite-anki, newest first. Pre-1.0 and unversioned, so entrie
 grouped by date rather than release. Curated from git history — see linked docs for the
 full rationale and design. Add new entries at the top.
 
+## 2026-07-07
+
+### Added
+- **Import carries enforceable constraints** onto vectorized tables — `NOT NULL` and
+  single-column `UNIQUE`/`PRIMARY KEY` (reconstructed from `PRAGMA table_info`/`index_list`), and
+  **column-level `CHECK`** (parsed from the source `CREATE TABLE` DDL via a quote/paren-aware
+  scanner, since no PRAGMA exposes CHECK). They enforce via the shadow, like greenfield.
+  Multi-column and table-level constraints can't be expressed in the per-column `anki(col …)` DSL
+  and stay dropped.
+- **Import drop-warning** — the Import & Vectorize dialog now lists which indexes, triggers,
+  foreign keys, `DEFAULT`s, and table-level constraints a table loses when you tick it to vectorize.
+
+### Docs
+- Added [docs/limitations.md](docs/limitations.md) — a living list of by-design limits (vtab
+  constraints, imports, storage format). Reshuffled [docs/TODO.md](docs/TODO.md) into an ordered
+  roadmap.
+
+## 2026-07-06
+
+### Added
+- **Column constraints on `anki` tables enforce.** `UNIQUE` / `CHECK` / `NOT NULL` declared on a
+  vector table are enforced via the real shadow table, and writes honor the SQL conflict clause
+  (`INSERT OR REPLACE` / `OR IGNORE` / plain) through `sqlite3_vtab_on_conflict`. `DEFAULT` is
+  ignored (a vtab limitation) and index/trigger/FK/table-level constraints can't apply. See
+  [docs/limitations.md](docs/limitations.md).
+
+### Changed
+- **Storage format v3 — real shadow column names.** The backing table is now `<name>_anki`;
+  internal columns are `anki_id` and `anki_emb_<col>`; user columns are stored under their **real
+  names** (declared type + `COLLATE`). The `anki_` prefix is reserved — a user column named
+  `anki_*` is rejected at create, and import offers an inline rename. Old DBs need a rebuild. This
+  is what makes `CHECK` expressions and readable constraint errors work.
+
 ## 2026-07-05
 
 ### Added
@@ -14,6 +47,9 @@ full rationale and design. Add new entries at the top.
   unchanged. Import schema fidelity and the remaining gaps (secondary indexes, triggers)
   are tracked in [docs/TODO.md](docs/TODO.md).
 - **`Cell::Blob`** so `BLOB` columns round-trip through the `anki` vtab (previously nulled).
+- **Index & trigger replay on import** — plain-copied tables keep their secondary indexes and
+  triggers (replayed after data, so nothing fires on the copied rows). Vectorized tables can't
+  carry them (vtab limits).
 
 ### Changed
 - **Streaming storage redesign** — the `anki` vtab no longer materializes the whole table
