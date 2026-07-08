@@ -64,6 +64,7 @@ import {
 } from "@/components/ui/dialog";
 import { ImportDialog } from "@/components/ImportDialog";
 import { SchemaTree } from "@/components/SchemaTree";
+import { HnswGraphView } from "@/components/HnswGraphView";
 import { TableView, type SearchMode } from "@/components/TableView";
 import { QueryView } from "@/components/QueryView";
 import { NotesView } from "@/components/NotesView";
@@ -116,6 +117,7 @@ export function SqliteWorkspace({ sidebarSize, onSidebarResize, active }: Worksp
   const [searchMode, setSearchMode] = useState<SearchMode>("hnsw");
   const [candidates, setCandidates] = useState(256);
 
+  const [graphTarget, setGraphTarget] = useState<{ table: string; col: string } | null>(null);
   const [op, setOp] = useState<OpStatus | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -564,6 +566,7 @@ export function SqliteWorkspace({ sidebarSize, onSidebarResize, active }: Worksp
                       tables={tables}
                       activeTable={activeTab?.kind === "table" ? activeTab.table?.name ?? null : null}
                       onOpenTable={openTable}
+                      onShowGraph={(table, col) => setGraphTarget({ table, col })}
                     />
                   )}
                 </div>
@@ -749,6 +752,15 @@ export function SqliteWorkspace({ sidebarSize, onSidebarResize, active }: Worksp
           onConfirm={(targetPath, plan) => void onImportConfirm(targetPath, plan)}
         />
       )}
+
+      {/* HNSW graph view — right-click a vector column in the schema tree */}
+      <HnswGraphView
+        open={!!graphTarget}
+        onOpenChange={(o) => !o && setGraphTarget(null)}
+        path={activeDb}
+        table={graphTarget?.table ?? ""}
+        col={graphTarget?.col ?? ""}
+      />
     </TooltipProvider>
   );
 }

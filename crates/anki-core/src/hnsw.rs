@@ -157,6 +157,36 @@ impl Hnsw {
         }
     }
 
+    /// Compacts tombstones for the on-disk and export forms: returns the live
+    /// (non-dead) node indices, an `old -> new` dense remap (`u32::MAX` for dead),
+    /// a re-picked entry (dense index of a surviving top-layer node — the old entry
+    /// may itself be tombstoned), and the surviving max level. `None` if no live
+    /// nodes remain. Shared by [`Hnsw::serialize`], [`Hnsw::to_json`], and
+    /// [`Hnsw::to_dot`] so all three emit the same dense, gap-free node indices.
+    fn compact(&self) -> Option<(Vec<u32>, Vec<u32>, u32, usize)> {
+        let mut remap = vec![u32::MAX; self.ids.len()];
+        let mut live: Vec<u32> = Vec::new();
+        for n in 0..self.ids.len() as u32 {
+            if !self.dead[n as usize] {
+                remap[n as usize] = live.len() as u32;
+                live.push(n);
+            }
+        }
+        if live.is_empty() {
+            return None;
+        }
+        let mut entry = 0u32;
+        let mut max_level = 0usize;
+        for (new_i, &old) in live.iter().enumerate() {
+            let lvl = self.neighbors[old as usize].len().saturating_sub(1);
+            if lvl >= max_level {
+                max_level = lvl;
+                entry = new_i as u32;
+            }
+        }
+        Some((live, remap, entry, max_level))
+    }
+
     /// Serializes the graph *topology* to a versioned little-endian blob so it
     /// can be persisted and reloaded instead of rebuilt on the next open (see
     /// docs/streaming-storage.md, roadmap #2 in docs/TODO.md). The stored
@@ -185,37 +215,12 @@ impl Hnsw {
     /// | Per level (×`levels`)    | `degree`     | `u32`          | neighbor count at this layer           |
     /// |                          | `neighbors`  | `u32`×`degree` | neighbor **node indices** (not rowids) |
     pub fn serialize(&self) -> Option<Vec<u8>> {
-        // Map each live (non-dead) node to a compact new index.
-        let mut remap = vec![u32::MAX; self.ids.len()];
-        let mut live: Vec<u32> = Vec::new();
-        for n in 0..self.ids.len() as u32 {
-            if !self.dead[n as usize] {
-                remap[n as usize] = live.len() as u32;
-                live.push(n);
-            }
-        }
-        if live.is_empty() {
-            return None;
-        }
-
-        // Re-pick the entry as a surviving node with the greatest level; the old
-        // entry may itself have been tombstoned. Any top-layer node is a valid
-        // HNSW entry point.
-        let mut new_entry = 0u32;
-        let mut new_max_level = 0usize;
-        for (new_i, &old) in live.iter().enumerate() {
-            let lvl = self.neighbors[old as usize].len().saturating_sub(1);
-            if lvl >= new_max_level {
-                new_max_level = lvl;
-                new_entry = new_i as u32;
-            }
-        }
-
+        let (live, remap, entry, max_level) = self.compact()?;
         let mut buf: Vec<u8> = Vec::new();
         buf.extend_from_slice(&GRAPH_FORMAT.to_le_bytes());
         buf.extend_from_slice(&(live.len() as u32).to_le_bytes());
-        buf.extend_from_slice(&(new_max_level as u32).to_le_bytes());
-        buf.extend_from_slice(&new_entry.to_le_bytes());
+        buf.extend_from_slice(&(max_level as u32).to_le_bytes());
+        buf.extend_from_slice(&entry.to_le_bytes());
         buf.extend_from_slice(&self.rng.to_le_bytes());
         for &old in &live {
             buf.extend_from_slice(&self.ids[old as usize].to_le_bytes());
@@ -317,40 +322,32 @@ impl Hnsw {
     /// (`a < b`). Output is deterministic. Vectors are not needed, so this works
     /// on a graph loaded via [`Hnsw::deserialize_topology`].
     pub fn to_json(&self) -> String {
-        let mut s = String::from("{");
-        match self.entry {
-            Some(e) if !self.dead[e as usize] => s.push_str(&format!("\"entry\":{e},")),
-            _ => s.push_str("\"entry\":null,"),
-        }
-        s.push_str(&format!("\"max_level\":{},\"nodes\":[", self.max_level));
-        let mut first = true;
-        for n in 0..self.ids.len() {
-            if self.dead[n] {
-                continue;
-            }
-            if !first {
+        let Some((live, remap, entry, max_level)) = self.compact() else {
+            return String::from("{\"entry\":null,\"max_level\":0,\"nodes\":[],\"edges\":[]}");
+        };
+        let mut s = format!("{{\"entry\":{entry},\"max_level\":{max_level},\"nodes\":[");
+        for (new_i, &old) in live.iter().enumerate() {
+            if new_i > 0 {
                 s.push(',');
             }
-            first = false;
-            let level = self.neighbors[n].len().saturating_sub(1);
+            let level = self.neighbors[old as usize].len().saturating_sub(1);
             s.push_str(&format!(
                 "{{\"node\":{},\"rowid\":{},\"level\":{}}}",
-                n, self.ids[n], level
+                new_i, self.ids[old as usize], level
             ));
         }
         s.push_str("],\"edges\":[");
-        first = true;
+        let mut first = true;
         let mut seen: HashSet<(u32, u32, usize)> = HashSet::new();
-        for n in 0..self.ids.len() {
-            if self.dead[n] {
-                continue;
-            }
-            for (layer, nbrs) in self.neighbors[n].iter().enumerate() {
+        for &old in &live {
+            let a0 = remap[old as usize];
+            for (layer, nbrs) in self.neighbors[old as usize].iter().enumerate() {
                 for &m in nbrs {
-                    if self.dead[m as usize] {
-                        continue;
-                    }
-                    let (a, b) = ((n as u32).min(m), (n as u32).max(m));
+                    let b0 = match remap.get(m as usize) {
+                        Some(&r) if r != u32::MAX => r,
+                        _ => continue,
+                    };
+                    let (a, b) = (a0.min(b0), a0.max(b0));
                     if a == b || !seen.insert((a, b, layer)) {
                         continue;
                     }
@@ -372,31 +369,31 @@ impl Hnsw {
     /// Tombstoned nodes are omitted; output is deterministic (edges sorted).
     pub fn to_dot(&self) -> String {
         let mut s = String::from("graph hnsw {\n  node [shape=circle fontsize=10];\n");
-        for n in 0..self.ids.len() {
-            if self.dead[n] {
-                continue;
-            }
-            if self.entry == Some(n as u32) {
+        let Some((live, remap, entry, _)) = self.compact() else {
+            s.push_str("}\n");
+            return s;
+        };
+        for (new_i, &old) in live.iter().enumerate() {
+            if new_i as u32 == entry {
                 s.push_str(&format!(
-                    "  {n} [label=\"{}\" color=\"#c0392b\" penwidth=2];\n",
-                    self.ids[n]
+                    "  {new_i} [label=\"{}\" color=\"#c0392b\" penwidth=2];\n",
+                    self.ids[old as usize]
                 ));
             } else {
-                s.push_str(&format!("  {n} [label=\"{}\"];\n", self.ids[n]));
+                s.push_str(&format!("  {new_i} [label=\"{}\"];\n", self.ids[old as usize]));
             }
         }
         // Collapse multi-layer edges to one, keyed by the highest layer they span.
         let mut edge_layer: HashMap<(u32, u32), usize> = HashMap::new();
-        for n in 0..self.ids.len() {
-            if self.dead[n] {
-                continue;
-            }
-            for (layer, nbrs) in self.neighbors[n].iter().enumerate() {
+        for &old in &live {
+            let a0 = remap[old as usize];
+            for (layer, nbrs) in self.neighbors[old as usize].iter().enumerate() {
                 for &m in nbrs {
-                    if self.dead[m as usize] {
-                        continue;
-                    }
-                    let (a, b) = ((n as u32).min(m), (n as u32).max(m));
+                    let b0 = match remap.get(m as usize) {
+                        Some(&r) if r != u32::MAX => r,
+                        _ => continue,
+                    };
+                    let (a, b) = (a0.min(b0), a0.max(b0));
                     if a == b {
                         continue;
                     }

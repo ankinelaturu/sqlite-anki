@@ -8,10 +8,19 @@ import {
   Sparkles,
   Table2,
   Type,
+  Waypoints,
   type LucideIcon,
 } from "lucide-react";
 import type { TableInfo } from "@/db";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuLabel,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu";
 import { cn } from "@/lib/utils";
 
 /** Per-column visual identity from SQLite type affinity: a left icon plus a pill
@@ -65,9 +74,11 @@ interface SchemaTreeProps {
   tables: TableInfo[];
   activeTable: string | null;
   onOpenTable: (table: TableInfo) => void;
+  /** Right-click a `TEXT VECTOR` column → visualize its HNSW graph. */
+  onShowGraph?: (table: string, col: string) => void;
 }
 
-export function SchemaTree({ tables, activeTable, onOpenTable }: SchemaTreeProps) {
+export function SchemaTree({ tables, activeTable, onOpenTable, onShowGraph }: SchemaTreeProps) {
   const [open, setOpen] = useState<Record<string, boolean>>({});
 
   if (tables.length === 0) {
@@ -117,21 +128,41 @@ export function SchemaTree({ tables, activeTable, onOpenTable }: SchemaTreeProps
                     "inline-flex items-center rounded border px-1 text-[9px] font-medium uppercase leading-[1.4] tracking-wide",
                     pill,
                   );
+                  const row = (
+                    <div className="flex flex-wrap items-center gap-1.5 rounded px-2 py-[0.3rem] text-muted-foreground hover:bg-accent/50">
+                      <Icon className={cn("h-4 w-4 shrink-0", color)} />
+                      <span className="text-sm text-foreground/80">{c.name}</span>
+                      {c.type && (
+                        <span className={cn("text-xs uppercase opacity-60", color)}>{c.type}</span>
+                      )}
+                      {c.pk && <span className={pillCls}>PRIMARY KEY</span>}
+                      {c.isVector && <span className={pillCls}>VECTOR</span>}
+                      {c.notnull && !c.pk && <span className={pillCls}>NOT NULL</span>}
+                      {c.hasDefault && <span className={pillCls}>DEFAULT</span>}
+                    </div>
+                  );
+                  // Vector columns get a right-click menu to visualize their HNSW graph.
+                  if (c.isVector && onShowGraph) {
+                    return (
+                      <ContextMenu key={c.name}>
+                        <ContextMenuTrigger asChild>{row}</ContextMenuTrigger>
+                        <ContextMenuContent>
+                          <ContextMenuLabel>
+                            {c.name}
+                            {c.description ? ` — ${c.description}` : ""}
+                          </ContextMenuLabel>
+                          <ContextMenuSeparator />
+                          <ContextMenuItem onSelect={() => onShowGraph(t.name, c.name)}>
+                            <Waypoints className="h-3.5 w-3.5 text-violet-400" />
+                            Show HNSW graph
+                          </ContextMenuItem>
+                        </ContextMenuContent>
+                      </ContextMenu>
+                    );
+                  }
                   return (
                     <Described key={c.name} desc={c.description}>
-                      <div className="flex flex-wrap items-center gap-1.5 rounded px-2 py-[0.3rem] text-muted-foreground hover:bg-accent/50">
-                        <Icon className={cn("h-4 w-4 shrink-0", color)} />
-                        <span className="text-sm text-foreground/80">{c.name}</span>
-                        {c.type && (
-                          <span className={cn("text-xs uppercase opacity-60", color)}>
-                            {c.type}
-                          </span>
-                        )}
-                        {c.pk && <span className={pillCls}>PRIMARY KEY</span>}
-                        {c.isVector && <span className={pillCls}>VECTOR</span>}
-                        {c.notnull && !c.pk && <span className={pillCls}>NOT NULL</span>}
-                        {c.hasDefault && <span className={pillCls}>DEFAULT</span>}
-                      </div>
+                      {row}
                     </Described>
                   );
                 })}

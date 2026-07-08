@@ -95,6 +95,27 @@ test("labels come from the app via a JOIN on rowid", () => {
   }
 });
 
+test("live in-RAM graph is exported right after a search (no write/commit)", () => {
+  const db = new sqlite3.oo1.DB(":memory:");
+  try {
+    db.exec(`CREATE VIRTUAL TABLE t USING anki(abcd TEXT VECTOR);`);
+    for (const w of WORDS) db.exec(`INSERT INTO t(abcd) VALUES(?)`, { bind: [w] });
+    // A MATCH builds the index in RAM. No write follows, so nothing is persisted…
+    db.selectObjects(`SELECT rowid FROM t WHERE abcd MATCH 'invoice'`);
+    assert.equal(
+      db.selectValue(`SELECT count(*) FROM t_anki_hnsw`),
+      0,
+      "graph not persisted without a committing write after the build",
+    );
+    // …but the live index is still exported (the point of live-read).
+    const json = db.selectValue(`SELECT anki_hnsw_json('t','abcd')`);
+    assert.equal(typeof json, "string", "live graph exported without a commit");
+    assert.equal(JSON.parse(json).nodes.length, WORDS.length);
+  } finally {
+    db.close();
+  }
+});
+
 test("NULL when there is no persisted graph or the target is unknown", () => {
   const db = new sqlite3.oo1.DB(":memory:");
   try {

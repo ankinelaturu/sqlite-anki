@@ -18,6 +18,8 @@ use crate::match_query::{parse_match, Mode};
 use crate::metrics;
 use crate::{DEFAULT_SIMILARITY_THRESHOLD, HNSW_CANDIDATE_CAP};
 use core::cmp::Ordering;
+use once_cell::sync::Lazy;
+use parking_lot::Mutex;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ffi::{CStr, CString};
 use std::mem::transmute;
@@ -352,6 +354,8 @@ struct TableState {
     next_rowid: i64,
     /// Connection used to read/write the persistent shadow table.
     db: *mut sqlite3,
+    /// Bare vtab name (argv[2]) — the registry key for live graph export.
+    table_name: String,
     /// Quoted, db-qualified shadow table name, e.g. `"main"."customers_anki_data"`.
     data_table: String,
     /// Set on `xRollback`: the cache may diverge from the rolled-back shadow
@@ -907,6 +911,36 @@ fn hnsw_table_ident(db_name: &str, table: &str) -> String {
     )
 }
 
+/// Live-table registry: `(db connection, vtab name) -> *mut TableState` (stored as
+/// `usize` so the map is `Send`). Lets the `anki_hnsw_json`/`anki_hnsw_dot` scalar
+/// functions read a table's **in-RAM** HNSW index directly — reflecting the graph
+/// right after a `MATCH` builds it, without waiting for it to be persisted. Entries
+/// are added at `xCreate`/`xConnect` and removed at `xDisconnect`/`xDestroy`.
+static VTAB_REGISTRY: Lazy<Mutex<HashMap<(usize, String), usize>>> =
+    Lazy::new(|| Mutex::new(HashMap::new()));
+
+/// Records `state` as the live table for `(db, name)`. Call once the state is fully
+/// built, just before handing the vtab to SQLite.
+fn register_vtab(db: *mut sqlite3, name: &str, state: *mut TableState) {
+    VTAB_REGISTRY
+        .lock()
+        .insert((db as usize, name.to_string()), state as usize);
+}
+
+/// Removes the live-table entry (idempotent). Call before freeing the state so no
+/// scalar function can observe a dangling pointer.
+fn unregister_vtab(db: *mut sqlite3, name: &str) {
+    VTAB_REGISTRY.lock().remove(&(db as usize, name.to_string()));
+}
+
+/// Looks up the live `TableState` for `(db, name)`, if any is registered.
+fn lookup_vtab(db: *mut sqlite3, name: &str) -> Option<*mut TableState> {
+    VTAB_REGISTRY
+        .lock()
+        .get(&(db as usize, name.to_string()))
+        .map(|&p| p as *mut TableState)
+}
+
 /// Quoted embedding-column identifier for a vector column, e.g. `"anki_emb_notes"`.
 /// The `anki_` prefix is reserved from user column names, so it never collides.
 fn emb_col_ident(name: &str) -> String {
@@ -1270,6 +1304,7 @@ unsafe fn new_state(
         rows: BTreeMap::new(),
         next_rowid: 1,
         db,
+        table_name,
         data_table,
         dirty: false,
         indexes: (0..ncol).map(|_| None).collect(),
@@ -1584,6 +1619,9 @@ unsafe extern "C" fn x_create(
         }
     }
 
+    // Publish the live state so the graph-export functions can read the in-RAM index.
+    register_vtab(db, &(*state).table_name, state);
+
     // Hand ownership of the vtab object to SQLite via *pp_vtab; it lives until
     // xDisconnect/xDestroy. The base sqlite3_vtab must be the first field so the
     // pointer can be cast both ways.
@@ -1648,6 +1686,9 @@ unsafe extern "C" fn x_connect(
     // no-op and `index_dirty` stays set, falling back to rebuild-on-first-`MATCH`.
     load_graphs(&mut *state);
 
+    // Publish the live state for the graph-export functions.
+    register_vtab(db, &(*state).table_name, state);
+
     let vt = Box::into_raw(Box::new(AnkiVtab {
         base: zeroed_vtab(),
         state,
@@ -1659,6 +1700,8 @@ unsafe extern "C" fn x_connect(
 /// Frees in-memory state but keeps the shadow table (data persists).
 unsafe extern "C" fn x_disconnect(vtab: *mut sqlite3_vtab) -> c_int {
     let vt = Box::from_raw(vtab as *mut AnkiVtab);
+    // Drop the live-table entry before freeing the state (no dangling lookups).
+    unregister_vtab((*vt.state).db, &(*vt.state).table_name);
     drop(Box::from_raw(vt.state));
     drop(vt);
     SQLITE_OK
@@ -1668,6 +1711,7 @@ unsafe extern "C" fn x_disconnect(vtab: *mut sqlite3_vtab) -> c_int {
 unsafe extern "C" fn x_destroy(vtab: *mut sqlite3_vtab) -> c_int {
     let vt = Box::from_raw(vtab as *mut AnkiVtab);
     let st = Box::from_raw(vt.state);
+    unregister_vtab(st.db, &st.table_name);
     exec(st.db, &format!("DROP TABLE IF EXISTS {}", st.data_table));
     exec(st.db, &format!("DROP TABLE IF EXISTS {}", st.hnsw_table));
     drop(st);
@@ -2369,15 +2413,40 @@ unsafe fn graph_export(
         }
     };
     let db = sqlite3_context_db_handle(ctx);
+
+    // Prefer the live in-RAM index (reflects the graph right after a MATCH builds
+    // it, before it's persisted). We only *read* the state — no rebuild, no
+    // mutation — so this is safe alongside any concurrent (immutable) vtab access
+    // on the single-threaded connection. When the live index isn't built yet
+    // (`index_dirty`), or the table isn't registered, fall back to the persisted
+    // cache so a freshly reopened DB still shows its last-committed graph.
+    if let Some(state) = lookup_vtab(db, &table) {
+        let st = &*state;
+        if !st.index_dirty {
+            match st.columns.iter().position(|c| c.name == col && c.is_vector) {
+                Some(ci) => {
+                    match &st.indexes[ci] {
+                        Some(idx) => result_text(ctx, &render(idx)),
+                        None => sqlite3_result_null(ctx), // vector column, no vectors
+                    }
+                }
+                None => sqlite3_result_null(ctx), // not a vector column of this table
+            }
+            return;
+        }
+    }
+
+    // Fallback: the persisted `<table>_anki_hnsw` cache.
     match read_graph_blob(db, &table, &col).and_then(|b| Hnsw::deserialize_topology(&b)) {
         Some(idx) => result_text(ctx, &render(&idx)),
         None => sqlite3_result_null(ctx),
     }
 }
 
-/// `anki_hnsw_json(table, col)` — the persisted HNSW graph for a vector column
-/// as JSON (`{entry, max_level, nodes:[{node,rowid,level}], edges:[{a,b,layer}]}`),
-/// or `NULL` if none is cached. `rowid` joins back to `table` for labels.
+/// `anki_hnsw_json(table, col)` — the HNSW graph for a vector column as JSON
+/// (`{entry, max_level, nodes:[{node,rowid,level}], edges:[{a,b,layer}]}`), or
+/// `NULL` if there's no graph. Reads the live in-RAM index when built, else the
+/// persisted cache. `rowid` joins back to `table` for labels.
 unsafe extern "C" fn anki_hnsw_json_fn(
     ctx: *mut sqlite3_context,
     argc: c_int,
@@ -2386,8 +2455,9 @@ unsafe extern "C" fn anki_hnsw_json_fn(
     graph_export(ctx, argc, argv, |idx| idx.to_json());
 }
 
-/// `anki_hnsw_dot(table, col)` — the persisted HNSW graph as Graphviz DOT, or
-/// `NULL` if none is cached. Node labels are rowids; edges are colored by layer.
+/// `anki_hnsw_dot(table, col)` — the HNSW graph as Graphviz DOT (live in-RAM index
+/// when built, else the persisted cache), or `NULL` if none. Node labels are
+/// rowids; edges are colored by layer.
 unsafe extern "C" fn anki_hnsw_dot_fn(
     ctx: *mut sqlite3_context,
     argc: c_int,

@@ -202,9 +202,10 @@ never on the hot path**, only the fallback.
 ## Inspecting the graph (SQL functions)
 
 Two scalar SQL functions export the graph so the app can visualize it (e.g. the
-explorer's "Show HNSW graph" on a vector field). Both take `(table, col)`, read the
-**persisted** `<table>_anki_hnsw` cache, and decode it in Rust — so the blob format
-stays single-sourced (no hand-written JS parser to drift):
+explorer's "Show HNSW graph" on a vector field). Both take `(table, col)` and serialize
+the graph in Rust — the **live in-RAM index** when it's built, else the **persisted**
+`<table>_anki_hnsw` cache — so the format stays single-sourced (no hand-written JS parser
+to drift):
 
 - **`anki_hnsw_json(table, col)`** → a JSON object:
 
@@ -227,15 +228,18 @@ stays single-sourced (no hand-written JS parser to drift):
 - **`anki_hnsw_dot(table, col)`** → Graphviz DOT (node label = rowid, entry emphasized,
   edges colored by layer) for a quick static render.
 
-Both return **`NULL`** when there's no graph to show — no cache row yet, an empty
-(all-NULL) column, an unknown table/column, or an undecodable blob. Because they read the
-*persisted* cache (written at commit), a graph appears after it has been built (a `MATCH`)
-and committed; a freshly-inserted-but-never-searched table returns `NULL` until then. The
+Live-read comes from a small `(db, table) → TableState` registry (populated at
+`xConnect`/`xCreate`, cleared at `xDisconnect`/`xDestroy`); the function reads the state
+**immutably** (no rebuild), so a graph appears as soon as a `MATCH` has built the index —
+no write/commit needed — and a freshly reopened DB still shows its last-committed graph via
+the persisted fallback. Both return **`NULL`** when there's genuinely no graph — never
+searched and nothing cached, an empty (all-NULL) column, or an unknown table/column. The
 app treats `NULL` as "no graph yet — run a search."
 
-Tombstoned nodes are omitted from both exports (they're compacted out of the persisted
-blob anyway). Implemented by `Hnsw::to_json` / `to_dot` / `deserialize_topology` in
-`hnsw.rs` and registered next to `anki_model()` / `anki_dim()` in `vtab.rs`.
+Tombstoned nodes are omitted and node indices are **dense** (`0..N`): `to_json`/`to_dot`
+share `Hnsw::compact()` with `serialize`, so live and persisted exports agree. Implemented
+by `Hnsw::to_json` / `to_dot` / `deserialize_topology` in `hnsw.rs` and registered next to
+`anki_model()` / `anki_dim()` in `vtab.rs`.
 
 ## Assumptions and limits
 
