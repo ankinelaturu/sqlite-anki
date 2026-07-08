@@ -107,3 +107,29 @@ test("DEFAULT is not applied on a vtab (documented limitation)", () => {
     db.close();
   }
 });
+
+// Regression: the shadow already declares `anki_id INTEGER PRIMARY KEY`, so a user
+// column's PRIMARY KEY must map to shadow UNIQUE (a second PRIMARY KEY fails CREATE
+// — which broke every demo table, all declared `id INTEGER PRIMARY KEY`).
+test("a user PRIMARY KEY column maps to shadow UNIQUE (create succeeds, id unique)", () => {
+  const db = new sqlite3.oo1.DB(":memory:");
+  try {
+    db.exec(`CREATE VIRTUAL TABLE t USING anki(id INTEGER PRIMARY KEY, title TEXT, body TEXT VECTOR);`);
+    db.exec(`INSERT INTO t(id,title,body) VALUES (10,'a','first'),(20,'b','second');`);
+    // `id` is a normal column with UNIQUE enforcement; the vtab keeps its own rowid.
+    assert.throws(
+      () => db.exec(`INSERT INTO t(id,title,body) VALUES (10,'dup','x')`),
+      /UNIQUE|constraint/i,
+      "duplicate id rejected",
+    );
+    assert.equal(db.selectValue(`SELECT count(*) FROM t`), 2);
+    assert.equal(db.selectValue(`SELECT title FROM t WHERE id = 20`), "b");
+    // Search still works alongside the PK column.
+    assert.equal(
+      db.selectObjects(`SELECT id FROM t WHERE body MATCH 'first' ORDER BY body_score DESC`)[0].id,
+      10,
+    );
+  } finally {
+    db.close();
+  }
+});

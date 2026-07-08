@@ -38,6 +38,13 @@ full rationale and design. Add new entries at the top.
 - **Import drop-warning** — the Import & Vectorize dialog now lists which indexes, triggers,
   foreign keys, `DEFAULT`s, and table-level constraints a table loses when you tick it to vectorize.
 
+### Fixed
+- **`CREATE VIRTUAL TABLE … USING anki(id INTEGER PRIMARY KEY, …)` no longer fails.** A user
+  column's `PRIMARY KEY` collided with the shadow's own `anki_id INTEGER PRIMARY KEY` (SQLite allows
+  one per table), so the shadow `CREATE TABLE` errored — which broke the **demo** (every table
+  declares `id INTEGER PRIMARY KEY`). A single-column user `PRIMARY KEY` now maps to shadow `UNIQUE`
+  (uniqueness still enforced; `AUTOINCREMENT` dropped). Regression from the 2026-07-06 constraint work.
+
 ### Changed
 - **Storage format v3 → v4.** Adds the HNSW graph cache table (created at table creation). DBs
   written by an older format still hit the existing "rebuild required" guard on open; rebuild via

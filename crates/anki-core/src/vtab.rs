@@ -947,6 +947,33 @@ fn emb_col_ident(name: &str) -> String {
     quote_ident(&format!("anki_emb_{name}"))
 }
 
+/// Rewrites a user column's declared type for the **shadow** table: a user
+/// `PRIMARY KEY` becomes `UNIQUE` (the shadow's own `anki_id` is the sole PRIMARY
+/// KEY, and SQLite allows only one per table), and a trailing `AUTOINCREMENT`
+/// (valid only on `INTEGER PRIMARY KEY`) is dropped. Uniqueness is still enforced.
+/// Everything else (`NOT NULL`, `UNIQUE`, `CHECK`, `COLLATE`, `DEFAULT`) is
+/// unchanged. Case-insensitive on the keywords.
+fn shadow_decl_type(decl_type: &str) -> String {
+    let toks: Vec<&str> = decl_type.split_whitespace().collect();
+    let mut out: Vec<String> = Vec::with_capacity(toks.len());
+    let mut i = 0;
+    while i < toks.len() {
+        let is_pk = toks[i].eq_ignore_ascii_case("primary")
+            && toks.get(i + 1).is_some_and(|t| t.eq_ignore_ascii_case("key"));
+        if is_pk {
+            out.push("UNIQUE".to_string());
+            i += 2;
+            if toks.get(i).is_some_and(|t| t.eq_ignore_ascii_case("autoincrement")) {
+                i += 1;
+            }
+        } else {
+            out.push(toks[i].to_string());
+            i += 1;
+        }
+    }
+    out.join(" ")
+}
+
 fn build_ddl(data_table: &str, columns: &[ColumnDef]) -> String {
     // Internal columns are namespaced with `anki_` (reserved from user names) so the
     // data columns can keep their *real* names + declared type/COLLATE — a WHERE run
@@ -954,10 +981,11 @@ fn build_ddl(data_table: &str, columns: &[ColumnDef]) -> String {
     // column, and CHECK exprs / errors read naturally. See docs/streaming-storage.md.
     let mut defs = vec!["anki_id INTEGER PRIMARY KEY".to_string()];
     for c in columns {
-        if c.decl_type.is_empty() {
+        let decl = shadow_decl_type(&c.decl_type);
+        if decl.is_empty() {
             defs.push(quote_ident(&c.name));
         } else {
-            defs.push(format!("{} {}", quote_ident(&c.name), c.decl_type));
+            defs.push(format!("{} {}", quote_ident(&c.name), decl));
         }
     }
     for c in columns.iter().filter(|c| c.is_vector) {
@@ -2575,3 +2603,23 @@ pub unsafe extern "C" fn anki_register_vtab(db: *mut sqlite3) -> c_int {
 // (`filter_candidate_ids`), so the collation/affinity correctness this module used
 // to guard is covered by the wasm e2e suites (hybrid-filtering, collation,
 // pushdown-fidelity) against SQLite's real comparison.
+
+#[cfg(test)]
+mod tests {
+    use super::shadow_decl_type;
+
+    #[test]
+    fn shadow_decl_maps_primary_key_to_unique() {
+        // A user PRIMARY KEY → UNIQUE (the shadow's anki_id is the sole PK).
+        assert_eq!(shadow_decl_type("INTEGER PRIMARY KEY"), "INTEGER UNIQUE");
+        assert_eq!(shadow_decl_type("TEXT PRIMARY KEY"), "TEXT UNIQUE");
+        // AUTOINCREMENT (only valid on INTEGER PRIMARY KEY) is dropped; keywords
+        // are matched case-insensitively.
+        assert_eq!(shadow_decl_type("integer primary key autoincrement"), "integer UNIQUE");
+        // Everything else passes through untouched.
+        assert_eq!(shadow_decl_type("TEXT NOT NULL"), "TEXT NOT NULL");
+        assert_eq!(shadow_decl_type("TEXT COLLATE NOCASE"), "TEXT COLLATE NOCASE");
+        assert_eq!(shadow_decl_type("INTEGER UNIQUE"), "INTEGER UNIQUE");
+        assert_eq!(shadow_decl_type(""), "");
+    }
+}
