@@ -108,27 +108,51 @@ test("DEFAULT is not applied on a vtab (documented limitation)", () => {
   }
 });
 
-// Regression: the shadow already declares `anki_id INTEGER PRIMARY KEY`, so a user
-// column's PRIMARY KEY must map to shadow UNIQUE (a second PRIMARY KEY fails CREATE
-// — which broke every demo table, all declared `id INTEGER PRIMARY KEY`).
-test("a user PRIMARY KEY column maps to shadow UNIQUE (create succeeds, id unique)", () => {
+// A single user `INTEGER PRIMARY KEY` column *becomes* the shadow rowid (no injected
+// `anki_id`), so `rowid == id`, autoincrement works, and CREATE succeeds. (Every demo
+// table declares `id INTEGER PRIMARY KEY` — this is the path that unbroke the demo.)
+test("a single INTEGER PRIMARY KEY column becomes the rowid", () => {
   const db = new sqlite3.oo1.DB(":memory:");
   try {
     db.exec(`CREATE VIRTUAL TABLE t USING anki(id INTEGER PRIMARY KEY, title TEXT, body TEXT VECTOR);`);
-    db.exec(`INSERT INTO t(id,title,body) VALUES (10,'a','first'),(20,'b','second');`);
-    // `id` is a normal column with UNIQUE enforcement; the vtab keeps its own rowid.
-    assert.throws(
-      () => db.exec(`INSERT INTO t(id,title,body) VALUES (10,'dup','x')`),
-      /UNIQUE|constraint/i,
-      "duplicate id rejected",
+    const ddl = db.selectValue(`SELECT sql FROM sqlite_master WHERE name='t_anki_data'`);
+    assert.ok(!/anki_id/.test(ddl), "the user's id is the rowid — no injected anki_id");
+
+    db.exec(`INSERT INTO t(id,title,body) VALUES (10,'a','first deal'),(20,'b','second deal');`);
+    const rows = db.selectObjects(`SELECT id, rowid FROM t ORDER BY id`);
+    assert.deepEqual(
+      rows.map((r) => [r.id, r.rowid]),
+      [[10, 10], [20, 20]],
+      "rowid == id",
     );
+    // A bare INSERT auto-assigns, like a normal INTEGER PRIMARY KEY.
+    db.exec(`INSERT INTO t(title,body) VALUES ('c','third deal')`);
+    assert.equal(db.selectValue(`SELECT id FROM t WHERE title='c'`), 21);
+    // Duplicate id rejected; update/delete/search all work alongside the PK.
+    assert.throws(() => db.exec(`INSERT INTO t(id,title,body) VALUES (10,'x','y')`), /constraint/i);
+    db.exec(`UPDATE t SET title='a2' WHERE id=10`);
+    assert.equal(db.selectValue(`SELECT title FROM t WHERE id=10`), "a2");
+    db.exec(`DELETE FROM t WHERE id=20`);
     assert.equal(db.selectValue(`SELECT count(*) FROM t`), 2);
-    assert.equal(db.selectValue(`SELECT title FROM t WHERE id = 20`), "b");
-    // Search still works alongside the PK column.
     assert.equal(
-      db.selectObjects(`SELECT id FROM t WHERE body MATCH 'first' ORDER BY body_score DESC`)[0].id,
+      db.selectObjects(`SELECT id FROM t WHERE body MATCH 'first deal' ORDER BY body_score DESC`)[0].id,
       10,
+      "search returns the row's id (== rowid)",
     );
+  } finally {
+    db.close();
+  }
+});
+
+// A non-integer PRIMARY KEY can't be a rowid, so it still maps to shadow UNIQUE
+// (and the vtab injects its own anki_id rowid).
+test("a TEXT PRIMARY KEY maps to shadow UNIQUE (injected rowid)", () => {
+  const db = new sqlite3.oo1.DB(":memory:");
+  try {
+    db.exec(`CREATE VIRTUAL TABLE t USING anki(code TEXT PRIMARY KEY, body TEXT VECTOR);`);
+    assert.ok(/anki_id/.test(db.selectValue(`SELECT sql FROM sqlite_master WHERE name='t_anki_data'`)));
+    db.exec(`INSERT INTO t(code,body) VALUES ('A','hello');`);
+    assert.throws(() => db.exec(`INSERT INTO t(code,body) VALUES ('A','again')`), /constraint/i);
   } finally {
     db.close();
   }

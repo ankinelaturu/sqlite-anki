@@ -356,6 +356,14 @@ struct TableState {
     db: *mut sqlite3,
     /// Bare vtab name (argv[2]) — the registry key for live graph export.
     table_name: String,
+    /// Name of the shadow's rowid column (its `INTEGER PRIMARY KEY`). When the user
+    /// declares a single `INTEGER PRIMARY KEY` column, that column *is* the rowid and
+    /// this is its name; otherwise we inject `anki_id` and this is `"anki_id"`.
+    rowid_col: String,
+    /// `Some(i)` when the rowid is user column `i` (no injected `anki_id`); `None`
+    /// when `anki_id` is injected. The rowid column is bound with the rowid value on
+    /// write and served directly on read, not treated as an ordinary user cell.
+    rowid_user_idx: Option<usize>,
     /// Quoted, db-qualified shadow table name, e.g. `"main"."customers_anki_data"`.
     data_table: String,
     /// Set on `xRollback`: the cache may diverge from the rolled-back shadow
@@ -529,7 +537,12 @@ unsafe fn filter_candidate_ids(
         })
         .collect::<Vec<_>>()
         .join(" AND ");
-    let sql = format!("SELECT anki_id FROM {} WHERE {}", st.data_table, where_sql);
+    let sql = format!(
+        "SELECT {} FROM {} WHERE {}",
+        quote_ident(&st.rowid_col),
+        st.data_table,
+        where_sql
+    );
     let csql = CString::new(sql).ok()?;
     let mut stmt: *mut sqlite3_stmt = ptr::null_mut();
     if sqlite3_prepare_v2(st.db, csql.as_ptr(), -1, &mut stmt, ptr::null_mut()) != SQLITE_OK {
@@ -702,8 +715,10 @@ unsafe fn set_err(pz_err: *mut *mut c_char, msg: &str) {
 /// (`anki_id`, `anki_emb_<col>`, data columns under their real names); v4 added the
 /// HNSW graph cache; v5 renamed the shadow tables to the parallel `<name>_anki_data`
 /// (rows + embeddings) and `<name>_anki_hnsw` (graph cache), both created at `xCreate`
-/// so writes persist the index without DDL at commit time — see docs/streaming-storage.md.
-const STORAGE_FORMAT: u32 = 5;
+/// so writes persist the index without DDL at commit time; v6 lets a user
+/// `INTEGER PRIMARY KEY` column *be* the shadow rowid (no injected `anki_id`) — see
+/// docs/streaming-storage.md.
+const STORAGE_FORMAT: u32 = 6;
 
 /// Quoted, db-qualified `anki_meta` table name (database-wide model metadata).
 fn meta_table_ident(db_name: &str) -> String {
@@ -947,6 +962,16 @@ fn emb_col_ident(name: &str) -> String {
     quote_ident(&format!("anki_emb_{name}"))
 }
 
+/// True if a declared type is `INTEGER PRIMARY KEY [AUTOINCREMENT]` — the one form
+/// SQLite treats as a rowid alias. Such a user column can *be* the shadow's rowid
+/// (VACUUM-stable) instead of a redundant injected `anki_id`. `TEXT PRIMARY KEY` and
+/// other affinities are not rowid-eligible (they map to `UNIQUE` via `shadow_decl_type`).
+fn is_integer_pk(decl_type: &str) -> bool {
+    let up = decl_type.to_ascii_uppercase();
+    let mut toks = up.split_whitespace();
+    toks.next() == Some("INTEGER") && up.contains("PRIMARY KEY")
+}
+
 /// Rewrites a user column's declared type for the **shadow** table: a user
 /// `PRIMARY KEY` becomes `UNIQUE` (the shadow's own `anki_id` is the sole PRIMARY
 /// KEY, and SQLite allows only one per table), and a trailing `AUTOINCREMENT`
@@ -974,18 +999,35 @@ fn shadow_decl_type(decl_type: &str) -> String {
     out.join(" ")
 }
 
-fn build_ddl(data_table: &str, columns: &[ColumnDef]) -> String {
+fn build_ddl(
+    data_table: &str,
+    columns: &[ColumnDef],
+    rowid_col: &str,
+    rowid_user_idx: Option<usize>,
+) -> String {
     // Internal columns are namespaced with `anki_` (reserved from user names) so the
     // data columns can keep their *real* names + declared type/COLLATE — a WHERE run
     // directly on the shadow table then matches SQLite's semantics for the virtual
     // column, and CHECK exprs / errors read naturally. See docs/streaming-storage.md.
-    let mut defs = vec!["anki_id INTEGER PRIMARY KEY".to_string()];
-    for c in columns {
-        let decl = shadow_decl_type(&c.decl_type);
-        if decl.is_empty() {
-            defs.push(quote_ident(&c.name));
+    let mut defs: Vec<String> = Vec::new();
+    // The rowid is the shadow's sole `INTEGER PRIMARY KEY`. If a user column fills
+    // that role we keep it in place (below); otherwise inject a synthetic one.
+    if rowid_user_idx.is_none() {
+        defs.push(format!("{} INTEGER PRIMARY KEY", quote_ident(rowid_col)));
+    }
+    for (i, c) in columns.iter().enumerate() {
+        if Some(i) == rowid_user_idx {
+            // The user's own INTEGER PRIMARY KEY *is* the rowid — keep it verbatim
+            // (INTEGER PRIMARY KEY [AUTOINCREMENT]), VACUUM-stable, no injected id.
+            defs.push(format!("{} {}", quote_ident(&c.name), c.decl_type));
         } else {
-            defs.push(format!("{} {}", quote_ident(&c.name), decl));
+            // A non-rowid PRIMARY KEY maps to UNIQUE (only one PK per table).
+            let decl = shadow_decl_type(&c.decl_type);
+            if decl.is_empty() {
+                defs.push(quote_ident(&c.name));
+            } else {
+                defs.push(format!("{} {}", quote_ident(&c.name), decl));
+            }
         }
     }
     for c in columns.iter().filter(|c| c.is_vector) {
@@ -994,15 +1036,20 @@ fn build_ddl(data_table: &str, columns: &[ColumnDef]) -> String {
     format!("CREATE TABLE IF NOT EXISTS {data_table}({})", defs.join(", "))
 }
 
-/// Column list shared by the INSERT and SELECT: `anki_id, <cols…>, anki_emb_<vec>…`.
-/// Order (rowid, then declared columns, then embeddings per vector column) matches
-/// `persist_row`'s bind order.
-fn data_columns(columns: &[ColumnDef]) -> Vec<String> {
-    let mut cols = vec!["anki_id".to_string()];
-    for c in columns {
+/// Write-path column list, in bind order: **rowid column first**, then the other
+/// user columns (declared order), then `anki_emb_<vec>` per vector column. The rowid
+/// column is bound with the rowid value (`bind_row_values` skips its user cell), so
+/// this works whether the rowid is injected (`anki_id`) or a user `INTEGER PRIMARY
+/// KEY`. Matches `bind_row_values`' order.
+fn data_columns(st: &TableState) -> Vec<String> {
+    let mut cols = vec![quote_ident(&st.rowid_col)];
+    for (i, c) in st.columns.iter().enumerate() {
+        if Some(i) == st.rowid_user_idx {
+            continue; // the rowid column is already first
+        }
         cols.push(quote_ident(&c.name));
     }
-    for c in columns.iter().filter(|c| c.is_vector) {
+    for c in st.columns.iter().filter(|c| c.is_vector) {
         cols.push(emb_col_ident(&c.name));
     }
     cols
@@ -1099,7 +1146,10 @@ unsafe fn bind_row_values(
     start: c_int,
 ) -> c_int {
     let mut idx = start;
-    for cell in cells.iter().take(st.ncol) {
+    for (i, cell) in cells.iter().take(st.ncol).enumerate() {
+        if Some(i) == st.rowid_user_idx {
+            continue; // the rowid column is bound with the rowid value, not this cell
+        }
         bind_cell(stmt, idx, cell);
         idx += 1;
     }
@@ -1147,7 +1197,7 @@ unsafe fn insert_row(
     embeddings: &[Option<Vec<f32>>],
     conflict: &str,
 ) -> c_int {
-    let cols = data_columns(&st.columns);
+    let cols = data_columns(st);
     let placeholders = vec!["?"; cols.len()].join(", ");
     let sql = format!(
         "INSERT OR {} INTO {}({}) VALUES({})",
@@ -1169,8 +1219,8 @@ unsafe fn insert_row(
     finish_write(stmt)
 }
 
-/// Updates the shadow row identified by `anki_id = rowid` in place, with the
-/// caller-supplied conflict mode (`UPDATE OR <conflict>`).
+/// Updates the shadow row identified by its rowid (the `rowid_col` value) in place,
+/// with the caller-supplied conflict mode (`UPDATE OR <conflict>`).
 unsafe fn update_row(
     st: &TableState,
     rowid: i64,
@@ -1178,16 +1228,19 @@ unsafe fn update_row(
     embeddings: &[Option<Vec<f32>>],
     conflict: &str,
 ) -> c_int {
-    let cols = data_columns(&st.columns);
-    // Every column except the `anki_id` PK is assigned; the PK is the WHERE key.
+    let cols = data_columns(st);
+    // Every column except the rowid (cols[0]) is assigned; the rowid is the WHERE key.
     let set = cols[1..]
         .iter()
         .map(|c| format!("{c}=?"))
         .collect::<Vec<_>>()
         .join(", ");
     let sql = format!(
-        "UPDATE OR {} {} SET {} WHERE anki_id = ?",
-        conflict, st.data_table, set
+        "UPDATE OR {} {} SET {} WHERE {} = ?",
+        conflict,
+        st.data_table,
+        set,
+        quote_ident(&st.rowid_col)
     );
     let csql = match CString::new(sql) {
         Ok(c) => c,
@@ -1203,7 +1256,11 @@ unsafe fn update_row(
 }
 
 unsafe fn delete_row(st: &TableState, rowid: i64) -> c_int {
-    let sql = format!("DELETE FROM {} WHERE anki_id = ?", st.data_table);
+    let sql = format!(
+        "DELETE FROM {} WHERE {} = ?",
+        st.data_table,
+        quote_ident(&st.rowid_col)
+    );
     let csql = match CString::new(sql) {
         Ok(c) => c,
         Err(_) => return SQLITE_ERROR,
@@ -1230,12 +1287,18 @@ unsafe fn load_all(st: &mut TableState) {
     st.dirty = false;
     st.index_dirty = true;
     // Only rowid + embeddings are held in RAM; user column data stays on disk and
-    // is read on demand by xColumn. The SELECT fetches `anki_id, anki_emb_<col>…`.
-    let mut cols = vec!["anki_id".to_string()];
+    // is read on demand by xColumn. The SELECT fetches `<rowid>, anki_emb_<col>…`.
+    let rowid = quote_ident(&st.rowid_col);
+    let mut cols = vec![rowid.clone()];
     for &vi in &st.vector_cols {
         cols.push(emb_col_ident(&st.columns[vi].name));
     }
-    let sql = format!("SELECT {} FROM {} ORDER BY anki_id", cols.join(", "), st.data_table);
+    let sql = format!(
+        "SELECT {} FROM {} ORDER BY {}",
+        cols.join(", "),
+        st.data_table,
+        rowid
+    );
     let csql = match CString::new(sql) {
         Ok(c) => c,
         Err(_) => return,
@@ -1325,6 +1388,14 @@ unsafe fn new_state(
     let data_table = data_table_ident(&db_name, &table_name);
     let hnsw_table = hnsw_table_ident(&db_name, &table_name);
 
+    // A single user `INTEGER PRIMARY KEY` becomes the rowid (no injected `anki_id`);
+    // otherwise inject `anki_id`. Any other PRIMARY KEY column → shadow UNIQUE.
+    let rowid_user_idx = columns.iter().position(|c| is_integer_pk(&c.decl_type));
+    let rowid_col = match rowid_user_idx {
+        Some(i) => columns[i].name.clone(),
+        None => "anki_id".to_string(),
+    };
+
     Some(Box::into_raw(Box::new(TableState {
         columns,
         ncol,
@@ -1333,6 +1404,8 @@ unsafe fn new_state(
         next_rowid: 1,
         db,
         table_name,
+        rowid_col,
+        rowid_user_idx,
         data_table,
         dirty: false,
         indexes: (0..ncol).map(|_| None).collect(),
@@ -1611,7 +1684,12 @@ unsafe extern "C" fn x_create(
     };
 
     // Create the persistent shadow table (`<name>_anki_data`) backing this vtab.
-    let ddl = build_ddl(&(*state).data_table, &(*state).columns);
+    let ddl = build_ddl(
+        &(*state).data_table,
+        &(*state).columns,
+        &(*state).rowid_col,
+        (*state).rowid_user_idx,
+    );
     let rc = exec(db, &ddl);
     if rc != SQLITE_OK {
         drop(Box::from_raw(state)); // reclaim the leaked state on the error path
@@ -2141,7 +2219,12 @@ unsafe fn load_cursor_row(c: &mut AnkiCursor, st: &TableState, rowid: i64) {
             .map(|c| quote_ident(&c.name))
             .collect::<Vec<_>>()
             .join(", ");
-        let sql = format!("SELECT {} FROM {} WHERE anki_id = ?", cols, st.data_table);
+        let sql = format!(
+            "SELECT {} FROM {} WHERE {} = ?",
+            cols,
+            st.data_table,
+            quote_ident(&st.rowid_col)
+        );
         if let Ok(csql) = CString::new(sql) {
             let mut stmt: *mut sqlite3_stmt = ptr::null_mut();
             if sqlite3_prepare_v2(st.db, csql.as_ptr(), -1, &mut stmt, ptr::null_mut())
@@ -2291,9 +2374,17 @@ unsafe extern "C" fn x_update(
     } else {
         Some(sqlite3_value_int64(old))
     };
-    // Use the rowid SQLite supplies, or assign the next one for a bare INSERT.
+    // Determine the rowid. SQLite's supplied rowid (`argv[1]`) wins. Otherwise, when
+    // a user `INTEGER PRIMARY KEY` column is the rowid, take the value the caller gave
+    // that column (so `INSERT INTO t(id,…) VALUES(10,…)` yields rowid 10); a bare
+    // INSERT (NULL id) auto-assigns the next rowid, like a normal INTEGER PRIMARY KEY.
     let rowid = if sqlite3_value_type(new_rowid_v) != SQLITE_NULL {
         sqlite3_value_int64(new_rowid_v)
+    } else if let Some(idx) = st.rowid_user_idx {
+        match cells.get(idx) {
+            Some(Cell::Int(v)) => *v,
+            _ => st.next_rowid,
+        }
     } else {
         st.next_rowid
     };

@@ -32,11 +32,12 @@ enforcing them; FTS5 rejects some as its own policy). They ride on the real shad
   the shadow `CREATE TABLE`, and every write routes through the shadow via `xUpdate`. The SQL
   conflict clause is honored — `INSERT OR REPLACE` replaces, `INSERT OR IGNORE` skips, plain
   `INSERT` rejects (via `sqlite3_vtab_on_conflict`).
-- **A single-column `PRIMARY KEY` becomes `UNIQUE` on the shadow.** The shadow's own rowid,
-  `anki_id INTEGER PRIMARY KEY`, is the table's sole `PRIMARY KEY` (SQLite allows one), so a user
-  `id INTEGER PRIMARY KEY` is stored `id INTEGER UNIQUE` (uniqueness still enforced; `AUTOINCREMENT`
-  dropped). The `anki` vtab keeps its own rowid — a user PK column is an ordinary unique column, not
-  the rowid.
+- **A single `INTEGER PRIMARY KEY` column becomes the rowid.** When you declare exactly one
+  `INTEGER PRIMARY KEY` column, *it* is the shadow's rowid (`rowid == id`, VACUUM-stable,
+  `AUTOINCREMENT` honored) — no injected `anki_id`. Tables without one get an injected
+  `anki_id INTEGER PRIMARY KEY`. A **non-integer** PK (`TEXT PRIMARY KEY`) can't be a rowid, so it
+  maps to `UNIQUE` (and `anki_id` is injected); only one `PRIMARY KEY` per table, so any *second* PK
+  also maps to `UNIQUE`.
 - **Not expressible:** table-level constraints — multi-column `UNIQUE`, `PRIMARY KEY(a, b)`,
   table-level `CHECK`. The `USING anki(col …)` DSL is per-column only.
 - **`DEFAULT`:** see above (a vtab limitation).

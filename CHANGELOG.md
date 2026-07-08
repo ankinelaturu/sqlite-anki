@@ -42,8 +42,10 @@ full rationale and design. Add new entries at the top.
 - **`CREATE VIRTUAL TABLE … USING anki(id INTEGER PRIMARY KEY, …)` no longer fails.** A user
   column's `PRIMARY KEY` collided with the shadow's own `anki_id INTEGER PRIMARY KEY` (SQLite allows
   one per table), so the shadow `CREATE TABLE` errored — which broke the **demo** (every table
-  declares `id INTEGER PRIMARY KEY`). A single-column user `PRIMARY KEY` now maps to shadow `UNIQUE`
-  (uniqueness still enforced; `AUTOINCREMENT` dropped). Regression from the 2026-07-06 constraint work.
+  declares `id INTEGER PRIMARY KEY`). Now a single `INTEGER PRIMARY KEY` column **becomes the shadow
+  rowid** (`rowid == id`, VACUUM-stable, `AUTOINCREMENT` honored) with no injected `anki_id` — the
+  user's key keeps its full semantics. Tables without an integer PK still get an injected `anki_id`;
+  a non-integer/second PK maps to `UNIQUE`. Regression from the 2026-07-06 constraint work.
 
 ### Changed
 - **Storage format v3 → v4.** Adds the HNSW graph cache table (created at table creation). DBs
@@ -54,6 +56,9 @@ full rationale and design. Add new entries at the top.
   functions to `anki_hnsw_json` / `anki_hnsw_dot`. All per-table internals now share the
   `<name>_anki_*` shape, so the explorer hides them with one rule and future shadow tables fit the
   scheme. (Column names — `anki_id`, `anki_emb_<col>` — keep the reserved `anki_` prefix.)
+- **Storage format v5 → v6.** A user `INTEGER PRIMARY KEY` column now *is* the shadow rowid (see
+  Fixed), so the shadow layout differs from v5 for such tables. Older DBs hit the "rebuild required"
+  guard on open.
 
 ### Docs
 - Added [docs/limitations.md](docs/limitations.md) — a living list of by-design limits (vtab
