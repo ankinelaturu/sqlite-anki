@@ -216,9 +216,10 @@ test("real column names (incl 'id'/'c0') round-trip; shadow uses them", async ()
     assert.equal(row.id, "X-1");
     assert.equal(row.c0, "legacy");
     assert.equal(db.selectValue(`SELECT id FROM docs WHERE body MATCH 'cloud database'`), "X-1");
-    // The shadow table carries the real names + `anki_` internals, in order.
+    // The shadow carries the user's real column names verbatim (no injected rowid
+    // column) plus the `anki_emb_<col>` blob; it keys on SQLite's implicit rowid.
     const cols = db.selectObjects(`PRAGMA table_info("docs_anki_data")`).map((c) => c.name);
-    assert.deepEqual(cols, ["anki_id", "id", "c0", "body", "anki_emb_body"]);
+    assert.deepEqual(cols, ["id", "c0", "body", "anki_emb_body"]);
   } finally {
     db.close();
   }

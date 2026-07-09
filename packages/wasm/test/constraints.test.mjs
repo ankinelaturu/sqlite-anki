@@ -144,13 +144,15 @@ test("a single INTEGER PRIMARY KEY column becomes the rowid", () => {
   }
 });
 
-// A non-integer PRIMARY KEY can't be a rowid, so it still maps to shadow UNIQUE
-// (and the vtab injects its own anki_id rowid).
-test("a TEXT PRIMARY KEY maps to shadow UNIQUE (injected rowid)", () => {
+// A non-integer PRIMARY KEY can't be a rowid, but nothing is injected now, so it's
+// kept *verbatim* as a real PRIMARY KEY (SQLite gives it a separate implicit rowid).
+test("a TEXT PRIMARY KEY is kept verbatim (real PK, separate rowid)", () => {
   const db = new sqlite3.oo1.DB(":memory:");
   try {
     db.exec(`CREATE VIRTUAL TABLE t USING anki(code TEXT PRIMARY KEY, body TEXT VECTOR);`);
-    assert.ok(/anki_id/.test(db.selectValue(`SELECT sql FROM sqlite_master WHERE name='t_anki_data'`)));
+    const ddl = db.selectValue(`SELECT sql FROM sqlite_master WHERE name='t_anki_data'`);
+    assert.match(ddl, /"code" TEXT PRIMARY KEY/, "PK kept as declared, not demoted to UNIQUE");
+    assert.ok(!/anki_id/.test(ddl), "no injected column");
     db.exec(`INSERT INTO t(code,body) VALUES ('A','hello');`);
     assert.throws(() => db.exec(`INSERT INTO t(code,body) VALUES ('A','again')`), /constraint/i);
   } finally {

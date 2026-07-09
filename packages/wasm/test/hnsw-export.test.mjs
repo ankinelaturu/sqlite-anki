@@ -43,7 +43,7 @@ test("anki_hnsw_json returns the persisted topology", () => {
     assert.ok(g.max_level >= 0);
 
     // Every node carries a compact index, a rowid, and a level.
-    const rowids = new Set(db.selectObjects(`SELECT anki_id AS id FROM t_anki_data`).map((r) => r.id));
+    const rowids = new Set(db.selectObjects(`SELECT rowid AS id FROM t`).map((r) => r.id));
     for (const n of g.nodes) {
       assert.equal(typeof n.node, "number");
       assert.ok(rowids.has(n.rowid), `node rowid ${n.rowid} exists in the table`);

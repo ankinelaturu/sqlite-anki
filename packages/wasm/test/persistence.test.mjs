@@ -54,10 +54,12 @@ const metricsSnap = (sqlite3) =>
 
 // Roadmap #2: the built HNSW graph is persisted to `<name>_anki_hnsw` at commit,
 // so reopening reads it instead of paying a cold O(N) rebuild on the first MATCH.
+// The graph is only persisted for a **pinned** (INTEGER PRIMARY KEY) rowid, so the
+// table declares one.
 test("HNSW graph persists across reopen: first MATCH skips the rebuild", () => {
   const path = "/graph-persist.db";
   let db = new sqlite3.oo1.DB(path, "c");
-  db.exec(`CREATE VIRTUAL TABLE docs USING anki(notes TEXT VECTOR);`);
+  db.exec(`CREATE VIRTUAL TABLE docs USING anki(id INTEGER PRIMARY KEY, notes TEXT VECTOR);`);
   db.exec(`INSERT INTO docs(notes) VALUES
     ('billing and invoice dispute'),('weather forecast tomorrow'),
     ('refund request for an order'),('sunny skies and a warm wind');`);
@@ -96,7 +98,7 @@ test("HNSW graph persists across reopen: first MATCH skips the rebuild", () => {
 test("a deleted row stays gone after reopen (compacted graph, no rebuild)", () => {
   const path = "/graph-persist-del.db";
   let db = new sqlite3.oo1.DB(path, "c");
-  db.exec(`CREATE VIRTUAL TABLE docs USING anki(notes TEXT VECTOR);`);
+  db.exec(`CREATE VIRTUAL TABLE docs USING anki(id INTEGER PRIMARY KEY, notes TEXT VECTOR);`);
   db.exec(`INSERT INTO docs(notes) VALUES
     ('alpha one two three'),('beta four five six'),
     ('gamma seven eight nine'),('unique deletion sentinel phrase');`);
@@ -116,6 +118,34 @@ test("a deleted row stays gone after reopen (compacted graph, no rebuild)", () =
       rows.every((r) => r.notes !== "unique deletion sentinel phrase"),
       "deleted row must not resurface from the persisted graph",
     );
+  } finally {
+    db.close();
+  }
+});
+
+// An unpinned table (no INTEGER PRIMARY KEY) has a VACUUM-unstable rowid, so the
+// graph is deliberately never persisted — it just rebuilds in RAM on open.
+test("an unpinned table does not persist the graph (rebuilds on reopen)", () => {
+  const path = "/graph-unpinned.db";
+  let db = new sqlite3.oo1.DB(path, "c");
+  db.exec(`CREATE VIRTUAL TABLE docs USING anki(notes TEXT VECTOR);`); // no integer PK
+  db.exec(`INSERT INTO docs(notes) VALUES ('billing dispute'),('weather forecast');`);
+  db.selectObjects(`SELECT rowid FROM docs WHERE notes MATCH 'billing'`); // build in RAM
+  db.exec(`INSERT INTO docs(notes) VALUES ('refund request')`); // commit
+  assert.equal(
+    db.selectValue(`SELECT count(*) FROM "main"."docs_anki_hnsw"`),
+    0,
+    "unpinned table never writes a persisted graph",
+  );
+  db.close();
+
+  const pre = metricsSnap(sqlite3);
+  db = new sqlite3.oo1.DB(path, "w");
+  try {
+    db.selectObjects(`SELECT notes FROM docs WHERE notes MATCH 'billing'`);
+    const post = metricsSnap(sqlite3);
+    assert.equal(post.graph_loads - pre.graph_loads, 0, "nothing to load");
+    assert.ok(post.index_rebuilds - pre.index_rebuilds >= 1, "rebuilds on open instead");
   } finally {
     db.close();
   }
