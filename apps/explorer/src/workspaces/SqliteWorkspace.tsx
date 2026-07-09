@@ -627,7 +627,13 @@ export function SqliteWorkspace({ sidebarSize, onSidebarResize, active }: Worksp
                   {/* The SQL editor stays mounted (hidden) so its content,
                       results and selection survive tab switches. */}
                   <div className={cn("h-full", activeTab?.kind !== "query" && "hidden")}>
-                    <QueryView key={activeDb} api={api} path={activeDb} run={runQuery} />
+                    <QueryView
+                      key={activeDb}
+                      api={api}
+                      path={activeDb}
+                      tables={tables}
+                      run={runQuery}
+                    />
                   </div>
                   {activeTab?.kind === "notes" && (
                     <NotesView key={`${activeDb}:notes`} api={api} path={activeDb} />

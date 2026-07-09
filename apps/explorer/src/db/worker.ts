@@ -22,6 +22,7 @@ import {
   type ModelSpec,
   type QueryResult,
   type Row,
+  type SqlDiagnostic,
   type SqlValue,
   type TableInfo,
 } from "./types";
@@ -32,6 +33,24 @@ type Db = any;
 
 function quote(name: string): string {
   return `"${name.replace(/"/g, '""')}"`;
+}
+
+/** Best-effort map from a SQLite prepare error to a span inside `sql`. */
+function locateSqlError(sql: string, message: string): { from: number; to: number } {
+  const token =
+    /near\s+"([^"]+)"/i.exec(message)?.[1] ??
+    /near\s+[`"']([^`"']+)[`"']/i.exec(message)?.[1] ??
+    /near\s+(\S+)/i.exec(message)?.[1] ??
+    /no such table:\s*(\S+)/i.exec(message)?.[1] ??
+    /no such column:\s*(?:\S+\.)?(\S+)/i.exec(message)?.[1];
+
+  if (token) {
+    const from = sql.indexOf(token);
+    if (from >= 0) return { from, to: from + token.length };
+  }
+
+  const end = sql.trimEnd().length;
+  return { from: Math.max(0, end - 1), to: end };
 }
 
 /**
@@ -385,6 +404,22 @@ class AnkiWorker implements AnkiWorkerApi {
 
   async writeQuery(path: string, content: string): Promise<void> {
     return writeSidecar(queryName(path), content);
+  }
+
+  async checkSql(path: string, sql: string): Promise<SqlDiagnostic[]> {
+    const trimmed = sql.trim();
+    if (!trimmed) return [];
+
+    const db = this.db(path);
+    try {
+      const stmt = db.prepare(trimmed);
+      stmt.finalize();
+      return [];
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      const { from, to } = locateSqlError(trimmed, message);
+      return [{ from, to, message }];
+    }
   }
 
   private async ensureNotes(path: string): Promise<void> {

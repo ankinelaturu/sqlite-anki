@@ -1,22 +1,23 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import CodeMirror, { type ReactCodeMirrorRef } from "@uiw/react-codemirror";
-import { sql, SQLite } from "@codemirror/lang-sql";
 import { Check, Play, RefreshCw, TextCursorInput } from "lucide-react";
-import type { AnkiWorkerApi, QueryResult, Remote } from "@/db";
+import type { AnkiWorkerApi, QueryResult, Remote, TableInfo } from "@/db";
 import { Button } from "@/components/ui/button";
 import { DataGrid } from "@/components/DataGrid";
 import { editorColorMode, useTheme } from "@/lib/theme";
+import { lintGutter, sqlEditorExtensions, sqliteLinter } from "@/lib/sqlEditor";
 
 interface QueryViewProps {
   api: Remote<AnkiWorkerApi>;
   path: string;
+  tables: TableInfo[];
   run: (sql: string) => Promise<QueryResult>;
 }
 
 type SaveState = "loading" | "saved" | "dirty" | "saving";
 const STARTER_SQL = "SELECT name FROM sqlite_master WHERE type IN ('table','view');\n";
 
-export function QueryView({ api, path, run }: QueryViewProps) {
+export function QueryView({ api, path, tables, run }: QueryViewProps) {
   const [value, setValue] = useState("");
   const [result, setResult] = useState<QueryResult | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -26,6 +27,11 @@ export function QueryView({ api, path, run }: QueryViewProps) {
   const cmRef = useRef<ReactCodeMirrorRef>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const colorMode = editorColorMode(useTheme());
+
+  const extensions = useMemo(
+    () => [...sqlEditorExtensions(tables), sqliteLinter(api, path), lintGutter()],
+    [tables, api, path],
+  );
 
   // Load the persisted scratchpad for this database.
   useEffect(() => {
@@ -131,14 +137,19 @@ export function QueryView({ api, path, run }: QueryViewProps) {
           onChange={onChange}
           onUpdate={(u) => setHasSelection(!u.state.selection.main.empty)}
           theme={colorMode}
-          extensions={[sql({ dialect: SQLite })]}
+          extensions={extensions}
           onKeyDownCapture={(e) => {
             if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
               e.preventDefault();
               runSmart();
             }
           }}
-          basicSetup={{ lineNumbers: true, foldGutter: false, highlightActiveLine: false }}
+          basicSetup={{
+            lineNumbers: true,
+            foldGutter: false,
+            highlightActiveLine: false,
+            autocompletion: false,
+          }}
           height="100%"
           style={{ height: "100%" }}
         />

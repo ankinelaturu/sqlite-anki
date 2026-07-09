@@ -4,6 +4,14 @@ Notable changes to sqlite-anki, newest first. Pre-1.0 and unversioned, so entrie
 grouped by date rather than release. Curated from git history — see linked docs for the
 full rationale and design. Add new entries at the top.
 
+## 2026-07-09
+
+### Explorer
+- **SQL scratchpad: schema-aware autocomplete and inline errors.** The query editor now
+  completes table/column names (including `anki` `<col>_score` columns) from the open database
+  with context-filtered suggestions (tables after `FROM`, columns in `SELECT`/`WHERE`, keywords
+  elsewhere) and shows prepare-time squiggles on the statement at the cursor before run.
+
 ## 2026-07-07
 
 ### Performance

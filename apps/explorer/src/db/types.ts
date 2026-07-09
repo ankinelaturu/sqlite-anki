@@ -41,6 +41,13 @@ export interface Metrics {
   rows_matched: number;
 }
 
+/** A single inline SQL error (offsets relative to the checked statement text). */
+export interface SqlDiagnostic {
+  from: number;
+  to: number;
+  message: string;
+}
+
 /** Result of running SQL, with the per-operation metric delta + wall time. */
 export interface QueryResult {
   columns: string[];
@@ -137,6 +144,11 @@ export interface AnkiWorkerApi {
   dropDatabase(path: string): Promise<void>;
   schema(path: string): Promise<TableInfo[]>;
   query(path: string, sql: string, params?: SqlValue[]): Promise<QueryResult>;
+  /**
+   * Validates SQL via `prepare()` without executing it. Offsets in the
+   * returned diagnostics are relative to `sql`.
+   */
+  checkSql(path: string, sql: string): Promise<SqlDiagnostic[]>;
   tableData(
     path: string,
     table: string,
