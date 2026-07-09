@@ -64,7 +64,11 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: Emscripten SDK
-        uses: mymindstorm/setup-emsdk@v14
+        uses: emscripten-core/setup-emsdk@v15
+        with:
+          # Pin: EMSDK "latest" (6.0.2) trips a wasm-opt DWARF assertion on our
+          # large sqlite3+anki link. 6.0.1 is known-good locally and in CI.
+          version: "6.0.1"
 
       - name: wabt (provides wasm-strip)
         run: sudo apt-get update && sudo apt-get install -y wabt

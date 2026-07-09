@@ -149,7 +149,10 @@ done
 # in sqlite3ApiBootstrap with "HEAPU64 was not exported".
 # HEAPU8 is needed so the JS glue can copy model/tokenizer bytes into the wasm
 # heap before calling anki_load_model.
-ANKI_LINK="$ANKI_LIB -msimd128 -sEXPORTED_RUNTIME_METHODS=wasmMemory,HEAPU64,HEAP64,HEAPU8"
+# -g0 overrides the makefile's -g3 (appended last on the emcc line) so wasm-opt
+# does not process DWARF — EMSDK 6.0.2+ can SIGABRT on our large link. Debug
+# info is stripped below with wasm-strip anyway.
+ANKI_LINK="$ANKI_LIB -msimd128 -g0 -sEXPORTED_RUNTIME_METHODS=wasmMemory,HEAPU64,HEAP64,HEAPU8"
 
 # wasm threads: shared memory + a worker pool so Candle's gemm/rayon can run
 # matmuls in parallel. Growable shared memory needs an explicit MAXIMUM_MEMORY.
@@ -165,8 +168,9 @@ EMCC_INITIAL_MEMORY="${EMCC_INITIAL_MEMORY:-128}"
 
 # Optimization level for the SQLite C + glue. The ext/wasm default for our
 # (non-"dist") targets is -O0; the makefile notes -O2 gives the fastest
-# deliverables. Override with EMCC_OPT=-Oz for smallest. (-g3 is always added by
-# the makefile, then removed below by wasm-strip / wasm-opt --strip-debug.)
+# deliverables. Override with EMCC_OPT=-Oz for smallest. The makefile adds -g3
+# (keeps export names through -O2+); we cancel it with -g0 in ANKI_LINK, then
+# wasm-strip shrinks the output.
 EMCC_OPT="${EMCC_OPT:--O2}"
 
 echo "==> Building official SQLite WASM (ext/wasm), emcc_opt=$EMCC_OPT"
@@ -182,9 +186,8 @@ make -C "$WASM_DIR" -j"$(sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || e
   jswasm/sqlite3-worker1-bundler-friendly.mjs \
   jswasm/sqlite3-opfs-async-proxy.js
 
-# Strip the -g3 debug info the makefile always adds. wasm-opt --strip-debug does
-# this when binaryen is present; this guarantees a small wasm even without it
-# (-g3 debug is the bulk of the ~16 MB unoptimized size).
+# Strip any residual debug sections. wasm-strip guarantees a small wasm even
+# without a standalone binaryen install (-g3 debug is the bulk of ~16 MB unoptimized).
 echo "==> Stripping debug info (wasm-strip)"
 for w in "$WASM_DIR"/jswasm/sqlite3*.wasm; do
   [[ -f "$w" ]] && { wasm-strip "$w" || echo "    (wasm-strip failed on $(basename "$w"), continuing)"; }
