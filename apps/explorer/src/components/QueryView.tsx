@@ -144,6 +144,7 @@ export function QueryView({ api, path, tables, run }: QueryViewProps) {
               runSmart();
             }
           }}
+          indentWithTab={false}
           basicSetup={{
             lineNumbers: true,
             foldGutter: false,

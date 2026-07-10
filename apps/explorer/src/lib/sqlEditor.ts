@@ -7,14 +7,19 @@ import {
 } from "@codemirror/lang-sql";
 import {
   autocompletion,
+  acceptCompletion,
+  completionStatus,
   type Completion,
   type CompletionContext,
   type CompletionResult,
 } from "@codemirror/autocomplete";
+import { indentLess, indentMore } from "@codemirror/commands";
 import { syntaxTree } from "@codemirror/language";
 import type { SyntaxNode } from "@lezer/common";
 import type { Extension } from "@codemirror/state";
 import type { EditorState } from "@codemirror/state";
+import { Prec } from "@codemirror/state";
+import { keymap } from "@codemirror/view";
 import { linter, lintGutter, type Diagnostic } from "@codemirror/lint";
 import type { AnkiWorkerApi, Remote, TableInfo } from "@/db";
 
@@ -283,6 +288,25 @@ function contextualSqlCompletion(tables: TableInfo[], schema: SQLNamespace) {
 }
 
 /**
+ * VS Code-style Tab: accept the highlighted completion when the menu is open,
+ * otherwise indent. Enter still accepts via the default `completionKeymap`.
+ */
+function tabAcceptOrIndent(): Extension {
+  return Prec.highest(
+    keymap.of([
+      {
+        key: "Tab",
+        run(view) {
+          if (completionStatus(view.state)) return acceptCompletion(view);
+          return indentMore(view);
+        },
+        shift: indentLess,
+      },
+    ]),
+  );
+}
+
+/**
  * SQLite highlighting plus context-filtered completion (no keyword dump after
  * `FROM`, etc.). `sql()` provides the language + highlighting; `override`
  * replaces its built-in completion sources with our context-aware one.
@@ -302,6 +326,7 @@ export function sqlEditorExtensions(tables: TableInfo[]): Extension[] {
       ],
       optionClass: (c) => ((c as SqlCompletion).pills?.length ? "sql-completion-has-pills" : ""),
     }),
+    tabAcceptOrIndent(),
   ];
 }
 
