@@ -2,6 +2,7 @@ import { useState } from "react";
 import { ChevronRight, File, Folder, FolderOpen } from "lucide-react";
 import { fmtBytes, type OpfsNode } from "@/lib/opfs";
 import { cn } from "@/lib/utils";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 interface OpfsTreeProps {
   nodes: OpfsNode[];
@@ -50,40 +51,47 @@ function OpfsTreeItem({
 
   return (
     <div>
-      <div
-        role="button"
-        onClick={() => (isDir ? setOpen((o) => !o) : onSelect(node))}
-        style={{ paddingLeft: `${depth * 12 + 8}px` }}
-        className={cn(
-          "flex cursor-default items-center gap-1.5 rounded py-1 pr-2 text-sm hover:bg-accent/50",
-          selected && "bg-accent",
-        )}
-      >
-        {isDir ? (
-          <ChevronRight
-            className={cn("h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform", open && "rotate-90")}
-          />
-        ) : (
-          <span className="w-3.5 shrink-0" />
-        )}
-        {isDir ? (
-          open ? (
-            <FolderOpen className="h-4 w-4 shrink-0 text-sky-400" />
-          ) : (
-            <Folder className="h-4 w-4 shrink-0 text-sky-400" />
-          )
-        ) : (
-          <File className="h-4 w-4 shrink-0 text-muted-foreground" />
-        )}
-        <span className={cn("truncate", selected ? "text-foreground" : "text-foreground/80")}>
-          {node.name}
-        </span>
-        {!isDir && (
-          <span className="ml-auto shrink-0 pl-2 text-xs text-muted-foreground">
-            {fmtBytes(node.size)}
-          </span>
-        )}
-      </div>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <div
+            role="button"
+            onClick={() => (isDir ? setOpen((o) => !o) : onSelect(node))}
+            style={{ paddingLeft: `${depth * 12 + 8}px` }}
+            className={cn(
+              "flex min-w-0 cursor-default items-center gap-1.5 overflow-hidden rounded py-1 pr-2 text-sm hover:bg-accent/50",
+              selected && "bg-accent",
+            )}
+          >
+            {isDir ? (
+              <ChevronRight
+                className={cn("h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform", open && "rotate-90")}
+              />
+            ) : (
+              <span className="w-3.5 shrink-0" />
+            )}
+            {isDir ? (
+              open ? (
+                <FolderOpen className="h-4 w-4 shrink-0 text-sky-400" />
+              ) : (
+                <Folder className="h-4 w-4 shrink-0 text-sky-400" />
+              )
+            ) : (
+              <File className="h-4 w-4 shrink-0 text-muted-foreground" />
+            )}
+            <span
+              className={cn("min-w-0 flex-1 truncate", selected ? "text-foreground" : "text-foreground/80")}
+            >
+              {node.name}
+            </span>
+            {!isDir && (
+              <span className="ml-auto shrink-0 pl-2 text-xs text-muted-foreground">
+                {fmtBytes(node.size)}
+              </span>
+            )}
+          </div>
+        </TooltipTrigger>
+        <TooltipContent>{node.name}</TooltipContent>
+      </Tooltip>
       {isDir && open && node.children && (
         <OpfsTree
           nodes={node.children}

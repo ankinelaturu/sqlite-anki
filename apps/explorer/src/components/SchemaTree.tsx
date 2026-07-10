@@ -59,15 +59,29 @@ function typeMeta(type: string | undefined): { Icon: LucideIcon; color: string; 
   };
 }
 
-/** Wraps an element in a shadcn tooltip when there's a description. */
-function Described({ desc, children }: { desc?: string; children: ReactElement }) {
-  if (!desc) return children;
+/** Tooltip with the full tree label; optional description below. */
+function TreeTooltip({
+  title,
+  desc,
+  children,
+}: {
+  title: string;
+  desc?: string;
+  children: ReactElement;
+}) {
   return (
     <Tooltip>
       <TooltipTrigger asChild>{children}</TooltipTrigger>
-      <TooltipContent className="max-w-xs leading-relaxed">{desc}</TooltipContent>
+      <TooltipContent className="max-w-xs leading-relaxed">
+        <p>{title}</p>
+        {desc ? <p className="mt-1 text-muted-foreground">{desc}</p> : null}
+      </TooltipContent>
     </Tooltip>
   );
+}
+
+function columnTitle(name: string, type: string | undefined, flags: string[]): string {
+  return [name, type, ...flags].filter(Boolean).join(" · ");
 }
 
 interface SchemaTreeProps {
@@ -109,31 +123,40 @@ export function SchemaTree({ tables, activeTable, onOpenTable, onShowGraph }: Sc
                   className={cn("h-3.5 w-3.5 transition-transform", isOpen && "rotate-90")}
                 />
               </button>
-              <Described desc={t.description}>
+              <TreeTooltip title={t.name} desc={t.description}>
                 <button
-                  className="flex min-w-0 flex-1 items-center gap-1.5"
+                  className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden"
                   onClick={() => onOpenTable(t)}
                 >
                   <Table2 className={cn("h-4 w-4 shrink-0", t.isAnki ? "text-violet-400" : "text-sky-400")} />
                   <span className="truncate">{t.name}</span>
                   {t.isAnki && <Sparkles className="h-3 w-3 shrink-0 text-violet-400" />}
                 </button>
-              </Described>
+              </TreeTooltip>
             </div>
             {isOpen && (
               <div className="ml-5 border-l pl-2">
                 {t.columns.map((c) => {
                   const { Icon, color, pill } = typeMeta(c.type);
                   const pillCls = cn(
-                    "inline-flex items-center rounded border px-1 text-[9px] font-medium uppercase leading-[1.4] tracking-wide",
+                    "inline-flex shrink-0 items-center rounded border px-1 text-[9px] font-medium uppercase leading-[1.4] tracking-wide",
                     pill,
                   );
+                  const flags = [
+                    c.pk ? "PRIMARY KEY" : "",
+                    c.isVector ? "VECTOR" : "",
+                    c.notnull && !c.pk ? "NOT NULL" : "",
+                    c.hasDefault ? "DEFAULT" : "",
+                  ].filter(Boolean);
+                  const label = columnTitle(c.name, c.type, flags);
                   const row = (
-                    <div className="flex flex-wrap items-center gap-1.5 rounded px-2 py-[0.3rem] text-muted-foreground hover:bg-accent/50">
+                    <div className="flex min-w-0 items-center gap-1.5 overflow-hidden rounded px-2 py-[0.3rem] text-muted-foreground hover:bg-accent/50">
                       <Icon className={cn("h-4 w-4 shrink-0", color)} />
-                      <span className="text-sm text-foreground/80">{c.name}</span>
+                      <span className="min-w-0 flex-1 truncate text-sm text-foreground/80">{c.name}</span>
                       {c.type && (
-                        <span className={cn("text-xs uppercase opacity-60", color)}>{c.type}</span>
+                        <span className={cn("max-w-[5rem] shrink-0 truncate text-xs uppercase opacity-60", color)}>
+                          {c.type}
+                        </span>
                       )}
                       {c.pk && <span className={pillCls}>PRIMARY KEY</span>}
                       {c.isVector && <span className={pillCls}>VECTOR</span>}
@@ -144,26 +167,28 @@ export function SchemaTree({ tables, activeTable, onOpenTable, onShowGraph }: Sc
                   // Vector columns get a right-click menu to visualize their HNSW graph.
                   if (c.isVector && onShowGraph) {
                     return (
-                      <ContextMenu key={c.name}>
-                        <ContextMenuTrigger asChild>{row}</ContextMenuTrigger>
-                        <ContextMenuContent>
-                          <ContextMenuLabel>
-                            {c.name}
-                            {c.description ? ` — ${c.description}` : ""}
-                          </ContextMenuLabel>
-                          <ContextMenuSeparator />
-                          <ContextMenuItem onSelect={() => onShowGraph(t.name, c.name)}>
-                            <Waypoints className="h-3.5 w-3.5 text-violet-400" />
-                            Show HNSW graph
-                          </ContextMenuItem>
-                        </ContextMenuContent>
-                      </ContextMenu>
+                      <TreeTooltip key={c.name} title={label} desc={c.description}>
+                        <ContextMenu>
+                          <ContextMenuTrigger asChild>{row}</ContextMenuTrigger>
+                          <ContextMenuContent>
+                            <ContextMenuLabel>
+                              {c.name}
+                              {c.description ? ` — ${c.description}` : ""}
+                            </ContextMenuLabel>
+                            <ContextMenuSeparator />
+                            <ContextMenuItem onSelect={() => onShowGraph(t.name, c.name)}>
+                              <Waypoints className="h-3.5 w-3.5 text-violet-400" />
+                              Show HNSW graph
+                            </ContextMenuItem>
+                          </ContextMenuContent>
+                        </ContextMenu>
+                      </TreeTooltip>
                     );
                   }
                   return (
-                    <Described key={c.name} desc={c.description}>
+                    <TreeTooltip key={c.name} title={label} desc={c.description}>
                       {row}
-                    </Described>
+                    </TreeTooltip>
                   );
                 })}
               </div>
