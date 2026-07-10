@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import CodeMirror, { type ReactCodeMirrorRef } from "@uiw/react-codemirror";
-import type { EditorView } from "@codemirror/view";
 import { Check, Play, RefreshCw, TextCursorInput } from "lucide-react";
 import type { AnkiWorkerApi, QueryResult, Remote, TableInfo } from "@/db";
 import { Button } from "@/components/ui/button";
@@ -19,69 +18,6 @@ interface QueryViewProps {
 
 type SaveState = "loading" | "saved" | "dirty" | "saving";
 const STARTER_SQL = "SELECT name FROM sqlite_master WHERE type IN ('table','view');\n";
-const SELECTION_FAB_EST_W = 148;
-const SELECTION_FAB_EST_H = 32;
-const SELECTION_FAB_GAP = 6;
-
-function rectsOverlap(
-  a: { x: number; y: number; w: number; h: number },
-  b: { x: number; y: number; w: number; h: number },
-): boolean {
-  return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
-}
-
-/** Place the run-selection button above or below the selection end, never on top of it. */
-function selectionFabPosition(
-  view: EditorView,
-  wrap: HTMLElement,
-): { x: number; y: number } | null {
-  const sel = view.state.selection.main;
-  if (sel.empty) return null;
-
-  const fromCoords = view.coordsAtPos(sel.from, -1);
-  const toCoords = view.coordsAtPos(sel.to, 1);
-  if (!fromCoords || !toCoords) return null;
-
-  const endedForward = sel.head === sel.to;
-  const headCoords = view.coordsAtPos(sel.head, endedForward ? 1 : -1);
-  if (!headCoords) return null;
-
-  const wrapRect = wrap.getBoundingClientRect();
-  const pad = 8;
-
-  const selRect = {
-    x: Math.min(fromCoords.left, toCoords.left) - wrapRect.left,
-    y: Math.min(fromCoords.top, toCoords.top) - wrapRect.top,
-    w: Math.max(fromCoords.right, toCoords.right) - Math.min(fromCoords.left, toCoords.left),
-    h: Math.max(fromCoords.bottom, toCoords.bottom) - Math.min(fromCoords.top, toCoords.top),
-  };
-
-  const headLineTop = headCoords.top - wrapRect.top;
-  const headLineBottom = headCoords.bottom - wrapRect.top;
-
-  const belowTop = headLineBottom + SELECTION_FAB_GAP;
-  const aboveTop = headLineTop - SELECTION_FAB_GAP - SELECTION_FAB_EST_H;
-
-  let top = endedForward ? belowTop : aboveTop;
-
-  let left = headCoords.left - wrapRect.left;
-  left = Math.min(Math.max(pad, left), wrapRect.width - SELECTION_FAB_EST_W - pad);
-
-  const fabAt = (y: number) => ({ x: left, y, w: SELECTION_FAB_EST_W, h: SELECTION_FAB_EST_H });
-
-  const fits = (y: number) =>
-    y >= pad && y + SELECTION_FAB_EST_H <= wrapRect.height - pad && !rectsOverlap(fabAt(y), selRect);
-
-  if (!fits(top)) {
-    const alternate = endedForward ? aboveTop : belowTop;
-    if (fits(alternate)) top = alternate;
-    else if (fits(belowTop)) top = belowTop;
-    else if (fits(aboveTop)) top = aboveTop;
-    else top = Math.min(Math.max(pad, top), wrapRect.height - SELECTION_FAB_EST_H - pad);
-  }
-
-  return { x: left, y: top };
-}
 
 export function QueryView({ api, path, tables, run }: QueryViewProps) {
   const [value, setValue] = useState("");
@@ -90,9 +26,7 @@ export function QueryView({ api, path, tables, run }: QueryViewProps) {
   const [running, setRunning] = useState(false);
   const [save, setSave] = useState<SaveState>("loading");
   const [hasSelection, setHasSelection] = useState(false);
-  const [selectionFab, setSelectionFab] = useState<{ x: number; y: number } | null>(null);
   const cmRef = useRef<ReactCodeMirrorRef>(null);
-  const editorWrapRef = useRef<HTMLDivElement>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const colorMode = editorColorMode(useTheme());
   const runShortcut = runSqlShortcut();
@@ -160,25 +94,6 @@ export function QueryView({ api, path, tables, run }: QueryViewProps) {
     void execute(view.state.sliceDoc(from, to));
   };
 
-  const syncSelectionUi = useCallback(
-    (view: EditorView) => {
-      const empty = view.state.selection.main.empty;
-      setHasSelection(!empty);
-      if (empty || running) {
-        setSelectionFab(null);
-        return;
-      }
-      const wrap = editorWrapRef.current;
-      if (!wrap) return;
-      setSelectionFab(selectionFabPosition(view, wrap));
-    },
-    [running],
-  );
-
-  useEffect(() => {
-    if (running) setSelectionFab(null);
-  }, [running]);
-
   const saveLabel =
     save === "saving"
       ? "Saving…"
@@ -231,18 +146,12 @@ export function QueryView({ api, path, tables, run }: QueryViewProps) {
         </div>
       </div>
 
-      <div
-        ref={editorWrapRef}
-        className="relative min-h-[8rem] shrink-0 border-b"
-        style={{ flexBasis: "38%" }}
-      >
+      <div className="min-h-[8rem] shrink-0 border-b" style={{ flexBasis: "38%" }}>
         <CodeMirror
           ref={cmRef}
           value={value}
           onChange={onChange}
-          onUpdate={(u) => {
-            if (u.view) syncSelectionUi(u.view);
-          }}
+          onUpdate={(u) => setHasSelection(!u.state.selection.main.empty)}
           theme={colorMode}
           extensions={extensions}
           onKeyDownCapture={(e) => {
@@ -261,19 +170,6 @@ export function QueryView({ api, path, tables, run }: QueryViewProps) {
           height="100%"
           style={{ height: "100%" }}
         />
-        {selectionFab && hasSelection && !running ? (
-          <Button
-            type="button"
-            size="xs"
-            className="absolute z-10 shadow-md"
-            style={{ left: selectionFab.x, top: selectionFab.y }}
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={runSelection}
-          >
-            <Play />
-            Run the Selection
-          </Button>
-        ) : null}
       </div>
 
       <div className="min-h-0 flex-1">

@@ -13,8 +13,8 @@ full rationale and design. Add new entries at the top.
   elsewhere), pill badges for type/table metadata in the completion popup, hover tooltips on
   identifiers in the buffer (table/column type, flags, descriptions), per-statement gutter
   icons (run valid statements, error icon with message for invalid), toolbar shortcuts
-  (`⌘Enter` / `Ctrl+Enter` run SQL, `⌘⇧Enter` / `Ctrl+Shift+Enter` run selection), an in-editor
-  “Run the Selection” popup after drag-select, and prepare-time squiggles on the statement at the
+  (`⌘Enter` / `Ctrl+Enter` run SQL, `⌘⇧Enter` / `Ctrl+Shift+Enter` run selection), and
+  prepare-time squiggles on the statement at the
   cursor before run.
 
 ## 2026-07-07
