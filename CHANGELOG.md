@@ -4,6 +4,15 @@ Notable changes to sqlite-anki, newest first. Pre-1.0 and unversioned, so entrie
 grouped by date rather than release. Curated from git history — see linked docs for the
 full rationale and design. Add new entries at the top.
 
+## 2026-07-10
+
+### Performance
+- **Session query-embedding cache.** A module-global LRU (keyed by query text, cap 256) caches the
+  ONNX forward pass so a **repeated query is embedded once across queries**, not just within a single
+  scan. It sits on the query path only (write-time row embeddings bypass it), and is in-memory —
+  a query embedding is cheap to recompute, so it's never persisted. Observable as `embed_calls`
+  staying flat on a repeat. See roadmap Done in [docs/TODO.md](docs/TODO.md).
+
 ## 2026-07-09
 
 ### Explorer

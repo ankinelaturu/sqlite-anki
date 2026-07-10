@@ -20,7 +20,7 @@ use crate::{DEFAULT_SIMILARITY_THRESHOLD, HNSW_CANDIDATE_CAP};
 use core::cmp::Ordering;
 use once_cell::sync::Lazy;
 use parking_lot::Mutex;
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::ffi::{CStr, CString};
 use std::mem::transmute;
 use std::os::raw::{c_char, c_int, c_void};
@@ -415,13 +415,15 @@ struct AnkiCursor {
 }
 
 impl AnkiCursor {
-    /// Embeds `text` for `col`, reusing a prior embedding of the same query on this
-    /// cursor (see `q_cache`). `None` only when the text embeds to nothing.
+    /// Embeds `text` for `col`, reusing a prior embedding. Two cache layers: this
+    /// cursor's `q_cache` (fast, lock-free, serves a join's repeated `xFilter`
+    /// calls) then the session-wide LRU (`embed_query`, shared across queries).
+    /// `None` only when the text embeds to nothing.
     fn embed_cached(&mut self, col: usize, text: &str) -> Option<Vec<f32>> {
         if let Some((_, _, emb)) = self.q_cache.iter().find(|(c, t, _)| *c == col && t == text) {
             return Some(emb.clone());
         }
-        let emb = embed_text(text)?;
+        let emb = embed_query(text)?;
         self.q_cache.push((col, text.to_string(), emb.clone()));
         Some(emb)
     }
@@ -439,6 +441,83 @@ fn embed_text(text: &str) -> Option<Vec<f32>> {
         Ok(e) => e.lock().embed(t).ok(),
         Err(_) => None,
     }
+}
+
+/// Max distinct query embeddings retained in the session cache. A query embedding
+/// is `dim * 4` bytes (~1.5 KB at dim 384), so 256 entries is well under a MB.
+const QUERY_CACHE_CAP: usize = 256;
+
+/// A tiny dependency-free LRU over query embeddings, keyed by the (trimmed) query
+/// text. `order` holds keys least-recently-used first; `map` is the store.
+struct QueryEmbedCache {
+    map: HashMap<String, Vec<f32>>,
+    order: VecDeque<String>,
+}
+
+impl QueryEmbedCache {
+    /// Returns a cached embedding and marks it most-recently-used, or `None`.
+    fn get(&mut self, key: &str) -> Option<Vec<f32>> {
+        let emb = self.map.get(key)?.clone();
+        self.touch(key);
+        Some(emb)
+    }
+
+    /// Inserts (or refreshes) `key`, evicting the least-recently-used entry when
+    /// over capacity.
+    fn put(&mut self, key: String, emb: Vec<f32>) {
+        if self.map.contains_key(&key) {
+            self.touch(&key);
+            return;
+        }
+        while self.map.len() >= QUERY_CACHE_CAP {
+            match self.order.pop_front() {
+                Some(old) => {
+                    self.map.remove(&old);
+                }
+                None => break,
+            }
+        }
+        self.order.push_back(key.clone());
+        self.map.insert(key, emb);
+    }
+
+    /// Moves `key` to the most-recently-used end of `order`.
+    fn touch(&mut self, key: &str) {
+        if let Some(pos) = self.order.iter().position(|k| k == key) {
+            if let Some(k) = self.order.remove(pos) {
+                self.order.push_back(k);
+            }
+        }
+    }
+}
+
+/// Session-scoped (module-global) LRU of **query** embeddings, so the dominant
+/// cost — the ONNX forward pass — is paid once per distinct query text *across*
+/// queries, not just within one cursor's scan (`AnkiCursor::q_cache`). Keyed by
+/// text alone: correct while the model is global (one per module). When models
+/// become per-DB (roadmap #2), the key must incorporate the model id. Not
+/// persisted — a query embedding is one cheap forward pass to recompute.
+static QUERY_EMBED_CACHE: Lazy<Mutex<QueryEmbedCache>> = Lazy::new(|| {
+    Mutex::new(QueryEmbedCache {
+        map: HashMap::new(),
+        order: VecDeque::new(),
+    })
+});
+
+/// Embeds a **query**, reusing the session cache. A cache hit skips the forward
+/// pass entirely (and its `embed_calls` metric); a miss embeds and stores it.
+/// Empty/whitespace text embeds to nothing and is never cached.
+fn embed_query(text: &str) -> Option<Vec<f32>> {
+    let key = text.trim();
+    if key.is_empty() {
+        return None;
+    }
+    if let Some(emb) = QUERY_EMBED_CACHE.lock().get(key) {
+        return Some(emb);
+    }
+    let emb = embed_text(key)?;
+    QUERY_EMBED_CACHE.lock().put(key.to_string(), emb.clone());
+    Some(emb)
 }
 
 /// Cosine similarity. Stored and query embeddings are L2-normalized by the
@@ -2647,7 +2726,35 @@ pub unsafe extern "C" fn anki_register_vtab(db: *mut sqlite3) -> c_int {
 
 #[cfg(test)]
 mod tests {
-    use super::is_integer_pk;
+    use super::{is_integer_pk, QueryEmbedCache, QUERY_CACHE_CAP};
+    use std::collections::{HashMap, VecDeque};
+
+    fn empty_cache() -> QueryEmbedCache {
+        QueryEmbedCache { map: HashMap::new(), order: VecDeque::new() }
+    }
+
+    #[test]
+    fn query_cache_get_put_and_lru_eviction() {
+        let mut c = empty_cache();
+        assert!(c.get("a").is_none());
+        c.put("a".into(), vec![1.0]);
+        assert_eq!(c.get("a"), Some(vec![1.0]));
+
+        // Fill to capacity, then touch k0 so it's most-recently-used.
+        let mut c = empty_cache();
+        for i in 0..QUERY_CACHE_CAP {
+            c.put(format!("k{i}"), vec![i as f32]);
+        }
+        assert_eq!(c.map.len(), QUERY_CACHE_CAP);
+        c.get("k0"); // k0 -> MRU; k1 is now the LRU
+
+        // One more insert evicts the LRU (k1), not the touched k0.
+        c.put("new".into(), vec![0.0]);
+        assert_eq!(c.map.len(), QUERY_CACHE_CAP);
+        assert!(c.map.contains_key("k0"), "touched entry survives");
+        assert!(!c.map.contains_key("k1"), "least-recently-used evicted");
+        assert!(c.map.contains_key("new"));
+    }
 
     #[test]
     fn integer_pk_detects_the_rowid_alias() {

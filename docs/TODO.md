@@ -6,22 +6,15 @@ a design section in another doc. **Done** work is kept at the bottom for provena
 
 ## Open roadmap (in intended order)
 
-### 1. Session query-embedding cache (LRU)
-Reuse query embeddings *across* queries in a session (today it's per-query/per-cursor only). An
-**in-memory LRU scoped per-DB** (keyed by text; the model is implied once model is per-DB, see #2).
-**Not** persisted to the DB file: a query embedding is one cheap forward pass to recompute, so
-disk persistence adds unbounded keys + eviction for negligible gain (unlike the HNSW graph, now
-persisted — see Done — which is expensive to rebuild).
-
-### 2. Per-DB configuration + core / frontend separation (CLI-readiness)
+### 1. Per-DB configuration + core / frontend separation (CLI-readiness)
 The core-API hardening the CLI depends on. Do this as one phase so the core boundary is drawn once.
 - **Per-DB model selection.** Lift "one model per module instance (first `Embedder::load` wins)" so
   each DB loads its own model. The DB already records `model_id`+`dim` in `anki_meta` (mismatch
   guard); opening reads it and loads that model. *"Per-import model switching" is just the UI face
   of this.*
-- **Per-DB config lives in `anki_meta`.** Model **and** int8 mode (#3) ride the same rails: chosen at
+- **Per-DB config lives in `anki_meta`.** Model **and** int8 mode (#2) ride the same rails: chosen at
   create/import, recorded in `anki_meta`, read on open, fixed for the DB's life (change → rebuild,
-  see #4).
+  see #3).
 - **Explorer / core layering.** Separate the reusable core from the explorer so a CLI can reuse it:
   split **OPFS vs native VFS**, the **tract/candle native** engine variants, and the model-load path
   (OPFS cache vs filesystem). **Do not implement the CLI yet** — just draw the boundary.
@@ -30,31 +23,31 @@ The core-API hardening the CLI depends on. Do this as one phase so the core boun
   explorer worker** today. A native (Rust) CLI can't call TS → they'd need a **Rust home exposed via
   FFI**; a Node CLI could share the TS. All import features (incl. companion, backlog) ride this call.
 
-### 3. RAM reduction (beyond the shipped streaming redesign)
+### 2. RAM reduction (beyond the shipped streaming redesign)
 The streaming redesign (`streaming-storage.md`) already cut RAM to **rowid + embeddings + HNSW**.
-- **int8 quantization — opt-in per DB** (rides the `anki_meta` per-DB config, #2). Each `float32`
+- **int8 quantization — opt-in per DB** (rides the `anki_meta` per-DB config, #1). Each `float32`
   component → one `int8` (~4× less RAM *and* disk). Use **asymmetric** (float query × int8 stored)
   + **per-vector scale** to minimize error; keeps `/hnsw` + `/exact`. **Measure first:** before
   building the storage path, quantify recall@K and `<col>_score` drift on real data (expected ~99%
   recall, drift in the thousandths — proceed if so). **Bumps the storage format.**
   *(Binary quantization — 1 bit/dim, 32× — is the aggressive cousin; needs float reranking to stay
-  accurate, so it pairs with #3-Option-B, not plain int8.)*
+  accurate, so it pairs with #2-Option-B, not plain int8.)*
 - **Stream embeddings ("Option B" / DiskANN).** Keep only the HNSW graph resident, read vectors from
   disk during traversal. Big win at very large N; cost is random OPFS-read latency (worst for
   `/exact`). Only ~100k+ vectorized rows. Enables a two-stage **float rerank** of the top-K.
 
-### 4. "Rebuild required" migration UX
+### 3. "Rebuild required" migration UX
 The storage-format guard hard-fails opening older-format DBs with a raw error. Show a friendly
 message that offers to rebuild (Import & Vectorize / re-populate demo) — the pre-1.0 migration story.
-Build it **once, after the format-bumping features settle** (#2 per-DB model, #3 int8; graph cache,
+Build it **once, after the format-bumping features settle** (#1 per-DB model, #2 int8; graph cache,
 shadow-table rename, and the no-injected-rowid change already took it to v7), so it's written against a
 stable format instead of revised each bump.
 
-### 5. Native CLI + interactive import
+### 4. Native CLI + interactive import
 - A native macOS/Windows **CLI** reusing `anki-core` + the `anki` vtab (link into a native SQLite
   build — the reserved `candle-native` variant). Makes import a serious tool on real, write-heavy DBs.
 - **Interactive import tool** (probably a TUI): pick vector columns, choose model + int8, in-place vs
-  companion. Built on the shared import layer from #2.
+  companion. Built on the shared import layer from #1.
 
 ## Low priority / backlog
 - **Companion-table import (faithful retrofit).** Vectorizing in-place turns a table into an `anki`
@@ -70,7 +63,7 @@ stable format instead of revised each bump.
     with generated sync — the app never runs a model, inserts a vector, or hand-syncs. Companion changes
     *where the vector column sits*, not *who does the ML work*.
   - **Needs no vtab changes** → a **shared-layer** capability (not CLI-only), living beside the CHECK /
-    constraint-reconstruction logic; rides the import-logic-home decision (#2). Costs vs in-place: a
+    constraint-reconstruction logic; rides the import-logic-home decision (#1). Costs vs in-place: a
     second copy of the text, sync-trigger overhead, and a JOIN — hence retrofit-only.
 - **Index frequently-filtered shadow columns.** `filter_candidate_ids` scans the shadow for unindexed
   filter columns; add indexes (auto-heuristic or explicit). **Low ROI.**
@@ -95,6 +88,14 @@ stable format instead of revised each bump.
   the payoff, and needs exhaustive parity tests. Dropped.
 
 ## Done
+- **Session query-embedding cache (LRU) — DONE (2026-07-10).** A module-global LRU (`QUERY_EMBED_CACHE`,
+  cap 256) keyed by query text caches the ONNX forward pass so a repeated query is embedded once
+  *across* queries, not just within one cursor's scan (`AnkiCursor::q_cache` stays as the fast
+  per-scan layer). Consulted only in the query path (`embed_cached` → `embed_query`); write-time row
+  embeddings bypass it (mostly one-shot). In-memory only (a query embedding is cheap to recompute).
+  Keyed by text alone — correct while the model is global; re-key by model when per-DB models (#1)
+  land. Observable via `embed_calls` staying flat on a repeat (no new metric). Tests: `vtab.rs` LRU
+  unit + `embed-cache.test.mjs` e2e.
 - **No injected rowid; columns stored verbatim — DONE (2026-07-08, storage format v7).** Dropped the
   injected `anki_id`; the shadow keeps the user's columns **verbatim** (constraints incl. any
   `PRIMARY KEY`) and keys on SQLite's `rowid` — a user `INTEGER PRIMARY KEY` *is* that rowid
