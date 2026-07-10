@@ -278,8 +278,8 @@ function contextualSqlCompletion(tables: TableInfo[], schema: SQLNamespace) {
     }
 
     if (kind === "column") {
-      const schemaResult = schemaSource(context) as CompletionResult | null;
-      if (schemaResult?.options.length) return mapResultPills(schemaResult);
+      // Top-level schema completion lists tables, not columns — using it here
+      // (especially on Ctrl+Space mid-identifier) wrongly suggests table names.
       return columnCompletions(context, tables);
     }
 
