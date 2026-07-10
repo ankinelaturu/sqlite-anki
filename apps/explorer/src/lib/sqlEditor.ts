@@ -178,12 +178,6 @@ function matchWord(context: CompletionContext): { from: number; text: string } |
   return { from: word?.from ?? context.pos, text: word?.text ?? "" };
 }
 
-function filterByPrefix(options: Completion[], prefix: string): Completion[] {
-  if (!prefix) return options;
-  const lower = prefix.toLowerCase();
-  return options.filter((o) => o.label.toLowerCase().startsWith(lower));
-}
-
 function tableCompletions(
   context: CompletionContext,
   tables: TableInfo[],
@@ -197,10 +191,7 @@ function tableCompletions(
     pills: [{ label: t.isAnki ? "anki" : "table", variant: t.isAnki ? "anki" : "table" }],
   }));
 
-  const filtered = filterByPrefix(options, word.text);
-  if (!filtered.length && !context.explicit) return null;
-
-  return { from: word.from, options: filtered.length ? filtered : options, validFor: /^\w*$/ };
+  return { from: word.from, options, validFor: /^\w*$/ };
 }
 
 function columnCompletions(
@@ -250,10 +241,7 @@ function columnCompletions(
     }
   }
 
-  const filtered = filterByPrefix(options, word.text);
-  if (!filtered.length && !context.explicit) return null;
-
-  return { from: word.from, options: filtered.length ? filtered : options, validFor: /^\w*$/ };
+  return { from: word.from, options, validFor: /^\w*$/ };
 }
 
 /** One completion source: schema in qualified positions, tables/columns/keywords by context. */
