@@ -68,6 +68,7 @@ import { HnswGraphView } from "@/components/HnswGraphView";
 import { TableView, type SearchMode } from "@/components/TableView";
 import { QueryView } from "@/components/QueryView";
 import { NotesView } from "@/components/NotesView";
+import { InitCodePreview } from "@/components/InitCodePreview";
 import { StatusBar, type OpStatus } from "@/components/StatusBar";
 import { cn } from "@/lib/utils";
 
@@ -321,107 +322,115 @@ export function SqliteWorkspace({ sidebarSize, onSidebarResize, active }: Worksp
     const sel = ANKI_MODEL_REGISTRY[modelChoice];
     const large = (sel?.sizeMb ?? 0) > 200;
     return (
-      <div className="flex h-full items-center justify-center bg-background">
-        <div className="w-[32rem] rounded-xl border bg-card p-6 shadow-xl">
-          <div className="mb-1 flex items-center gap-2 text-lg font-semibold">
-            <Boxes className="h-5 w-5 text-primary" /> sqlite-anki Explorer
-          </div>
-          <p className="mb-5 text-sm text-muted-foreground">
-            Choose an embedding model to load into the browser. It downloads once
-            and powers semantic search for every database this session.
-          </p>
-          <Label className="mb-1.5 block">Model</Label>
-          <Select value={modelChoice} onValueChange={setModelChoice} disabled={loadingModel}>
-            <SelectTrigger>
-              <SelectValue placeholder="Select a model" />
-            </SelectTrigger>
-            <SelectContent>
-              {MODELS.map((m) => {
-                const r = ANKI_MODEL_REGISTRY[m];
-                const pill =
-                  "rounded border px-1.5 py-0.5 text-[10px] leading-none text-muted-foreground";
-                return (
-                  <SelectItemRich
-                    key={m}
-                    value={m}
-                    className="rounded-none border-b border-border last:border-b-0"
-                    meta={
-                      <>
-                        <span className={pill}>{r.dim}d</span>
-                        {r.maxTokens != null && <span className={pill}>≤{r.maxTokens} tok</span>}
-                        <span className={pill}>{r.sizeMb} MB</span>
-                      </>
-                    }
-                  >
-                    {m}
-                  </SelectItemRich>
-                );
-              })}
-            </SelectContent>
-          </Select>
-
-          {/* selected-model details */}
-          {sel && (
-            <div className="mt-3 rounded-lg border bg-secondary/30 p-3">
-              <p className="text-xs leading-relaxed text-muted-foreground">
-                {sel.description}
-              </p>
-              {/* dimension · token limit · download size — one row */}
-              <div className="mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs">
-                <Badge variant="secondary">{sel.dim}-dim</Badge>
-                {sel.maxTokens != null && (
-                  <Badge variant="secondary">≤{sel.maxTokens} tokens</Badge>
-                )}
-                <span
-                  className={cn(
-                    "flex items-center gap-1 text-muted-foreground",
-                    large && "text-amber-400",
-                  )}
-                >
-                  <HardDrive className="h-3.5 w-3.5" /> {sel.sizeMb} MB
-                  {large ? " · large download" : ""}
-                </span>
-              </div>
-              {/* source URL — separate row */}
-              <a
-                href={sel.homeUrl ?? sel.modelUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="mt-3.5 flex items-center gap-1 text-xs text-primary hover:underline"
-              >
-                <ExternalLink className="h-3.5 w-3.5" /> View on HuggingFace
-              </a>
+      <div className="flex h-full items-center justify-center bg-background p-6">
+        <div className="grid w-full max-w-5xl grid-cols-2 divide-x overflow-hidden rounded-xl border bg-card shadow-xl">
+          <div className="p-6">
+            <div className="mb-1 flex items-center gap-2 text-lg font-semibold">
+              <Boxes className="h-5 w-5 text-primary" /> sqlite-anki Explorer
             </div>
-          )}
+            <p className="mb-5 text-sm text-muted-foreground">
+              Choose an embedding model to load into the browser. It downloads once
+              and powers semantic search for every database this session.
+            </p>
+            <Label className="mb-1.5 block">Model</Label>
+            <Select value={modelChoice} onValueChange={setModelChoice} disabled={loadingModel}>
+              <SelectTrigger>
+                <SelectValue placeholder="Select a model" />
+              </SelectTrigger>
+              <SelectContent>
+                {MODELS.map((m) => {
+                  const r = ANKI_MODEL_REGISTRY[m];
+                  const pill =
+                    "rounded border px-1.5 py-0.5 text-[10px] leading-none text-muted-foreground";
+                  return (
+                    <SelectItemRich
+                      key={m}
+                      value={m}
+                      className="rounded-none border-b border-border last:border-b-0"
+                      meta={
+                        <>
+                          <span className={pill}>{r.dim}d</span>
+                          {r.maxTokens != null && <span className={pill}>≤{r.maxTokens} tok</span>}
+                          <span className={pill}>{r.sizeMb} MB</span>
+                        </>
+                      }
+                    >
+                      {m}
+                    </SelectItemRich>
+                  );
+                })}
+              </SelectContent>
+            </Select>
 
-          <Button
-            className={cn("mt-5 w-full", loadingModel && "cursor-progress disabled:opacity-100")}
-            onClick={() => void loadModel()}
-            disabled={loadingModel}
-          >
-            {loadingModel ? (
-              <span className="flex w-full items-center justify-between">
-                <BrainCircuit className="h-4 w-4 shrink-0" />
-                <span className="relative mx-3 h-4 flex-1 overflow-hidden">
-                  {TRAVELERS.map((delay) => (
-                    <Binary
-                      key={delay}
-                      className="anki-travel text-primary-foreground/85"
-                      style={{ width: "11px", height: "11px", animationDelay: `${delay}s` }}
-                    />
-                  ))}
-                </span>
-                <AppWindow className="h-4 w-4 shrink-0" />
-              </span>
-            ) : (
-              <>
-                <BrainCircuit className="h-4 w-4" />
-                <span>Load &amp; Start</span>
-                <AppWindow className="h-4 w-4" />
-              </>
+            {/* selected-model details */}
+            {sel && (
+              <div className="mt-3 rounded-lg border bg-secondary/30 p-3">
+                <p className="text-xs leading-relaxed text-muted-foreground">
+                  {sel.description}
+                </p>
+                {/* dimension · token limit · download size — one row */}
+                <div className="mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs">
+                  <Badge variant="secondary">{sel.dim}-dim</Badge>
+                  {sel.maxTokens != null && (
+                    <Badge variant="secondary">≤{sel.maxTokens} tokens</Badge>
+                  )}
+                  <span
+                    className={cn(
+                      "flex items-center gap-1 text-muted-foreground",
+                      large && "text-amber-400",
+                    )}
+                  >
+                    <HardDrive className="h-3.5 w-3.5" /> {sel.sizeMb} MB
+                    {large ? " · large download" : ""}
+                  </span>
+                </div>
+                {/* source URL — separate row */}
+                <a
+                  href={sel.homeUrl ?? sel.modelUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="mt-3.5 flex items-center gap-1 text-xs text-primary hover:underline"
+                >
+                  <ExternalLink className="h-3.5 w-3.5" /> View on HuggingFace
+                </a>
+              </div>
             )}
-          </Button>
-          {error && <p className="mt-3 text-sm text-destructive">{error}</p>}
+
+            <Button
+              className={cn("mt-5 w-full", loadingModel && "cursor-progress disabled:opacity-100")}
+              onClick={() => void loadModel()}
+              disabled={loadingModel}
+            >
+              {loadingModel ? (
+                <span className="flex w-full items-center justify-between">
+                  <BrainCircuit className="h-4 w-4 shrink-0" />
+                  <span className="relative mx-3 h-4 flex-1 overflow-hidden">
+                    {TRAVELERS.map((delay) => (
+                      <Binary
+                        key={delay}
+                        className="anki-travel text-primary-foreground/85"
+                        style={{ width: "11px", height: "11px", animationDelay: `${delay}s` }}
+                      />
+                    ))}
+                  </span>
+                  <AppWindow className="h-4 w-4 shrink-0" />
+                </span>
+              ) : (
+                <>
+                  <BrainCircuit className="h-4 w-4" />
+                  <span>Load &amp; Start</span>
+                  <AppWindow className="h-4 w-4" />
+                </>
+              )}
+            </Button>
+            {error && <p className="mt-3 text-sm text-destructive">{error}</p>}
+          </div>
+
+          <div className="relative min-h-0">
+            <div className="absolute inset-0 flex flex-col p-6">
+              <InitCodePreview modelId={modelChoice} />
+            </div>
+          </div>
         </div>
       </div>
     );

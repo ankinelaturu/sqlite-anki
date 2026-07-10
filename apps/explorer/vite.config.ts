@@ -15,6 +15,7 @@ const codemirror = [
   "@codemirror/state",
   "@codemirror/view",
   "@codemirror/lang-sql",
+  "@codemirror/lang-javascript",
   "@codemirror/lang-markdown",
   "codemirror",
 ];
