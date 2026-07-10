@@ -749,6 +749,35 @@ way — enforced as "no user column may start with `anki_`." And `anki_id` has n
 themselves. Same `anki` namespace throughout; the placement just follows the convention that fits.
 Storage format bumped v4 → v5.
 
+## Letting SQLite keep the rowid
+`Jul 08, 2026`
+
+The demo wouldn't build. Every demo table declares `id INTEGER PRIMARY KEY`, and the shadow already
+carried its own `anki_id INTEGER PRIMARY KEY` — two primary keys, which SQLite refuses, so
+`CREATE VIRTUAL TABLE` failed. The first fix was a band-aid: rewrite a user `PRIMARY KEY` to
+`UNIQUE`. It worked, but it *lied* — silently demoting the key the user asked for and dropping
+`AUTOINCREMENT`. That got called out, rightly.
+
+The second fix made the user's `INTEGER PRIMARY KEY` *be* the rowid, so `rowid == id` and autoincrement
+worked — but it left a `TEXT PRIMARY KEY` still mapped to `UNIQUE`, and added a fair amount of
+"which column is the rowid" bookkeeping. Better, but still approximating.
+
+The real insight came from a plain question: *why does the shadow need `anki_id` at all?* Every SQLite
+table already has a rowid. `anki_id` existed for exactly one reason — to **pin** the rowid so `VACUUM`
+can't renumber it (we index every embedding by rowid). But a user's `INTEGER PRIMARY KEY` pins it just
+as well. So `anki_id` was only ever needed *when the user hadn't given us a stable key.* Drop it, key
+everything on `rowid`, and store the user's columns **verbatim** — and the entire class of "we changed
+your primary key" problems evaporates. `id INTEGER PRIMARY KEY` is the rowid; `code TEXT PRIMARY KEY`
+stays a real primary key over an implicit rowid, exactly like a normal table; nothing is rewritten.
+
+That leaves one honest gap: a table *without* an integer primary key has SQLite's implicit rowid, which
+`VACUUM` may renumber — and a persisted HNSW graph stores rowids. Rather than build machinery to detect
+a VACUUM, we took the blunt, clean option: persist the graph **only for "pinned" tables** (those with an
+`INTEGER PRIMARY KEY`). Unpinned tables simply rebuild the index in RAM on open, as they did before
+persistence existed. It's a one-line rule (`rowid_user_idx.is_some()`), no detection, no silent
+corruption. The whole change landed as a net *deletion* — the injected column, the PK-rewriting, and the
+rowid-name plumbing all gone — which is usually the sign you've found the right shape.
+
 ## This document
 `Jul 05, 2026`
 

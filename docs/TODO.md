@@ -46,8 +46,9 @@ The streaming redesign (`streaming-storage.md`) already cut RAM to **rowid + emb
 ### 4. "Rebuild required" migration UX
 The storage-format guard hard-fails opening older-format DBs with a raw error. Show a friendly
 message that offers to rebuild (Import & Vectorize / re-populate demo) — the pre-1.0 migration story.
-Build it **once, after the format-bumping features settle** (#2 per-DB model, #3 int8; persist-graph
-+ shadow-table rename already bumped to v5), so it's written against a stable format instead of revised each bump.
+Build it **once, after the format-bumping features settle** (#2 per-DB model, #3 int8; graph cache,
+shadow-table rename, and the no-injected-rowid change already took it to v7), so it's written against a
+stable format instead of revised each bump.
 
 ### 5. Native CLI + interactive import
 - A native macOS/Windows **CLI** reusing `anki-core` + the `anki` vtab (link into a native SQLite
@@ -94,6 +95,16 @@ Build it **once, after the format-bumping features settle** (#2 per-DB model, #3
   the payoff, and needs exhaustive parity tests. Dropped.
 
 ## Done
+- **No injected rowid; columns stored verbatim — DONE (2026-07-08, storage format v7).** Dropped the
+  injected `anki_id`; the shadow keeps the user's columns **verbatim** (constraints incl. any
+  `PRIMARY KEY`) and keys on SQLite's `rowid` — a user `INTEGER PRIMARY KEY` *is* that rowid
+  (`rowid == id`, VACUUM-stable, autoincrement honored). Fixes `CREATE … (id INTEGER PRIMARY KEY, …)`
+  (which had collided with the injected PK and broke the demo) and keeps `PRIMARY KEY` semantics exact
+  (no silent `→ UNIQUE`). Reserves the rowid aliases `rowid`/`_rowid_`/`oid`. The HNSW graph cache is
+  persisted **only for a pinned rowid** (`INTEGER PRIMARY KEY` present); an unpinned implicit rowid can
+  be renumbered by `VACUUM`, so its graph just rebuilds in RAM on open (`rowid_user_idx.is_some()`).
+  Net deletion — removed `anki_id` injection, the `shadow_decl_type` PK-rewriter, and the `rowid_col`
+  plumbing.
 - **Parallel shadow-table names — DONE (2026-07-07, storage format v5).** Renamed the per-table
   shadows to `<name>_anki_data` (rows + embeddings) and `<name>_anki_hnsw` (graph cache), and the
   export functions to `anki_hnsw_json` / `anki_hnsw_dot`, so every per-table internal shares the

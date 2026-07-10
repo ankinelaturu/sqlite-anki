@@ -129,7 +129,10 @@ node whose neighbors were all deleted can get stranded), which the occasional re
 The built graph normally lives only in WASM RAM and is rebuilt from the shadow table's
 `anki_emb_<col>` blobs on the first `MATCH` after open — an O(N) CPU spike. `serialize` /
 `deserialize` remove that spike by caching the graph to the `<name>_anki_hnsw` shadow
-table (storage format v5; see [streaming-storage.md](./streaming-storage.md)).
+table (storage format v7; see [streaming-storage.md](./streaming-storage.md)). This is done
+**only for a pinned rowid** (a table with an `INTEGER PRIMARY KEY`); an unpinned table's
+implicit rowid can be renumbered by `VACUUM`, which would invalidate the stored rowids, so
+its graph just rebuilds in RAM on open.
 
 **Topology only.** `serialize` writes the graph structure — ids, adjacency, entry, levels,
 `rng` — but **not the vectors**, which already sit in `anki_emb_<col>`. On load,
@@ -220,10 +223,9 @@ to drift):
   the internal shadow: the graph `rowid` is exactly the vtab's `rowid`, so a single
   `SELECT rowid, <cols> FROM <table>` scan builds a rowid→label map for the whole graph.
   (Prefer that one scan over per-node `WHERE rowid = ?` lookups: the vtab doesn't
-  PK-optimize a rowid constraint, so N point lookups scan N times. The shadow's
-  `anki_id` *is* a real primary key if you ever need fast point lookups, but reading the
-  shadow means reaching past the public interface.) Edges are undirected, de-duplicated
-  per layer.
+  PK-optimize a rowid constraint, so N point lookups scan N times. The shadow's `rowid`
+  *is* a fast point-lookup key if you ever need one, but reading the shadow directly means
+  reaching past the public interface.) Edges are undirected, de-duplicated per layer.
 
 - **`anki_hnsw_dot(table, col)`** → Graphviz DOT (node label = rowid, entry emphasized,
   edges colored by layer) for a quick static render.

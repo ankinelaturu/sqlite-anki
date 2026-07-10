@@ -28,18 +28,18 @@ change them:
 Column constraints **are** enforced — a deliberate choice (SQLite doesn't forbid a vtab from
 enforcing them; FTS5 rejects some as its own policy). They ride on the real shadow table:
 
-- **Enforced (greenfield):** `UNIQUE`, `CHECK`, `NOT NULL`. The declared column type flows into
-  the shadow `CREATE TABLE`, and every write routes through the shadow via `xUpdate`. The SQL
-  conflict clause is honored — `INSERT OR REPLACE` replaces, `INSERT OR IGNORE` skips, plain
-  `INSERT` rejects (via `sqlite3_vtab_on_conflict`).
-- **A single `INTEGER PRIMARY KEY` column becomes the rowid.** When you declare exactly one
-  `INTEGER PRIMARY KEY` column, *it* is the shadow's rowid (`rowid == id`, VACUUM-stable,
-  `AUTOINCREMENT` honored) — no injected `anki_id`. Tables without one get an injected
-  `anki_id INTEGER PRIMARY KEY`. A **non-integer** PK (`TEXT PRIMARY KEY`) can't be a rowid, so it
-  maps to `UNIQUE` (and `anki_id` is injected); only one `PRIMARY KEY` per table, so any *second* PK
-  also maps to `UNIQUE`.
+- **Enforced (greenfield):** `UNIQUE`, `CHECK`, `NOT NULL`, and `PRIMARY KEY` — kept **verbatim**.
+  The shadow injects no rowid column, so your declarations pass through unchanged, and every write
+  routes through the shadow via `xUpdate`. The SQL conflict clause is honored — `INSERT OR REPLACE`
+  replaces, `INSERT OR IGNORE` skips, plain `INSERT` rejects (via `sqlite3_vtab_on_conflict`).
+- **`PRIMARY KEY` keeps its exact meaning.** A single `INTEGER PRIMARY KEY` column *is* the rowid
+  (`rowid == id`, VACUUM-stable, `AUTOINCREMENT` honored). A `TEXT PRIMARY KEY` stays a real primary
+  key over a separate implicit rowid — exactly as in a normal SQLite table. Nothing is silently
+  rewritten to `UNIQUE`.
 - **Not expressible:** table-level constraints — multi-column `UNIQUE`, `PRIMARY KEY(a, b)`,
   table-level `CHECK`. The `USING anki(col …)` DSL is per-column only.
+- **Reserved column names:** the `anki_` prefix, plus the rowid aliases `rowid` / `_rowid_` / `oid`
+  (we key on SQLite's `rowid`). Rejected at `CREATE`; import offers a rename.
 - **`DEFAULT`:** see above (a vtab limitation).
 
 ## Import & Vectorize
@@ -62,11 +62,14 @@ strategy (keep the original table plain, vectorize into a companion) — see [TO
 
 ## Storage format
 
-- **Format v3, no migration.** A database written by an older build fails to open with a
+- **Format v7, no migration.** A database written by an older build fails to open with a
   *"rebuild required"* error; re-import or rebuild it. Pre-1.0, we don't ship migrations.
-- **Reserved `anki_` prefix.** User column names can't start with `anki_` (the shadow uses
-  `anki_id` / `anki_emb_<col>`). Greenfield: rejected at `CREATE`. Import: an inline rename is
-  offered for `anki_*` columns on a vectorized table.
+- **Reserved names.** User column names can't start with `anki_` (the shadow uses
+  `anki_emb_<col>` blobs) or be a rowid alias (`rowid` / `_rowid_` / `oid`). Greenfield: rejected at
+  `CREATE`. Import: an inline rename is offered for reserved columns on a vectorized table.
+- **The HNSW graph cache is only persisted for a *pinned* rowid** (a table with an
+  `INTEGER PRIMARY KEY`). Without one, the rowid is SQLite's implicit rowid, which `VACUUM` may
+  renumber — so its graph is never written to disk; it just rebuilds in RAM on open.
 
 ## Model
 

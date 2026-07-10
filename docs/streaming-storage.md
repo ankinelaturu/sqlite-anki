@@ -51,6 +51,15 @@ The layering is: a **virtual table** (the interface you query) → a **shadow ta
     `sqlite3_exec`): `CREATE TABLE customers_data(id INTEGER PRIMARY KEY, c0, c1, e1 BLOB)`.
     Its columns are **typeless** (`c0, c1, …`) — values round-trip verbatim, but the
     declared types/collations are **not** carried into storage.
+
+> **Current state (v7):** the examples below use the original `<name>_data` name and a
+> generic injected `id`/`c{i}` scheme, which the rest of this doc's "Type-full shadow
+> table" section already supersedes with real column names. Two further changes since:
+> the shadow is now `<name>_anki_data`, and it **injects no rowid column at all** — it
+> stores the user's columns verbatim and keys on SQLite's `rowid` (a user
+> `INTEGER PRIMARY KEY` *is* that rowid). Mentally read `<name>_data` → `<name>_anki_data`
+> and "injected `id`" → "SQLite's `rowid`". A full pass over the illustrative schema is
+> tracked in [TODO.md](TODO.md).
 - **Load:** `xConnect` → `load_all` → whole shadow table into `st.rows` (all cells +
   embeddings); `index_dirty = true`.
 - **Read:** `xBestIndex` claims constraints (pushdown); `xFilter` scans `st.rows`
@@ -315,11 +324,11 @@ The existing correctness suites are the specification and **must keep passing** 
 - **Migration guard:** opening a pre-format DB fails with the clear "rebuild required"
   error.
 
-## HNSW graph cache (storage format v5)
+## HNSW graph cache (storage format v7)
 
 The streaming redesign keeps only rowid + embeddings + the HNSW graph in RAM, and the
 graph is *rebuilt* from the `anki_emb_<col>` blobs on the first `MATCH` after open —
-an O(N) CPU spike. Format **v5** removes that spike by persisting the built graph:
+an O(N) CPU spike. Persisting the built graph removes that spike:
 
 - A second shadow table, **`<name>_anki_hnsw(col TEXT PRIMARY KEY, graph BLOB)`**, one
   row per vector column, is created at `xCreate` (up front, so persisting later never
@@ -329,11 +338,14 @@ an O(N) CPU spike. Format **v5** removes that spike by persisting the built grap
   (deleted) nodes are compacted out during serialization, since their vectors are gone
   from the shadow. The blob carries its own version tag, independent of `storage_format`.
 - **When:** persisted in `xSync`, inside the committing transaction, so the cache is
-  durable and rolled back atomically with the data. Each write marks the cache stale; at
-  commit we re-serialize the live graph, or clear the cache when there's nothing
-  trustworthy to save (post-rollback, or a `REPLACE`/`IGNORE` that moved rows behind the
-  vtab's back). Invariant: **after any commit the stored graph reflects committed data or
-  is absent — never stale-but-present.**
+  durable and rolled back atomically with the data — but **only for a *pinned* rowid** (a
+  table with an `INTEGER PRIMARY KEY`). An unpinned table keys on SQLite's implicit rowid,
+  which `VACUUM` can renumber, silently invalidating the stored rowids; rather than detect
+  VACUUM we simply never persist there — the graph rebuilds in RAM on open. Each write marks
+  the cache stale; at commit we re-serialize the live graph (pinned only), or clear the
+  cache when there's nothing trustworthy to save (unpinned, post-rollback, or a
+  `REPLACE`/`IGNORE` that moved rows behind the vtab's back). Invariant: **after any commit
+  the stored graph reflects committed data or is absent — never stale-but-present.**
 - **On open:** `xConnect` loads it after `load_all`; a successful all-or-nothing load
   skips the rebuild. Any miss — no cache, a missing column, a corrupt/stale blob, or a
   referenced rowid whose vector is gone — falls back to the existing rebuild-on-first-
