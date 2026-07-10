@@ -10,8 +10,9 @@ full rationale and design. Add new entries at the top.
 - **SQL scratchpad: schema-aware autocomplete and inline errors.** The query editor now
   completes table/column names (including `anki` `<col>_score` columns) from the open database
   with context-filtered suggestions (tables after `FROM`, columns in `SELECT`/`WHERE`, keywords
-  elsewhere), pill badges for type/table metadata in the completion popup, and prepare-time
-  squiggles on the statement at the cursor before run.
+  elsewhere), pill badges for type/table metadata in the completion popup, hover tooltips on
+  identifiers in the buffer (table/column type, flags, descriptions), and prepare-time squiggles
+  on the statement at the cursor before run.
 
 ## 2026-07-07
 

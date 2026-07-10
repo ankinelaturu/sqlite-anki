@@ -240,6 +240,43 @@ body {
   color: hsl(var(--muted-foreground));
 }
 
+/* SQL editor hover tooltips (see sqlEditor.ts sqlSchemaHover) */
+.cm-tooltip .sql-hover-info {
+  max-width: 22rem;
+  padding: 0.5rem 0.65rem;
+  font-size: 12px;
+  line-height: 1.45;
+}
+.sql-hover-title {
+  font-weight: 600;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  margin-bottom: 0.35rem;
+}
+.sql-hover-pills {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem;
+  margin-bottom: 0.35rem;
+}
+.sql-hover-desc {
+  color: hsl(var(--muted-foreground));
+  white-space: pre-wrap;
+}
+.sql-hover-meta {
+  margin-top: 0.25rem;
+  font-size: 11px;
+  color: hsl(var(--muted-foreground));
+}
+.sql-hover-columns {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+.sql-hover-column-row .sql-hover-desc {
+  margin-top: 0.2rem;
+}
+
 /* model-loading button: binary icons travel from the model to the app */
 @keyframes anki-travel {
   0% {

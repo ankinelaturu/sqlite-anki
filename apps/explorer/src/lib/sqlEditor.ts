@@ -19,9 +19,9 @@ import type { SyntaxNode } from "@lezer/common";
 import type { Extension } from "@codemirror/state";
 import type { EditorState } from "@codemirror/state";
 import { Prec } from "@codemirror/state";
-import { keymap } from "@codemirror/view";
+import { hoverTooltip, keymap } from "@codemirror/view";
 import { linter, lintGutter, type Diagnostic } from "@codemirror/lint";
-import type { AnkiWorkerApi, Remote, TableInfo } from "@/db";
+import type { AnkiWorkerApi, ColumnInfo, Remote, TableInfo } from "@/db";
 
 /** A document span covering one SQL statement (for lint / run-selection). */
 export interface StatementSpan {
@@ -96,12 +96,310 @@ function renderCompletionPills(completion: Completion): HTMLElement | null {
   const wrap = document.createElement("span");
   wrap.className = "sql-completion-pills";
   for (const pill of pills) {
-    const el = document.createElement("span");
-    el.className = `sql-completion-pill sql-completion-pill-${pill.variant}`;
-    el.textContent = pill.label;
-    wrap.appendChild(el);
+    appendPill(wrap, pill.label, pill.variant);
   }
   return wrap;
+}
+
+function appendPill(parent: HTMLElement, label: string, variant: SqlPill["variant"]) {
+  const el = document.createElement("span");
+  el.className = `sql-completion-pill sql-completion-pill-${variant}`;
+  el.textContent = label;
+  parent.appendChild(el);
+}
+
+function unquoteIdent(raw: string): string {
+  if (
+    (raw.startsWith("`") && raw.endsWith("`")) ||
+    (raw.startsWith('"') && raw.endsWith('"')) ||
+    (raw.startsWith("'") && raw.endsWith("'"))
+  ) {
+    return raw.slice(1, -1).replace(/""/g, '"');
+  }
+  if (raw.startsWith("[") && raw.endsWith("]")) return raw.slice(1, -1);
+  return raw;
+}
+
+const ROWID_COLUMN: ColumnInfo = {
+  name: "rowid",
+  type: "INTEGER",
+  notnull: false,
+  pk: false,
+  hasDefault: false,
+  isVector: false,
+  description: "SQLite implicit row identifier",
+};
+
+/** Identifier (or quoted identifier) under `pos`, if any. */
+function wordAt(state: EditorState, pos: number): { from: number; to: number; text: string } | null {
+  const tree = syntaxTree(state);
+  if (!tree.length) return null;
+
+  const node = tree.resolveInner(pos, -1);
+  for (let n: SyntaxNode | null = node; n; n = n.parent) {
+    if (/Comment/.test(n.name) || n.name === "String") return null;
+  }
+
+  let ident: SyntaxNode | null = null;
+  if (node.name === "Identifier" || node.name === "QuotedIdentifier") {
+    ident = node;
+  } else if (node.parent?.name === "Identifier" || node.parent?.name === "QuotedIdentifier") {
+    ident = node.parent;
+  }
+
+  if (ident) {
+    const raw = state.doc.sliceString(ident.from, ident.to);
+    const text = unquoteIdent(raw);
+    if (!text) return null;
+    return { from: ident.from, to: ident.to, text };
+  }
+
+  const line = state.doc.lineAt(pos);
+  const rel = pos - line.from;
+  let start = rel;
+  let end = rel;
+  while (start > 0 && /[`"'\w]/.test(line.text[start - 1]!)) start--;
+  while (end < line.text.length && /[`"'\w]/.test(line.text[end]!)) end++;
+  if (start === end) return null;
+  const text = unquoteIdent(line.text.slice(start, end));
+  if (!text) return null;
+  return { from: line.from + start, to: line.from + end, text };
+}
+
+/** Table name immediately before `table.` prefix at `wordFrom`, if qualified. */
+function qualifiedTable(state: EditorState, wordFrom: number): string | null {
+  const stmt = statementAtCursor(state.doc.toString(), wordFrom);
+  const before = state.doc.sliceString(stmt.from, wordFrom);
+  const m = /(?:^|[\s,(])([`"'\w]+)\.\s*$/i.exec(before);
+  return m ? unquoteIdent(m[1]) : null;
+}
+
+/** Table names referenced in the current statement's FROM / JOIN clauses. */
+function fromTables(state: EditorState, pos: number): string[] {
+  const stmt = statementAtCursor(state.doc.toString(), pos);
+  const names: string[] = [];
+  for (const m of stmt.text.matchAll(/\b(?:FROM|JOIN)\s+([`"'\w]+)/gi)) {
+    names.push(unquoteIdent(m[1]));
+  }
+  return names;
+}
+
+type HoverTarget =
+  | { kind: "table"; table: TableInfo }
+  | { kind: "column"; table: TableInfo; column: ColumnInfo; score?: boolean }
+  | { kind: "columns"; name: string; hits: Array<{ table: TableInfo; column: ColumnInfo }> };
+
+function columnFlags(c: ColumnInfo): string[] {
+  return [
+    c.pk ? "PRIMARY KEY" : "",
+    c.notnull ? "NOT NULL" : "",
+    c.hasDefault ? "DEFAULT" : "",
+    c.isVector ? "VECTOR" : "",
+  ].filter(Boolean);
+}
+
+function findVectorColumn(table: TableInfo, colName: string): ColumnInfo | undefined {
+  return table.columns.find(
+    (c) => c.name.toLowerCase() === colName.toLowerCase() && c.isVector,
+  );
+}
+
+function resolveHoverTarget(
+  state: EditorState,
+  word: { from: number; text: string },
+  tables: TableInfo[],
+  byName: Map<string, TableInfo>,
+): HoverTarget | null {
+  const name = word.text;
+  const lower = name.toLowerCase();
+  const preferred = new Set(fromTables(state, word.from).map((t) => t.toLowerCase()));
+
+  const qTableName = qualifiedTable(state, word.from);
+  if (qTableName) {
+    const table = byName.get(qTableName.toLowerCase());
+    if (!table) return null;
+
+    const scoreMatch = /^(.+)_score$/i.exec(name);
+    if (scoreMatch) {
+      const col = findVectorColumn(table, scoreMatch[1]!);
+      return col ? { kind: "column", table, column: col, score: true } : null;
+    }
+    if (lower === "rowid") return { kind: "column", table, column: ROWID_COLUMN };
+
+    const col = table.columns.find((c) => c.name.toLowerCase() === lower);
+    return col ? { kind: "column", table, column: col } : null;
+  }
+
+  const scoreMatch = /^(.+)_score$/i.exec(name);
+  if (scoreMatch) {
+    const search = tables.filter((t) => !preferred.size || preferred.has(t.name.toLowerCase()));
+    for (const table of search) {
+      const col = findVectorColumn(table, scoreMatch[1]!);
+      if (col) return { kind: "column", table, column: col, score: true };
+    }
+    return null;
+  }
+
+  const tableHit = byName.get(lower);
+  const colHits: Array<{ table: TableInfo; column: ColumnInfo }> = [];
+  for (const table of tables) {
+    for (const col of table.columns) {
+      if (col.name.toLowerCase() === lower) colHits.push({ table, column: col });
+    }
+    if (lower === "rowid") colHits.push({ table, column: ROWID_COLUMN });
+  }
+
+  const ctx = detectSqlContext(state, word.from);
+  if (ctx === "table" && tableHit) return { kind: "table", table: tableHit };
+
+  if (colHits.length === 1) {
+    const hit = colHits[0]!;
+    return { kind: "column", table: hit.table, column: hit.column };
+  }
+
+  if (colHits.length > 1) {
+    const scoped = colHits.filter((h) => preferred.has(h.table.name.toLowerCase()));
+    if (scoped.length === 1) {
+      const hit = scoped[0]!;
+      return { kind: "column", table: hit.table, column: hit.column };
+    }
+    return { kind: "columns", name, hits: scoped.length ? scoped : colHits };
+  }
+
+  if (tableHit) return { kind: "table", table: tableHit };
+  return null;
+}
+
+function renderColumnHover(
+  root: HTMLElement,
+  table: TableInfo,
+  column: ColumnInfo,
+  score?: boolean,
+): HTMLElement {
+  const title = document.createElement("div");
+  title.className = "sql-hover-title";
+  title.textContent = score ? `${column.name}_score` : column.name;
+  root.appendChild(title);
+
+  const pills = document.createElement("div");
+  pills.className = "sql-hover-pills";
+  if (score) {
+    appendPill(pills, "score", "score");
+    appendPill(pills, "REAL", "real");
+  } else if (column.type) {
+    appendPill(pills, shortTypeLabel(column.type), typePillVariant(column.type));
+  }
+  if (column.isVector) appendPill(pills, "vector", "score");
+  appendPill(pills, table.name, "table-ref");
+  for (const flag of columnFlags(column)) {
+    appendPill(pills, flag, flag === "VECTOR" ? "score" : "default");
+  }
+  root.appendChild(pills);
+
+  if (score) {
+    const desc = document.createElement("div");
+    desc.className = "sql-hover-desc";
+    desc.textContent = `Query-time cosine similarity for MATCH on ${column.name} (0–1).`;
+    root.appendChild(desc);
+  } else if (column.description) {
+    const desc = document.createElement("div");
+    desc.className = "sql-hover-desc";
+    desc.textContent = column.description;
+    root.appendChild(desc);
+  }
+  return root;
+}
+
+function renderHoverInfo(target: HoverTarget): HTMLElement {
+  const dom = document.createElement("div");
+  dom.className = "sql-hover-info";
+
+  if (target.kind === "table") {
+    const t = target.table;
+    const title = document.createElement("div");
+    title.className = "sql-hover-title";
+    title.textContent = t.name;
+    dom.appendChild(title);
+
+    const pills = document.createElement("div");
+    pills.className = "sql-hover-pills";
+    appendPill(pills, t.isAnki ? "anki" : "table", t.isAnki ? "anki" : "table");
+    dom.appendChild(pills);
+
+    if (t.description) {
+      const desc = document.createElement("div");
+      desc.className = "sql-hover-desc";
+      desc.textContent = t.description;
+      dom.appendChild(desc);
+    }
+
+    const meta = document.createElement("div");
+    meta.className = "sql-hover-meta";
+    meta.textContent = `${t.columns.length} column${t.columns.length === 1 ? "" : "s"}`;
+    dom.appendChild(meta);
+    return dom;
+  }
+
+  if (target.kind === "column") {
+    return renderColumnHover(dom, target.table, target.column, target.score);
+  }
+
+  const title = document.createElement("div");
+  title.className = "sql-hover-title";
+  title.textContent = target.name;
+  dom.appendChild(title);
+
+  const list = document.createElement("div");
+  list.className = "sql-hover-columns";
+  for (const { table, column } of target.hits) {
+    const row = document.createElement("div");
+    row.className = "sql-hover-column-row";
+
+    const pills = document.createElement("div");
+    pills.className = "sql-hover-pills";
+    appendPill(pills, table.name, "table-ref");
+    if (column.type) {
+      appendPill(pills, shortTypeLabel(column.type), typePillVariant(column.type));
+    }
+    row.appendChild(pills);
+
+    if (column.description) {
+      const desc = document.createElement("div");
+      desc.className = "sql-hover-desc";
+      desc.textContent = column.description;
+      row.appendChild(desc);
+    }
+    list.appendChild(row);
+  }
+  dom.appendChild(list);
+  return dom;
+}
+
+/** Hover tooltips on table/column identifiers in the SQL buffer. */
+function sqlSchemaHover(tables: TableInfo[]): Extension {
+  const byName = new Map(tables.map((t) => [t.name.toLowerCase(), t]));
+  return hoverTooltip(
+    (view, pos, side) => {
+      const word = wordAt(view.state, pos);
+      if (!word) return null;
+      if (pos < word.from || pos > word.to) return null;
+      if (pos === word.from && side < 0) return null;
+      if (pos === word.to && side > 0) return null;
+
+      const target = resolveHoverTarget(view.state, word, tables, byName);
+      if (!target) return null;
+
+      return {
+        pos: word.from,
+        end: word.to,
+        above: true,
+        create() {
+          return { dom: renderHoverInfo(target) };
+        },
+      };
+    },
+    { hoverTime: 400 },
+  );
 }
 
 /** Builds a CodeMirror SQL namespace from the open database schema. */
@@ -315,6 +613,7 @@ export function sqlEditorExtensions(tables: TableInfo[]): Extension[] {
       optionClass: (c) => ((c as SqlCompletion).pills?.length ? "sql-completion-has-pills" : ""),
     }),
     tabAcceptOrIndent(),
+    sqlSchemaHover(tables),
   ];
 }
 
