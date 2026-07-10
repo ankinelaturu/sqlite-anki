@@ -28,6 +28,77 @@ export interface StatementSpan {
 /** What kind of token belongs at the cursor. */
 type SqlCompletionContext = "none" | "table" | "column" | "qualified" | "keyword";
 
+/** Pill shown beside a completion label (rendered via `addToOptions`). */
+interface SqlPill {
+  label: string;
+  variant: "table" | "anki" | "table-ref" | "score" | "text" | "int" | "real" | "blob" | "default";
+}
+
+/** Completion with optional pill metadata for the autocomplete popup. */
+type SqlCompletion = Completion & { pills?: SqlPill[] };
+
+/** Short SQL type label for a pill (drops noisy qualifiers). */
+function shortTypeLabel(type: string): string {
+  const upper = type.toUpperCase();
+  if (upper.includes("VECTOR")) return "VECTOR";
+  if (/INT/.test(upper)) return "INT";
+  if (/CHAR|TEXT|CLOB/.test(upper)) return "TEXT";
+  if (/REAL|FLOA|DOUB/.test(upper)) return "REAL";
+  if (/BLOB/.test(upper)) return "BLOB";
+  if (/NUM|DEC/.test(upper)) return "NUM";
+  return type.split(/\s+/)[0]?.toUpperCase() || type;
+}
+
+function typePillVariant(type: string): SqlPill["variant"] {
+  const upper = type.toUpperCase();
+  if (/VECTOR/.test(upper)) return "score";
+  if (/INT/.test(upper)) return "int";
+  if (/CHAR|TEXT|CLOB/.test(upper)) return "text";
+  if (/REAL|FLOA|DOUB|NUM|DEC/.test(upper)) return "real";
+  if (/BLOB/.test(upper)) return "blob";
+  return "default";
+}
+
+/** Strip default `detail` text and attach pills for schema-sourced options. */
+function withPills(option: Completion): SqlCompletion {
+  const existing = option as SqlCompletion;
+  if (existing.pills?.length) return { ...existing, detail: undefined };
+
+  const pills: SqlPill[] = [];
+  if (option.type === "type") {
+    const kind = option.detail?.toLowerCase().includes("virtual") ? "anki" : "table";
+    pills.push({ label: kind === "anki" ? "anki" : "table", variant: kind });
+  } else if (option.type === "property" && option.detail) {
+    if (option.detail.includes("score")) {
+      pills.push({ label: "score", variant: "score" });
+    } else {
+      pills.push({ label: shortTypeLabel(option.detail), variant: typePillVariant(option.detail) });
+    }
+  }
+
+  return pills.length ? { ...option, detail: undefined, pills } : option;
+}
+
+function mapResultPills(result: CompletionResult | null): CompletionResult | null {
+  if (!result) return null;
+  return { ...result, options: result.options.map(withPills) };
+}
+
+function renderCompletionPills(completion: Completion): HTMLElement | null {
+  const pills = (completion as SqlCompletion).pills;
+  if (!pills?.length) return null;
+
+  const wrap = document.createElement("span");
+  wrap.className = "sql-completion-pills";
+  for (const pill of pills) {
+    const el = document.createElement("span");
+    el.className = `sql-completion-pill sql-completion-pill-${pill.variant}`;
+    el.textContent = pill.label;
+    wrap.appendChild(el);
+  }
+  return wrap;
+}
+
 /** Builds a CodeMirror SQL namespace from the open database schema. */
 export function sqlSchemaFromTables(tables: TableInfo[]): SQLNamespace {
   const schema: Record<string, SQLNamespace> = {};
@@ -115,10 +186,10 @@ function tableCompletions(
   const word = matchWord(context);
   if (!word) return null;
 
-  const options: Completion[] = tables.map((t) => ({
+  const options: SqlCompletion[] = tables.map((t) => ({
     label: t.name,
     type: "type",
-    detail: t.isVirtual ? "virtual table" : "table",
+    pills: [{ label: t.isAnki ? "anki" : "table", variant: t.isAnki ? "anki" : "table" }],
   }));
 
   const filtered = filterByPrefix(options, word.text);
@@ -135,23 +206,42 @@ function columnCompletions(
   if (!word) return null;
 
   const seen = new Set<string>();
-  const options: Completion[] = [{ label: "*", type: "keyword" }];
+  const options: SqlCompletion[] = [{ label: "*", type: "keyword" }];
 
   for (const t of tables) {
     for (const c of t.columns) {
       if (!seen.has(c.name)) {
         seen.add(c.name);
-        options.push({ label: c.name, type: "property", detail: t.name });
+        const pills: SqlPill[] = [{ label: t.name, variant: "table-ref" }];
+        if (c.type) {
+          pills.unshift({ label: shortTypeLabel(c.type), variant: typePillVariant(c.type) });
+        }
+        if (c.isVector) pills.push({ label: "vector", variant: "score" });
+        options.push({ label: c.name, type: "property", pills });
       }
       const score = `${c.name}_score`;
       if (c.isVector && !seen.has(score)) {
         seen.add(score);
-        options.push({ label: score, type: "property", detail: `${t.name} · score` });
+        options.push({
+          label: score,
+          type: "property",
+          pills: [
+            { label: "score", variant: "score" },
+            { label: t.name, variant: "table-ref" },
+          ],
+        });
       }
     }
     if (!seen.has("rowid")) {
       seen.add("rowid");
-      options.push({ label: "rowid", type: "property", detail: t.name });
+      options.push({
+        label: "rowid",
+        type: "property",
+        pills: [
+          { label: "INT", variant: "int" },
+          { label: t.name, variant: "table-ref" },
+        ],
+      });
     }
   }
 
@@ -173,22 +263,22 @@ function contextualSqlCompletion(tables: TableInfo[], schema: SQLNamespace) {
     if (kind === "none") return null;
 
     if (kind === "qualified") {
-      return schemaSource(context) as CompletionResult | null;
+      return mapResultPills(schemaSource(context) as CompletionResult | null);
     }
 
     if (kind === "table") {
       const schemaResult = schemaSource(context) as CompletionResult | null;
-      if (schemaResult?.options.length) return schemaResult;
+      if (schemaResult?.options.length) return mapResultPills(schemaResult);
       return tableCompletions(context, tables);
     }
 
     if (kind === "column") {
       const schemaResult = schemaSource(context) as CompletionResult | null;
-      if (schemaResult?.options.length) return schemaResult;
+      if (schemaResult?.options.length) return mapResultPills(schemaResult);
       return columnCompletions(context, tables);
     }
 
-    return keywordSource(context) as CompletionResult | null;
+    return mapResultPills(keywordSource(context) as CompletionResult | null);
   };
 }
 
@@ -204,6 +294,13 @@ export function sqlEditorExtensions(tables: TableInfo[]): Extension[] {
     autocompletion({
       override: [contextualSqlCompletion(tables, schema)],
       activateOnTyping: true,
+      addToOptions: [
+        {
+          position: 60,
+          render: renderCompletionPills,
+        },
+      ],
+      optionClass: (c) => ((c as SqlCompletion).pills?.length ? "sql-completion-has-pills" : ""),
     }),
   ];
 }

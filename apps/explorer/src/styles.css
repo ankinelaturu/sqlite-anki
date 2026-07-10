@@ -173,6 +173,73 @@ body {
   border: none !important;
 }
 
+/* SQL autocomplete pills (see sqlEditor.ts addToOptions) */
+.cm-tooltip-autocomplete ul li {
+  align-items: center;
+}
+.sql-completion-has-pills .cm-completionDetail {
+  display: none;
+}
+.sql-completion-pills {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 0.25rem;
+  margin-left: 0.5rem;
+}
+.sql-completion-pill {
+  border-radius: 0.25rem;
+  border: 1px solid;
+  padding: 0 0.3rem;
+  font-size: 9px;
+  font-weight: 500;
+  line-height: 1.45;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.sql-completion-pill-table {
+  border-color: rgb(56 189 248 / 0.35);
+  background: rgb(56 189 248 / 0.12);
+  color: rgb(56 189 248);
+}
+.sql-completion-pill-anki {
+  border-color: rgb(167 139 250 / 0.35);
+  background: rgb(167 139 250 / 0.12);
+  color: rgb(167 139 250);
+}
+.sql-completion-pill-table-ref {
+  border-color: hsl(var(--border));
+  background: hsl(var(--muted));
+  color: hsl(var(--muted-foreground));
+}
+.sql-completion-pill-score {
+  border-color: rgb(167 139 250 / 0.35);
+  background: rgb(167 139 250 / 0.12);
+  color: rgb(167 139 250);
+}
+.sql-completion-pill-text {
+  border-color: rgb(52 211 153 / 0.35);
+  background: rgb(52 211 153 / 0.12);
+  color: rgb(52 211 153);
+}
+.sql-completion-pill-int,
+.sql-completion-pill-real {
+  border-color: rgb(56 189 248 / 0.35);
+  background: rgb(56 189 248 / 0.12);
+  color: rgb(56 189 248);
+}
+.sql-completion-pill-blob {
+  border-color: rgb(251 146 60 / 0.35);
+  background: rgb(251 146 60 / 0.12);
+  color: rgb(251 146 60);
+}
+.sql-completion-pill-default {
+  border-color: hsl(var(--border));
+  background: hsl(var(--muted));
+  color: hsl(var(--muted-foreground));
+}
+
 /* model-loading button: binary icons travel from the model to the app */
 @keyframes anki-travel {
   0% {
