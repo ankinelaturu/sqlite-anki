@@ -24,12 +24,14 @@ import {
   RangeSetBuilder,
   StateEffect,
   StateField,
+  Transaction,
 } from "@codemirror/state";
 import {
+  Decoration,
+  type DecorationSet,
   EditorView,
   GutterMarker,
   ViewPlugin,
-  type ViewUpdate,
   gutter,
   hoverTooltip,
   keymap,
@@ -778,84 +780,35 @@ const stmtValidityField = StateField.define<StmtValidity[]>({
   },
 });
 
-const hoveredStmtField = StateField.define<{ from: number; to: number } | null>({
-  create: () => null,
-  update(value, tr) {
-    for (const e of tr.effects) {
-      if (e.is(setHoveredStmt)) return e.value;
-    }
-    return value;
-  },
-});
-
-/** Selection-like rectangles over the hovered statement (not per-line line backgrounds). */
-function hoverRectsForRange(view: EditorView, from: number, to: number): DOMRect[] {
-  const doc = view.state.doc;
-  const startLine = doc.lineAt(from);
-  const endLine = doc.lineAt(to);
-  const rects: DOMRect[] = [];
-
-  for (let n = startLine.number; n <= endLine.number; n++) {
-    const line = doc.line(n);
-    const lineFrom = n === startLine.number ? from : line.from;
-    const lineTo = n === endLine.number ? to : line.to;
-    const a = view.coordsAtPos(lineFrom, -1);
-    const b = view.coordsAtPos(lineTo, 1);
-    if (!a || !b) continue;
-    const left = Math.min(a.left, b.left);
-    const right = Math.max(a.right, b.right);
-    const top = Math.min(a.top, b.top);
-    const bottom = Math.max(a.bottom, b.bottom);
-    rects.push(new DOMRect(left, top, right - left, bottom - top));
-  }
-  return rects;
+function stmtHighlightRange(state: EditorState, stmt: StatementSpan): { from: number; to: number } {
+  const from = firstNonWhitespacePos(state, stmt);
+  let to = stmt.to;
+  while (to > from && /\s/.test(state.doc.sliceString(to - 1, to))) to--;
+  return { from, to };
 }
 
-const stmtHoverOverlayPlugin = ViewPlugin.fromClass(
-  class {
-    layer: HTMLElement;
+function dispatchHoveredStmt(view: EditorView, range: { from: number; to: number } | null) {
+  view.dispatch({
+    effects: setHoveredStmt.of(range),
+    annotations: Transaction.addToHistory.of(false),
+  });
+}
 
-    constructor(readonly view: EditorView) {
-      this.layer = document.createElement("div");
-      this.layer.className = "sql-stmt-hover-layer";
-      view.contentDOM.appendChild(this.layer);
-      this.sync();
+const hoveredStmtDeco = StateField.define<DecorationSet>({
+  create: () => Decoration.none,
+  update(deco, tr) {
+    deco = deco.map(tr.changes);
+    for (const e of tr.effects) {
+      if (!e.is(setHoveredStmt)) continue;
+      if (!e.value) return Decoration.none;
+      return Decoration.set([
+        Decoration.mark({ class: "sql-stmt-hover-mark" }).range(e.value.from, e.value.to),
+      ]);
     }
-
-    update(u: ViewUpdate) {
-      if (
-        u.docChanged ||
-        u.viewportChanged ||
-        u.geometryChanged ||
-        u.state.field(hoveredStmtField) !== u.startState.field(hoveredStmtField)
-      ) {
-        this.sync();
-      }
-    }
-
-    sync() {
-      const hover = this.view.state.field(hoveredStmtField);
-      this.layer.replaceChildren();
-      this.layer.style.height = `${this.view.contentDOM.scrollHeight}px`;
-      if (!hover) return;
-
-      const content = this.view.contentDOM.getBoundingClientRect();
-      for (const rect of hoverRectsForRange(this.view, hover.from, hover.to)) {
-        const el = document.createElement("div");
-        el.className = "sql-stmt-hover-rect";
-        el.style.left = `${rect.left - content.left}px`;
-        el.style.top = `${rect.top - content.top}px`;
-        el.style.width = `${rect.width}px`;
-        el.style.height = `${rect.height}px`;
-        this.layer.appendChild(el);
-      }
-    }
-
-    destroy() {
-      this.layer.remove();
-    }
+    return deco;
   },
-);
+  provide: (f) => EditorView.decorations.from(f),
+});
 
 const PLAY_SVG =
   '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true"><polygon points="8,5 19,12 8,19"/></svg>';
@@ -874,32 +827,48 @@ const stmtGutterRunField = StateField.define<(sql: string) => void>({
   },
 });
 
-function attachGutterTip(el: HTMLElement, text: string, view: EditorView, stmtFrom: number) {
-  let tip: HTMLElement | null = null;
+function hideGutterTip() {
+  document.querySelectorAll(".sql-gutter-tip").forEach((el) => el.remove());
+}
+
+function showGutterTip(anchor: HTMLElement, text: string, view: EditorView, stmtFrom: number) {
+  hideGutterTip();
+  const tip = document.createElement("div");
+  tip.className = "cm-tooltip sql-gutter-tip";
+  tip.textContent = text;
+  document.body.appendChild(tip);
+  const coords = view.coordsAtPos(stmtFrom, -1);
+  if (coords) {
+    tip.style.left = `${coords.left}px`;
+    tip.style.top = `${coords.top - 8}px`;
+    tip.style.transform = "translateY(-100%)";
+  } else {
+    const rect = anchor.getBoundingClientRect();
+    tip.style.left = `${rect.left}px`;
+    tip.style.top = `${rect.top - 8}px`;
+    tip.style.transform = "translateY(-100%)";
+  }
+}
+
+function bindGutterBtnHover(
+  btn: HTMLElement,
+  view: EditorView,
+  stmt: StatementSpan,
+  tip: string,
+  gutterPos: number,
+) {
   const show = () => {
-    tip = document.createElement("div");
-    tip.className = "cm-tooltip sql-gutter-tip";
-    tip.textContent = text;
-    document.body.appendChild(tip);
-    const coords = view.coordsAtPos(stmtFrom, -1);
-    if (coords) {
-      tip.style.left = `${coords.left}px`;
-      tip.style.top = `${coords.top - 8}px`;
-      tip.style.transform = "translateY(-100%)";
-    } else {
-      const rect = el.getBoundingClientRect();
-      tip.style.left = `${rect.left}px`;
-      tip.style.top = `${rect.top - 8}px`;
-      tip.style.transform = "translateY(-100%)";
-    }
+    dispatchHoveredStmt(view, stmtHighlightRange(view.state, stmt));
+    showGutterTip(btn, tip, view, gutterPos);
   };
   const hide = () => {
-    tip?.remove();
-    tip = null;
+    dispatchHoveredStmt(view, null);
+    hideGutterTip();
   };
-  el.addEventListener("mouseenter", show);
-  el.addEventListener("mouseleave", hide);
-  el.addEventListener("mousedown", hide);
+  btn.addEventListener("mouseenter", show);
+  btn.addEventListener("mouseleave", hide);
+  btn.addEventListener("pointerleave", hide);
+  btn.addEventListener("mousedown", hide);
 }
 
 class StmtGutterMarker extends GutterMarker {
@@ -930,15 +899,9 @@ class StmtGutterMarker extends GutterMarker {
     btn.type = "button";
     btn.className = `sql-stmt-gutter-btn sql-stmt-gutter-${this.kind}`;
     btn.innerHTML = this.kind === "run" ? PLAY_SVG : ERROR_SVG;
-    attachGutterTip(btn, this.tip, view, this.gutterPos);
 
-    const hover = (on: boolean) => {
-      view.dispatch({
-        effects: setHoveredStmt.of(on ? { from: this.gutterPos, to: this.stmtTo } : null),
-      });
-    };
-    btn.addEventListener("mouseenter", () => hover(true));
-    btn.addEventListener("mouseleave", () => hover(false));
+    const stmt: StatementSpan = { from: this.stmtFrom, to: this.stmtTo, text: this.stmtText };
+    bindGutterBtnHover(btn, view, stmt, this.tip, this.gutterPos);
 
     if (this.kind === "run") {
       btn.addEventListener("mousedown", (e) => e.preventDefault());
@@ -995,9 +958,11 @@ const stmtGutterMarkersField = StateField.define<RangeSet<GutterMarker>>({
   create: () => RangeSet.empty,
   update(markers, tr) {
     if (tr.effects.some((e) => e.is(setStmtValidity))) {
+      hideGutterTip();
       return buildStmtGutterMarkers(tr.state);
     }
     if (tr.docChanged) {
+      hideGutterTip();
       return markers.map(tr.changes);
     }
     return markers;
@@ -1081,10 +1046,9 @@ export function sqlStatementGutter(
 ): Extension[] {
   return [
     stmtValidityField,
-    hoveredStmtField,
+    hoveredStmtDeco,
     stmtGutterRunField,
     stmtGutterMarkersField,
-    stmtHoverOverlayPlugin,
     createStmtValidatePlugin(api, path),
     createRunHandlerPlugin(onRun),
   ];

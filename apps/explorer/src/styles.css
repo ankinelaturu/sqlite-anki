@@ -208,21 +208,11 @@ body {
   color: hsl(var(--destructive));
   cursor: default;
 }
-.cm-content {
-  position: relative;
-}
-.sql-stmt-hover-layer {
-  position: absolute;
-  left: 0;
-  top: 0;
-  width: 100%;
-  pointer-events: none;
-  z-index: 2;
-}
-.sql-stmt-hover-rect {
-  position: absolute;
-  border-radius: 2px;
-  background: hsl(var(--primary) / 0.22);
+.cm-content span.sql-stmt-hover-mark {
+  border-radius: 0;
+  background: hsl(var(--primary) / 0.28);
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
 }
 .cm-tooltip.sql-gutter-tip {
   position: fixed;
