@@ -11,8 +11,10 @@ full rationale and design. Add new entries at the top.
   completes table/column names (including `anki` `<col>_score` columns) from the open database
   with context-filtered suggestions (tables after `FROM`, columns in `SELECT`/`WHERE`, keywords
   elsewhere), pill badges for type/table metadata in the completion popup, hover tooltips on
-  identifiers in the buffer (table/column type, flags, descriptions), and prepare-time squiggles
-  on the statement at the cursor before run.
+  identifiers in the buffer (table/column type, flags, descriptions), toolbar shortcuts
+  (`⌘Enter` / `Ctrl+Enter` run SQL, `⌘⇧Enter` / `Ctrl+Shift+Enter` run selection), an in-editor
+  “Run the Selection” popup after drag-select, and prepare-time squiggles on the statement at the
+  cursor before run.
 
 ## 2026-07-07
 
