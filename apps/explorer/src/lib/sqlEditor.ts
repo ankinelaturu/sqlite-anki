@@ -815,17 +815,8 @@ const PLAY_SVG =
 const ERROR_SVG =
   '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>';
 
-const setStmtGutterRun = StateEffect.define<(sql: string) => void>();
-
-const stmtGutterRunField = StateField.define<(sql: string) => void>({
-  create: () => () => {},
-  update(value, tr) {
-    for (const e of tr.effects) {
-      if (e.is(setStmtGutterRun)) return e.value;
-    }
-    return value;
-  },
-});
+/** Latest run callback — updated whenever `sqlStatementGutter` is constructed. */
+const gutterRunRef: { current: (sql: string) => void } = { current: () => {} };
 
 function hideGutterTip() {
   document.querySelectorAll(".sql-gutter-tip").forEach((el) => el.remove());
@@ -908,7 +899,8 @@ class StmtGutterMarker extends GutterMarker {
       btn.addEventListener("click", (e) => {
         e.preventDefault();
         e.stopPropagation();
-        view.state.field(stmtGutterRunField)(this.stmtText);
+        const sql = view.state.doc.sliceString(this.stmtFrom, this.stmtTo);
+        gutterRunRef.current(sql);
       });
     }
 
@@ -1025,16 +1017,6 @@ function createStmtValidatePlugin(api: Remote<AnkiWorkerApi>, path: string) {
   );
 }
 
-function createRunHandlerPlugin(onRun: (sql: string) => void) {
-  return ViewPlugin.fromClass(
-    class {
-      constructor(view: EditorView) {
-        view.dispatch({ effects: setStmtGutterRun.of(onRun) });
-      }
-    },
-  );
-}
-
 /**
  * Gutter run/error icons per SQL statement. Valid statements get a run button;
  * invalid ones show an error icon with the prepare-time message on hover.
@@ -1044,13 +1026,12 @@ export function sqlStatementGutter(
   path: string,
   onRun: (sql: string) => void,
 ): Extension[] {
+  gutterRunRef.current = onRun;
   return [
     stmtValidityField,
     hoveredStmtDeco,
-    stmtGutterRunField,
     stmtGutterMarkersField,
     createStmtValidatePlugin(api, path),
-    createRunHandlerPlugin(onRun),
   ];
 }
 

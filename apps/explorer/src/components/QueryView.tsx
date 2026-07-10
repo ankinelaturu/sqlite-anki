@@ -50,13 +50,20 @@ export function QueryView({ api, path, tables, run }: QueryViewProps) {
     [run, running],
   );
 
+  const executeRef = useRef(execute);
+  executeRef.current = execute;
+
+  const runStmt = useCallback((sql: string) => {
+    void executeRef.current(sql);
+  }, []);
+
   const extensions = useMemo(
     () => [
       ...sqlEditorExtensions(tables),
       sqliteLinter(api, path),
-      ...sqlStatementGutter(api, path, (sql) => void execute(sql)),
+      ...sqlStatementGutter(api, path, runStmt),
     ],
-    [tables, api, path, execute],
+    [tables, api, path, runStmt],
   );
 
   // Load the persisted scratchpad for this database.
