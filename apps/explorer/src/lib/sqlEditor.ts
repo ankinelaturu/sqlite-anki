@@ -18,8 +18,22 @@ import { syntaxTree } from "@codemirror/language";
 import type { SyntaxNode } from "@lezer/common";
 import type { Extension } from "@codemirror/state";
 import type { EditorState } from "@codemirror/state";
-import { Prec } from "@codemirror/state";
-import { hoverTooltip, keymap } from "@codemirror/view";
+import {
+  Prec,
+  RangeSet,
+  RangeSetBuilder,
+  StateEffect,
+  StateField,
+} from "@codemirror/state";
+import {
+  EditorView,
+  GutterMarker,
+  ViewPlugin,
+  type ViewUpdate,
+  gutter,
+  hoverTooltip,
+  keymap,
+} from "@codemirror/view";
 import { linter, lintGutter, type Diagnostic } from "@codemirror/lint";
 import type { AnkiWorkerApi, ColumnInfo, Remote, TableInfo } from "@/db";
 
@@ -741,6 +755,339 @@ export function sqliteLinter(api: Remote<AnkiWorkerApi>, path: string) {
     },
     { delay: 400 },
   );
+}
+
+/** Per-statement validity cached for the statement gutter (index-aligned with `splitSqlStatements`). */
+interface StmtValidity {
+  from: number;
+  to: number;
+  valid: boolean;
+  error?: string;
+}
+
+const setStmtValidity = StateEffect.define<StmtValidity[]>();
+const setHoveredStmt = StateEffect.define<{ from: number; to: number } | null>();
+
+const stmtValidityField = StateField.define<StmtValidity[]>({
+  create: () => [],
+  update(value, tr) {
+    for (const e of tr.effects) {
+      if (e.is(setStmtValidity)) return e.value;
+    }
+    return value;
+  },
+});
+
+const hoveredStmtField = StateField.define<{ from: number; to: number } | null>({
+  create: () => null,
+  update(value, tr) {
+    for (const e of tr.effects) {
+      if (e.is(setHoveredStmt)) return e.value;
+    }
+    return value;
+  },
+});
+
+/** Selection-like rectangles over the hovered statement (not per-line line backgrounds). */
+function hoverRectsForRange(view: EditorView, from: number, to: number): DOMRect[] {
+  const doc = view.state.doc;
+  const startLine = doc.lineAt(from);
+  const endLine = doc.lineAt(to);
+  const rects: DOMRect[] = [];
+
+  for (let n = startLine.number; n <= endLine.number; n++) {
+    const line = doc.line(n);
+    const lineFrom = n === startLine.number ? from : line.from;
+    const lineTo = n === endLine.number ? to : line.to;
+    const a = view.coordsAtPos(lineFrom, -1);
+    const b = view.coordsAtPos(lineTo, 1);
+    if (!a || !b) continue;
+    const left = Math.min(a.left, b.left);
+    const right = Math.max(a.right, b.right);
+    const top = Math.min(a.top, b.top);
+    const bottom = Math.max(a.bottom, b.bottom);
+    rects.push(new DOMRect(left, top, right - left, bottom - top));
+  }
+  return rects;
+}
+
+const stmtHoverOverlayPlugin = ViewPlugin.fromClass(
+  class {
+    layer: HTMLElement;
+
+    constructor(readonly view: EditorView) {
+      this.layer = document.createElement("div");
+      this.layer.className = "sql-stmt-hover-layer";
+      view.contentDOM.appendChild(this.layer);
+      this.sync();
+    }
+
+    update(u: ViewUpdate) {
+      if (
+        u.docChanged ||
+        u.viewportChanged ||
+        u.geometryChanged ||
+        u.state.field(hoveredStmtField) !== u.startState.field(hoveredStmtField)
+      ) {
+        this.sync();
+      }
+    }
+
+    sync() {
+      const hover = this.view.state.field(hoveredStmtField);
+      this.layer.replaceChildren();
+      this.layer.style.height = `${this.view.contentDOM.scrollHeight}px`;
+      if (!hover) return;
+
+      const content = this.view.contentDOM.getBoundingClientRect();
+      for (const rect of hoverRectsForRange(this.view, hover.from, hover.to)) {
+        const el = document.createElement("div");
+        el.className = "sql-stmt-hover-rect";
+        el.style.left = `${rect.left - content.left}px`;
+        el.style.top = `${rect.top - content.top}px`;
+        el.style.width = `${rect.width}px`;
+        el.style.height = `${rect.height}px`;
+        this.layer.appendChild(el);
+      }
+    }
+
+    destroy() {
+      this.layer.remove();
+    }
+  },
+);
+
+const PLAY_SVG =
+  '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true"><polygon points="8,5 19,12 8,19"/></svg>';
+const ERROR_SVG =
+  '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>';
+
+const setStmtGutterRun = StateEffect.define<(sql: string) => void>();
+
+const stmtGutterRunField = StateField.define<(sql: string) => void>({
+  create: () => () => {},
+  update(value, tr) {
+    for (const e of tr.effects) {
+      if (e.is(setStmtGutterRun)) return e.value;
+    }
+    return value;
+  },
+});
+
+function attachGutterTip(el: HTMLElement, text: string, view: EditorView, stmtFrom: number) {
+  let tip: HTMLElement | null = null;
+  const show = () => {
+    tip = document.createElement("div");
+    tip.className = "cm-tooltip sql-gutter-tip";
+    tip.textContent = text;
+    document.body.appendChild(tip);
+    const coords = view.coordsAtPos(stmtFrom, -1);
+    if (coords) {
+      tip.style.left = `${coords.left}px`;
+      tip.style.top = `${coords.top - 8}px`;
+      tip.style.transform = "translateY(-100%)";
+    } else {
+      const rect = el.getBoundingClientRect();
+      tip.style.left = `${rect.left}px`;
+      tip.style.top = `${rect.top - 8}px`;
+      tip.style.transform = "translateY(-100%)";
+    }
+  };
+  const hide = () => {
+    tip?.remove();
+    tip = null;
+  };
+  el.addEventListener("mouseenter", show);
+  el.addEventListener("mouseleave", hide);
+  el.addEventListener("mousedown", hide);
+}
+
+class StmtGutterMarker extends GutterMarker {
+  constructor(
+    readonly kind: "run" | "error",
+    readonly stmtFrom: number,
+    readonly stmtTo: number,
+    readonly gutterPos: number,
+    readonly stmtText: string,
+    readonly tip: string,
+  ) {
+    super();
+  }
+
+  eq(other: GutterMarker): boolean {
+    return (
+      other instanceof StmtGutterMarker &&
+      other.kind === this.kind &&
+      other.stmtFrom === this.stmtFrom &&
+      other.stmtTo === this.stmtTo &&
+      other.gutterPos === this.gutterPos &&
+      other.tip === this.tip
+    );
+  }
+
+  toDOM(view: EditorView): HTMLElement {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = `sql-stmt-gutter-btn sql-stmt-gutter-${this.kind}`;
+    btn.innerHTML = this.kind === "run" ? PLAY_SVG : ERROR_SVG;
+    attachGutterTip(btn, this.tip, view, this.gutterPos);
+
+    const hover = (on: boolean) => {
+      view.dispatch({
+        effects: setHoveredStmt.of(on ? { from: this.gutterPos, to: this.stmtTo } : null),
+      });
+    };
+    btn.addEventListener("mouseenter", () => hover(true));
+    btn.addEventListener("mouseleave", () => hover(false));
+
+    if (this.kind === "run") {
+      btn.addEventListener("mousedown", (e) => e.preventDefault());
+      btn.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        view.state.field(stmtGutterRunField)(this.stmtText);
+      });
+    }
+
+    return btn;
+  }
+}
+
+function firstNonWhitespacePos(state: EditorState, stmt: StatementSpan): number {
+  const text = state.doc.sliceString(stmt.from, stmt.to);
+  const m = /\S/.exec(text);
+  return m ? stmt.from + m.index! : stmt.from;
+}
+
+/** Line start for the gutter icon — first line of statement content, not trailing `;` newline. */
+function statementGutterLine(state: EditorState, stmt: StatementSpan): number {
+  return state.doc.lineAt(firstNonWhitespacePos(state, stmt)).from;
+}
+
+function buildStmtGutterMarkers(state: EditorState): RangeSet<GutterMarker> {
+  const validity = state.field(stmtValidityField);
+  const stmts = splitSqlStatements(state.doc.toString());
+  const builder = new RangeSetBuilder<GutterMarker>();
+
+  for (let i = 0; i < stmts.length; i++) {
+    const stmt = stmts[i]!;
+    const status = validity[i];
+    if (!status || status.from !== stmt.from || status.to !== stmt.to) continue;
+
+    const tip = status.valid ? "Run this statement" : status.error || "SQL error";
+    const gutterPos = firstNonWhitespacePos(state, stmt);
+    const marker = new StmtGutterMarker(
+      status.valid ? "run" : "error",
+      stmt.from,
+      stmt.to,
+      gutterPos,
+      stmt.text,
+      tip,
+    );
+    const lineFrom = statementGutterLine(state, stmt);
+    builder.add(lineFrom, lineFrom, marker);
+  }
+
+  return builder.finish();
+}
+
+const stmtGutterMarkersField = StateField.define<RangeSet<GutterMarker>>({
+  create: () => RangeSet.empty,
+  update(markers, tr) {
+    if (tr.effects.some((e) => e.is(setStmtValidity))) {
+      return buildStmtGutterMarkers(tr.state);
+    }
+    if (tr.docChanged) {
+      return markers.map(tr.changes);
+    }
+    return markers;
+  },
+  provide: (field) =>
+    gutter({
+      class: "cm-sql-stmt-gutter",
+      markers: (view) => view.state.field(field),
+    }),
+});
+
+function createStmtValidatePlugin(api: Remote<AnkiWorkerApi>, path: string) {
+  return ViewPlugin.fromClass(
+    class {
+      timer: ReturnType<typeof setTimeout> | null = null;
+
+      constructor(readonly view: EditorView) {
+        this.schedule();
+      }
+
+      update(u: { docChanged: boolean }) {
+        if (u.docChanged) this.schedule();
+      }
+
+      schedule() {
+        if (this.timer) clearTimeout(this.timer);
+        this.timer = setTimeout(() => void this.validate(), 400);
+      }
+
+      async validate() {
+        const doc = this.view.state.doc.toString();
+        const stmts = splitSqlStatements(doc);
+        const results = await Promise.all(
+          stmts.map(async (stmt) => {
+            try {
+              const issues = await api.checkSql(path, stmt.text);
+              return {
+                from: stmt.from,
+                to: stmt.to,
+                valid: issues.length === 0,
+                error: issues[0]?.message,
+              } satisfies StmtValidity;
+            } catch {
+              return {
+                from: stmt.from,
+                to: stmt.to,
+                valid: false,
+                error: "SQL error",
+              } satisfies StmtValidity;
+            }
+          }),
+        );
+        this.view.dispatch({ effects: setStmtValidity.of(results) });
+      }
+
+      destroy() {
+        if (this.timer) clearTimeout(this.timer);
+      }
+    },
+  );
+}
+
+function createRunHandlerPlugin(onRun: (sql: string) => void) {
+  return ViewPlugin.fromClass(
+    class {
+      constructor(view: EditorView) {
+        view.dispatch({ effects: setStmtGutterRun.of(onRun) });
+      }
+    },
+  );
+}
+
+/**
+ * Gutter run/error icons per SQL statement. Valid statements get a run button;
+ * invalid ones show an error icon with the prepare-time message on hover.
+ */
+export function sqlStatementGutter(
+  api: Remote<AnkiWorkerApi>,
+  path: string,
+  onRun: (sql: string) => void,
+): Extension[] {
+  return [
+    stmtValidityField,
+    hoveredStmtField,
+    stmtGutterRunField,
+    stmtGutterMarkersField,
+    stmtHoverOverlayPlugin,
+    createStmtValidatePlugin(api, path),
+    createRunHandlerPlugin(onRun),
+  ];
 }
 
 /** Gutter markers for inline SQL errors. */

@@ -6,7 +6,7 @@ import type { AnkiWorkerApi, QueryResult, Remote, TableInfo } from "@/db";
 import { Button } from "@/components/ui/button";
 import { DataGrid } from "@/components/DataGrid";
 import { editorColorMode, useTheme } from "@/lib/theme";
-import { lintGutter, sqlEditorExtensions, sqliteLinter } from "@/lib/sqlEditor";
+import { sqlEditorExtensions, sqlStatementGutter, sqliteLinter } from "@/lib/sqlEditor";
 import { runSelectionShortcut, runSqlShortcut } from "@/lib/shortcuts";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
@@ -98,9 +98,31 @@ export function QueryView({ api, path, tables, run }: QueryViewProps) {
   const runShortcut = runSqlShortcut();
   const runSelShortcut = runSelectionShortcut();
 
+  const execute = useCallback(
+    async (text: string) => {
+      const trimmed = text.trim();
+      if (!trimmed || running) return;
+      setRunning(true);
+      setError(null);
+      try {
+        setResult(await run(trimmed));
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+        setResult(null);
+      } finally {
+        setRunning(false);
+      }
+    },
+    [run, running],
+  );
+
   const extensions = useMemo(
-    () => [...sqlEditorExtensions(tables), sqliteLinter(api, path), lintGutter()],
-    [tables, api, path],
+    () => [
+      ...sqlEditorExtensions(tables),
+      sqliteLinter(api, path),
+      ...sqlStatementGutter(api, path, (sql) => void execute(sql)),
+    ],
+    [tables, api, path, execute],
   );
 
   // Load the persisted scratchpad for this database.
@@ -129,21 +151,6 @@ export function QueryView({ api, path, tables, run }: QueryViewProps) {
     setSave("dirty");
     if (timer.current) clearTimeout(timer.current);
     timer.current = setTimeout(() => void persist(text), 1000); // autosave
-  };
-
-  const execute = async (text: string) => {
-    const trimmed = text.trim();
-    if (!trimmed || running) return;
-    setRunning(true);
-    setError(null);
-    try {
-      setResult(await run(trimmed));
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-      setResult(null);
-    } finally {
-      setRunning(false);
-    }
   };
 
   const runSelection = () => {

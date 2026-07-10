@@ -173,6 +173,67 @@ body {
   border: none !important;
 }
 
+/* SQL statement gutter (see sqlEditor.ts sqlStatementGutter) */
+.cm-sql-stmt-gutter {
+  width: 1.65rem;
+}
+.cm-sql-stmt-gutter .cm-gutterElement {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 !important;
+}
+.sql-stmt-gutter-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.35rem;
+  height: 1.35rem;
+  border: none;
+  border-radius: 0.25rem;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+  opacity: 0.5;
+  transition: opacity 0.15s ease, background-color 0.15s ease, color 0.15s ease;
+}
+.sql-stmt-gutter-btn:hover {
+  opacity: 1;
+  background: hsl(var(--accent) / 0.45);
+}
+.sql-stmt-gutter-run {
+  color: rgb(52 211 153);
+}
+.sql-stmt-gutter-error {
+  color: hsl(var(--destructive));
+  cursor: default;
+}
+.cm-content {
+  position: relative;
+}
+.sql-stmt-hover-layer {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  pointer-events: none;
+  z-index: 2;
+}
+.sql-stmt-hover-rect {
+  position: absolute;
+  border-radius: 2px;
+  background: hsl(var(--primary) / 0.22);
+}
+.cm-tooltip.sql-gutter-tip {
+  position: fixed;
+  z-index: 200;
+  max-width: 24rem;
+  white-space: pre-wrap;
+  font-size: 11px;
+  line-height: 1.4;
+  padding: 0.35rem 0.5rem;
+}
+
 /* SQL autocomplete pills (see sqlEditor.ts addToOptions) */
 .cm-tooltip-autocomplete ul li {
   align-items: center;
