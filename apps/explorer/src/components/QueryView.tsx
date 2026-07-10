@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import CodeMirror, { type ReactCodeMirrorRef } from "@uiw/react-codemirror";
+import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import { Check, Play, RefreshCw, TextCursorInput } from "lucide-react";
 import type { AnkiWorkerApi, QueryResult, Remote, TableInfo } from "@/db";
 import { Button } from "@/components/ui/button";
@@ -153,54 +154,58 @@ export function QueryView({ api, path, tables, run }: QueryViewProps) {
         </div>
       </div>
 
-      <div className="min-h-[8rem] shrink-0 border-b" style={{ flexBasis: "38%" }}>
-        <CodeMirror
-          ref={cmRef}
-          value={value}
-          onChange={onChange}
-          onUpdate={(u) => setHasSelection(!u.state.selection.main.empty)}
-          theme={colorMode}
-          extensions={extensions}
-          onKeyDownCapture={(e) => {
-            if (!(e.metaKey || e.ctrlKey) || e.key !== "Enter") return;
-            e.preventDefault();
-            if (e.shiftKey) runSelection();
-            else void execute(value);
-          }}
-          indentWithTab={false}
-          basicSetup={{
-            lineNumbers: true,
-            foldGutter: false,
-            highlightActiveLine: false,
-            autocompletion: false,
-          }}
-          height="100%"
-          style={{ height: "100%" }}
-        />
-      </div>
+      <PanelGroup direction="vertical" className="min-h-0 flex-1">
+        <Panel defaultSize={38} minSize={15} className="flex min-h-0 flex-col">
+          <CodeMirror
+            ref={cmRef}
+            value={value}
+            onChange={onChange}
+            onUpdate={(u) => setHasSelection(!u.state.selection.main.empty)}
+            theme={colorMode}
+            extensions={extensions}
+            onKeyDownCapture={(e) => {
+              if (!(e.metaKey || e.ctrlKey) || e.key !== "Enter") return;
+              e.preventDefault();
+              if (e.shiftKey) runSelection();
+              else void execute(value);
+            }}
+            indentWithTab={false}
+            basicSetup={{
+              lineNumbers: true,
+              foldGutter: false,
+              highlightActiveLine: false,
+              autocompletion: false,
+            }}
+            height="100%"
+            style={{ height: "100%" }}
+          />
+        </Panel>
 
-      <div className="min-h-0 flex-1">
-        {error ? (
-          <div className="m-3 rounded-md border border-destructive/40 bg-destructive/10 p-3 font-mono text-sm text-destructive">
-            {error}
-          </div>
-        ) : result ? (
-          <div className="flex h-full flex-col">
-            <div className="border-b px-3 py-1 text-xs text-muted-foreground">
-              {result.rows.length} row{result.rows.length === 1 ? "" : "s"} ·{" "}
-              {result.elapsedMs.toFixed(1)}ms
-              {result.rowsAffected > 0 ? ` · ${result.rowsAffected} affected` : ""}
+        <PanelResizeHandle className="h-px shrink-0 cursor-row-resize bg-border transition-colors hover:bg-primary/50" />
+
+        <Panel minSize={15} className="flex min-h-0 flex-col">
+          {error ? (
+            <div className="m-3 rounded-md border border-destructive/40 bg-destructive/10 p-3 font-mono text-sm text-destructive">
+              {error}
             </div>
-            <div className="min-h-0 flex-1">
-              <DataGrid columns={result.columns} rows={result.rows} />
+          ) : result ? (
+            <div className="flex h-full min-h-0 flex-col">
+              <div className="shrink-0 border-b px-3 py-1 text-xs text-muted-foreground">
+                {result.rows.length} row{result.rows.length === 1 ? "" : "s"} ·{" "}
+                {result.elapsedMs.toFixed(1)}ms
+                {result.rowsAffected > 0 ? ` · ${result.rowsAffected} affected` : ""}
+              </div>
+              <div className="min-h-0 flex-1">
+                <DataGrid columns={result.columns} rows={result.rows} />
+              </div>
             </div>
-          </div>
-        ) : (
-          <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-            Run a query to see results.
-          </div>
-        )}
-      </div>
+          ) : (
+            <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+              Run a query to see results.
+            </div>
+          )}
+        </Panel>
+      </PanelGroup>
     </div>
   );
 }
