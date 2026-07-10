@@ -173,6 +173,16 @@ body {
   border: none !important;
 }
 
+/* SQL editor active line — full width like VS Code */
+.cm-editor.cm-focused .cm-line.cm-activeLine {
+  background: transparent;
+  box-shadow: inset 0 0 0 9999px hsl(var(--muted) / 0.4);
+}
+.cm-editor.cm-focused .cm-activeLineGutter {
+  background: hsl(var(--muted) / 0.4);
+  color: hsl(var(--foreground));
+}
+
 /* SQL statement gutter (see sqlEditor.ts sqlStatementGutter) */
 .cm-sql-stmt-gutter {
   width: 1.65rem;

@@ -33,6 +33,8 @@ import {
   GutterMarker,
   ViewPlugin,
   gutter,
+  highlightActiveLine,
+  highlightActiveLineGutter,
   hoverTooltip,
   keymap,
 } from "@codemirror/view";
@@ -616,6 +618,8 @@ function tabAcceptOrIndent(): Extension {
 export function sqlEditorExtensions(tables: TableInfo[]): Extension[] {
   const schema = sqlSchemaFromTables(tables);
   return [
+    highlightActiveLine(),
+    highlightActiveLineGutter(),
     sql({ dialect: SQLite }),
     autocompletion({
       override: [contextualSqlCompletion(tables, schema)],
