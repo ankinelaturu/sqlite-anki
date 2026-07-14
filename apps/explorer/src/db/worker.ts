@@ -107,11 +107,15 @@ class AnkiWorker implements AnkiWorkerApi {
     const s = await initSqliteAnki(anki ? { anki } : undefined);
     this.sqlite3 = s;
     this.opfsAvailable = "opfs" in s && Boolean(s.opfs);
+    // The real truncation limit, read from the tokenizer that was actually
+    // fetched + loaded (not the registry estimate the dialog showed pre-load).
+    const realMaxTokens = (s as unknown as { anki?: { maxTokens?: number } }).anki?.maxTokens;
     return {
       opfs: this.opfsAvailable,
       version: s.version.libVersion,
       modelId: model.modelId ?? model.model ?? null,
       dim: model.dim ?? null,
+      maxTokens: realMaxTokens ?? null,
     };
   }
 

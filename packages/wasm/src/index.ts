@@ -141,14 +141,37 @@ async function fetchBytes(url: string, what: string): Promise<Uint8Array> {
 }
 
 /**
+ * Reads the tokenizer's configured truncation length (`truncation.max_length`)
+ * from a raw `tokenizer.json`. This is the **actual** token cutoff at runtime —
+ * input longer than this is silently truncated before embedding, since the
+ * embedder leaves the tokenizer's truncation in force (it only disables padding).
+ *
+ * Returns `undefined` when the tokenizer sets no truncation, or when the bytes
+ * don't parse as the expected JSON shape — callers should treat that as "unknown
+ * limit", never as "no limit".
+ */
+export function tokenizerMaxTokens(tokenizerBytes: Uint8Array): number | undefined {
+  try {
+    const json = JSON.parse(new TextDecoder().decode(tokenizerBytes));
+    const n = json?.truncation?.max_length;
+    return typeof n === "number" && n > 0 ? n : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * Fetches (or uses provided) model + tokenizer bytes and loads them into the
  * extension. Called automatically by {@link initSqliteAnki} when an `anki`
  * option is given; exported for advanced/manual use.
+ *
+ * Returns the loaded model's real truncation limit (from the fetched tokenizer),
+ * so callers can show the true cutoff rather than a registry estimate.
  */
 export async function loadAnkiModel(
   sqlite3: Sqlite3Module,
   a: AnkiOption
-): Promise<void> {
+): Promise<{ maxTokens?: number }> {
   if (a.onMismatch === "reindex") {
     throw new Error("anki: onMismatch 'reindex' is not implemented yet");
   }
@@ -196,6 +219,8 @@ export async function loadAnkiModel(
     wasm.dealloc(tp);
     wasm.dealloc(ip);
   }
+
+  return { maxTokens: tokenizerMaxTokens(tokenizerBytes) };
 }
 
 /**
@@ -208,7 +233,12 @@ export default async function initSqliteAnki(
 ): Promise<Sqlite3Module> {
   const sqlite3 = (await sqlite3WasmInit()) as Sqlite3Module;
   if (opts?.anki) {
-    await loadAnkiModel(sqlite3, opts.anki);
+    const loaded = await loadAnkiModel(sqlite3, opts.anki);
+    // Expose the *real* loaded-model info (from the fetched tokenizer) on the
+    // module, so callers can read the true truncation limit after boot.
+    (sqlite3 as unknown as { anki?: { maxTokens?: number } }).anki = {
+      maxTokens: loaded.maxTokens,
+    };
   }
   return sqlite3;
 }

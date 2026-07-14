@@ -22,6 +22,7 @@ import {
   Plus,
   Sparkles,
   Table2,
+  TriangleAlert,
   X,
 } from "lucide-react";
 import { track } from "@vercel/analytics";
@@ -396,6 +397,28 @@ export function SqliteWorkspace({ sidebarSize, onSidebarResize, active }: Worksp
               </div>
             )}
 
+            {/* Truncation warning — exact limit when the registry knows it, generic otherwise. */}
+            {sel && (
+              <div className="mt-3 flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs leading-relaxed text-amber-500">
+                <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                <span>
+                  {sel.maxTokens != null ? (
+                    <>
+                      Very long text (roughly {sel.maxTokens} tokens / ~
+                      {Math.round(sel.maxTokens * 0.75)} words or more) may be truncated before
+                      embedding — only the start is searchable.
+                    </>
+                  ) : (
+                    <>
+                      This model has a fixed token limit; text past it may be truncated before
+                      embedding — only the start is searchable.
+                    </>
+                  )}{" "}
+                  Split long text into shorter rows.
+                </span>
+              </div>
+            )}
+
             <Button
               className={cn("mt-5 w-full", loadingModel && "cursor-progress disabled:opacity-100")}
               onClick={() => void loadModel()}
@@ -436,6 +459,11 @@ export function SqliteWorkspace({ sidebarSize, onSidebarResize, active }: Worksp
     );
   }
 
+  // The token limit shown in the header is the *real* one, read from the
+  // tokenizer that was actually fetched + loaded (see InitResult.maxTokens) —
+  // not the registry estimate the pre-load dialog uses.
+  const headerModelTokens = info.maxTokens;
+
   return (
     <TooltipProvider delayDuration={300}>
       <div className="flex h-full flex-col bg-background">
@@ -448,6 +476,23 @@ export function SqliteWorkspace({ sidebarSize, onSidebarResize, active }: Worksp
           <span className="flex items-center gap-1.5 text-sm text-muted-foreground">
             <Cpu className="h-4 w-4 text-violet-400" /> {info.modelId}
           </span>
+          {headerModelTokens != null && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Badge
+                  variant="outline"
+                  className="gap-1 text-amber-500 border-amber-500/30 bg-amber-500/10"
+                >
+                  <TriangleAlert className="h-3 w-3" />≤{headerModelTokens} tok
+                </Badge>
+              </TooltipTrigger>
+              <TooltipContent className="max-w-xs">
+                This model truncates input at {headerModelTokens} tokens (≈
+                {Math.round(headerModelTokens * 0.75)} words). Longer text is cut before embedding —
+                only the start is searchable. Split long text into shorter rows.
+              </TooltipContent>
+            </Tooltip>
+          )}
           <Button
             variant="ghost"
             size="xs"

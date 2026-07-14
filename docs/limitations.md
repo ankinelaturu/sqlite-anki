@@ -77,6 +77,21 @@ strategy (keep the original table plain, vectorize into a companion) — see [TO
   a property of the loaded model. Switching models needs a fresh module instance.
 - **Panics abort the instance.** The release profile is `panic = "abort"`; a panic on the
   load/inference path aborts the whole wasm instance rather than returning a clean error.
+- **Long text is silently truncated at the model's context window.** The tokenizer truncates each
+  input to `max_length` (128 tokens for `all-MiniLM-L6-v2`, ≈ 90–100 English words); everything past
+  the boundary is dropped before the forward pass, with no error or warning. So a row whose text
+  exceeds ~128 tokens is embedded from its *prefix only* — the tail is invisible to `MATCH`, which
+  can quietly hurt recall on long documents. This is inherent to the model's fixed context window,
+  not a bug (and is distinct from *padding*, which we deliberately disabled — see
+  [our-findings.md](our-findings.md); padding stretched short text up to 128 and was pure waste,
+  whereas truncation caps long text and must stay). Note the two are the same number by coincidence
+  of this model's config, not by design. Workarounds:
+  - **Chunk before insert** — split a long document into passages and store one row per chunk, so
+    nothing is lost and a match points at the exact passage. This is the recommended pattern and a
+    likely piece of future tooling ([TODO.md](TODO.md)).
+  - **Raise `max_length`** (e.g. 128 → 256) for a model whose weights support a longer context —
+    a tunable trade of embedding cost for coverage. Most sentence-transformer models are trained at
+    a specific length, so pushing well past it degrades quality; it is not a free win.
 
 ## See also
 

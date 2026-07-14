@@ -134,6 +134,13 @@ export interface InitResult {
   version: string;
   modelId: string | null;
   dim: number | null;
+  /**
+   * The loaded model's real token-truncation limit, read from the fetched
+   * `tokenizer.json` (`truncation.max_length`) — the actual cutoff, not the
+   * registry estimate. `null` when no model was loaded or the tokenizer sets no
+   * truncation.
+   */
+  maxTokens: number | null;
 }
 
 /** Remote database API exposed from the worker via Comlink. */

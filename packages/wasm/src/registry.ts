@@ -11,7 +11,13 @@ export interface AnkiModelSpec {
   homeUrl?: string;
   /** Embedding dimension — must match the model's output. */
   dim: number;
-  /** Max input sequence length in tokens; longer text is truncated. */
+  /**
+   * Token limit at which the model's shipped tokenizer truncates input
+   * (`truncation.max_length` in its `tokenizer.json`) — often smaller than the
+   * model's nominal `max_seq_length`. Text beyond it is silently dropped before
+   * embedding. This is the *actual* cutoff at runtime, since the embedder leaves
+   * the tokenizer's truncation in force (it only disables padding).
+   */
   maxTokens?: number;
   /** Optional integrity pin for the model bytes. */
   sha256?: string;
@@ -59,21 +65,24 @@ function hf(
  * within one model, so a database is tied to the model that built it (and each
  * fp32/fp16 id is a distinct model for the mismatch guard).
  *
- * `maxTokens` is each model's configured max sequence length (sentence-transformers
- * `max_seq_length`); text beyond it is truncated before embedding.
+ * `maxTokens` is the token limit at which each model's **shipped tokenizer**
+ * truncates input (`truncation.max_length` in its `tokenizer.json`) — commonly
+ * 128, often *smaller* than the model's nominal `max_seq_length`. Text beyond it
+ * is silently dropped before embedding; these values were read from the actual
+ * `Xenova/*` tokenizers, not the model cards.
  */
 export const ANKI_MODEL_REGISTRY: Record<string, AnkiModelSpec> = {
   "all-MiniLM-L6-v2": hf(
     "Xenova/all-MiniLM-L6-v2",
     384,
-    256,
+    128,
     90,
     "Fast, general-purpose baseline. The best default for English semantic search.",
   ),
   "all-MiniLM-L6-v2-fp16": hf(
     "Xenova/all-MiniLM-L6-v2",
     384,
-    256,
+    128,
     45,
     "Half-precision (fp16) baseline — ~half the download, results effectively identical to fp32. Pick this when first-load size matters most.",
     "onnx/model_fp16.onnx",
@@ -81,21 +90,21 @@ export const ANKI_MODEL_REGISTRY: Record<string, AnkiModelSpec> = {
   "all-MiniLM-L12-v2": hf(
     "Xenova/all-MiniLM-L12-v2",
     384,
-    256,
+    128,
     133,
     "Deeper MiniLM — a little more accurate than L6, slightly slower.",
   ),
   "all-mpnet-base-v2": hf(
     "Xenova/all-mpnet-base-v2",
     768,
-    384,
+    128,
     435,
     "Highest general quality (768-dimensional). Best results, largest download.",
   ),
   "multi-qa-MiniLM-L6-cos-v1": hf(
     "Xenova/multi-qa-MiniLM-L6-cos-v1",
     384,
-    512,
+    250,
     90,
     "Tuned for question→passage retrieval and semantic search over documents.",
   ),
@@ -109,7 +118,7 @@ export const ANKI_MODEL_REGISTRY: Record<string, AnkiModelSpec> = {
   "gte-small": hf(
     "Xenova/gte-small",
     384,
-    512,
+    128,
     133,
     "Strong modern general-text embeddings with competitive retrieval quality.",
   ),

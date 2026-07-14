@@ -65,6 +65,13 @@ stable format instead of revised each bump.
   - **Needs no vtab changes** → a **shared-layer** capability (not CLI-only), living beside the CHECK /
     constraint-reconstruction logic; rides the import-logic-home decision (#1). Costs vs in-place: a
     second copy of the text, sync-trigger overhead, and a JOIN — hence retrofit-only.
+- **Long-text chunking.** The model truncates each input at its context window (`max_length`, 128
+  tokens for `all-MiniLM-L6-v2` ≈ 90–100 words) — text past the boundary is silently dropped, so a
+  long document is embedded from its prefix only (see `limitations.md`). Offer a chunking path: split
+  a long document into passages and store one row per chunk (nothing lost; a match points at the exact
+  passage). Open questions: where it lives (app-side helper vs. a vtab-aware split), how chunk rows
+  relate back to the source row, and whether to expose the `max_length` tunable (128 → 256) for
+  longer-context models. Likely rides the shared import layer (#1).
 - **Index frequently-filtered shadow columns.** `filter_candidate_ids` scans the shadow for unindexed
   filter columns; add indexes (auto-heuristic or explicit). **Low ROI.**
 - **DESIGN.md accuracy pass.** `docs/DESIGN.md` is a v1-era spec with stale claims beyond the HNSW
