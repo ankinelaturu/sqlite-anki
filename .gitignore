@@ -32,3 +32,6 @@ vendor/emsdk/
 .claude/settings.local.json
 .claude/worktrees/
 
+# Personal drafts (not part of the codebase)
+linkedin-posts.md
+
