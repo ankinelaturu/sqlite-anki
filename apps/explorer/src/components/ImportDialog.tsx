@@ -1,5 +1,15 @@
 import { useMemo, useState } from "react";
-import { Cpu, Database, Eye, FileUp, Sparkles, Table2 } from "lucide-react";
+import {
+  CheckCircle2,
+  Cpu,
+  Database,
+  Eye,
+  FileUp,
+  Loader2,
+  Sparkles,
+  Table2,
+  TriangleAlert,
+} from "lucide-react";
 import type { ImportAnalysis, ImportColumn, ImportDrops, ImportPlan } from "@/db";
 import {
   Dialog,
@@ -24,8 +34,20 @@ interface ImportDialogProps {
   modelId: string | null;
   /** Existing database paths (e.g. `/foo.db`) to warn on name collisions. */
   existingDbs: string[];
+  /**
+   * Import lifecycle: `"idle"` shows the picker + Rebuild button, `"importing"`
+   * shows progress (dialog can't be dismissed), `"done"` keeps the dialog open
+   * with an enabled Close button. Defaults to `"idle"`.
+   */
+  status?: "idle" | "importing" | "done";
+  /** Embed progress while `status === "importing"`. */
+  progress?: { done: number; total: number } | null;
+  /** Import error to surface in the dialog (shown while `status === "idle"`). */
+  error?: string | null;
   onCancel: () => void;
   onConfirm: (targetPath: string, plan: ImportPlan) => void;
+  /** Dismiss the completed dialog (and open the new DB). Called in `"done"`. */
+  onClose?: () => void;
 }
 
 /** `{ tableName: Set<pickedColumn> }` */
@@ -53,8 +75,12 @@ export function ImportDialog({
   defaultName,
   modelId,
   existingDbs,
+  status = "idle",
+  progress,
+  error,
   onCancel,
   onConfirm,
+  onClose,
 }: ImportDialogProps) {
   const [name, setName] = useState(defaultName);
   const [notes, setNotes] = useState("");
@@ -103,6 +129,8 @@ export function ImportDialog({
     [analysis, picks],
   );
   const totalPicks = Object.values(picks).reduce((n, s) => n + s.size, 0);
+  // Once the import starts, the plan is fixed — freeze the picker and inputs.
+  const locked = status !== "idle";
 
   const submit = () => {
     if (!safeName || collision || !renamesResolved) return;
@@ -128,8 +156,15 @@ export function ImportDialog({
     onConfirm(targetPath, plan);
   };
 
+  // Escape / overlay-click / X: blocked mid-import; opens the new DB when done.
+  const onRequestClose = () => {
+    if (status === "importing") return;
+    if (status === "done") onClose?.();
+    else onCancel();
+  };
+
   return (
-    <Dialog open onOpenChange={(o) => !o && onCancel()}>
+    <Dialog open onOpenChange={(o) => !o && onRequestClose()}>
       <DialogContent className="flex max-h-[85vh] max-w-2xl flex-col gap-0 p-0">
         <DialogHeader className="shrink-0 border-b px-5 py-4">
           <DialogTitle className="flex items-center gap-2">
@@ -191,7 +226,7 @@ export function ImportDialog({
                         >
                           <Checkbox
                             checked={on}
-                            disabled={!canVector}
+                            disabled={!canVector || locked}
                             onCheckedChange={() => toggle(t.name, c.name)}
                           />
                           <span className="truncate">{c.name}</span>
@@ -225,6 +260,7 @@ export function ImportDialog({
                               value={renames[t.name]?.[c.name] ?? ""}
                               onChange={(e) => setRename(t.name, c.name, e.target.value)}
                               placeholder="new name"
+                              disabled={locked}
                               className={cn(
                                 "h-7 flex-1",
                                 !isValidRename(t.name, c.name, t.columns) && "border-destructive",
@@ -261,6 +297,7 @@ export function ImportDialog({
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   placeholder="my-database"
+                  disabled={locked}
                 />
                 <span className="text-sm text-muted-foreground">.db</span>
               </div>
@@ -282,26 +319,67 @@ export function ImportDialog({
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
               rows={2}
+              disabled={locked}
               placeholder="What is this database for?"
-              className="flex min-h-[3.5rem] w-full resize-y rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              className="flex min-h-[3.5rem] w-full resize-y rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
             />
           </div>
         </div>
 
         <DialogFooter className="shrink-0 items-center border-t px-5 py-3">
-          <span className="mr-auto text-xs text-muted-foreground">
-            {totalPicks === 0
-              ? "No columns picked — the file will be copied unchanged."
-              : `Will embed ~${embedRows.toLocaleString()} row${embedRows === 1 ? "" : "s"} across ${
-                  Object.values(picks).filter((s) => s.size > 0).length
-                } table${Object.values(picks).filter((s) => s.size > 0).length === 1 ? "" : "s"}.`}
-          </span>
-          <Button variant="ghost" onClick={onCancel}>
-            Cancel
-          </Button>
-          <Button onClick={submit} disabled={!safeName || collision || !renamesResolved}>
-            {totalPicks === 0 ? "Import" : "Rebuild & Vectorize"}
-          </Button>
+          {status === "done" ? (
+            <>
+              <span className="mr-auto flex items-center gap-1.5 text-xs text-emerald-500">
+                <CheckCircle2 className="h-4 w-4 shrink-0" />
+                {totalPicks === 0
+                  ? `Imported — “${safeName}.db” is ready.`
+                  : `Embedded ~${embedRows.toLocaleString()} row${
+                      embedRows === 1 ? "" : "s"
+                    } — “${safeName}.db” is ready.`}
+              </span>
+              <Button onClick={() => onClose?.()}>Close</Button>
+            </>
+          ) : status === "importing" ? (
+            <>
+              <span className="mr-auto flex items-center gap-1.5 text-xs text-muted-foreground">
+                Embedding rows… {(progress?.done ?? 0).toLocaleString()} /{" "}
+                {(progress?.total ?? 0).toLocaleString()}
+              </span>
+              <Button disabled>
+                <Loader2 className="h-4 w-4 animate-spin" /> Importing…
+              </Button>
+            </>
+          ) : (
+            <>
+              <span
+                className={cn(
+                  "mr-auto flex items-center gap-1.5 text-xs",
+                  error ? "text-destructive" : "text-muted-foreground",
+                )}
+              >
+                {error ? (
+                  <>
+                    <TriangleAlert className="h-3.5 w-3.5 shrink-0" />
+                    {error}
+                  </>
+                ) : totalPicks === 0 ? (
+                  "No columns picked — the file will be copied unchanged."
+                ) : (
+                  `Will embed ~${embedRows.toLocaleString()} row${
+                    embedRows === 1 ? "" : "s"
+                  } across ${Object.values(picks).filter((s) => s.size > 0).length} table${
+                    Object.values(picks).filter((s) => s.size > 0).length === 1 ? "" : "s"
+                  }.`
+                )}
+              </span>
+              <Button variant="ghost" onClick={onCancel}>
+                Cancel
+              </Button>
+              <Button onClick={submit} disabled={!safeName || collision || !renamesResolved}>
+                {totalPicks === 0 ? "Import" : "Rebuild & Vectorize"}
+              </Button>
+            </>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>

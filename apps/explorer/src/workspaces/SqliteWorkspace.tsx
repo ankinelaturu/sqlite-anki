@@ -11,6 +11,7 @@ import {
   Binary,
   Boxes,
   BrainCircuit,
+  CheckCircle2,
   Cpu,
   Database,
   DatabaseZap,
@@ -128,6 +129,9 @@ export function SqliteWorkspace({ sidebarSize, onSidebarResize, active }: Worksp
   const [confirmDemo, setConfirmDemo] = useState(false);
   const [populating, setPopulating] = useState<{ done: number; total: number } | null>(null);
   const [buildKind, setBuildKind] = useState<"demo" | "import">("demo");
+  // When the demo build finishes we keep its progress dialog open in a "ready"
+  // state (enabled Close button) instead of auto-closing and opening the DB.
+  const [demoDone, setDemoDone] = useState(false);
   const [elapsedMs, setElapsedMs] = useState(0);
   const populateStart = useRef(0);
   const populateActive = populating !== null;
@@ -138,18 +142,23 @@ export function SqliteWorkspace({ sidebarSize, onSidebarResize, active }: Worksp
     analysis: ImportAnalysis;
     defaultName: string;
   } | null>(null);
+  // The import runs *inside* the ImportDialog now: "importing" shows progress,
+  // "done" keeps the dialog open with an enabled Close button (which opens the
+  // new DB) instead of auto-closing. `importTarget` is the path to open on close.
+  const [importStatus, setImportStatus] = useState<"idle" | "importing" | "done">("idle");
+  const [importTarget, setImportTarget] = useState<string | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Tick an elapsed timer on the main thread while building the demo, so there's
   // visible motion even between the (slow) per-row progress updates.
   useEffect(() => {
-    if (!populateActive) return;
+    if (!populateActive || demoDone) return;
     populateStart.current = performance.now();
     setElapsedMs(0);
     const iv = setInterval(() => setElapsedMs(performance.now() - populateStart.current), 200);
     return () => clearInterval(iv);
-  }, [populateActive]);
+  }, [populateActive, demoDone]);
 
   const onOp = useCallback((label: string, r: QueryResult) => {
     setOp({ label, elapsedMs: r.elapsedMs, metrics: r.metrics });
@@ -211,6 +220,7 @@ export function SqliteWorkspace({ sidebarSize, onSidebarResize, active }: Worksp
   const startPopulate = async () => {
     setConfirmDemo(false);
     setError(null);
+    setDemoDone(false);
     setBuildKind("demo");
     setPopulating({ done: 0, total: 0 });
     try {
@@ -218,14 +228,22 @@ export function SqliteWorkspace({ sidebarSize, onSidebarResize, active }: Worksp
         DEMO_PATH,
         proxy((done, total) => setPopulating({ done, total })),
       );
-      setPopulating(null);
       setDatabases(await api.listDatabases());
-      await openDb(DEMO_PATH);
+      // Keep the progress dialog open in its "ready" state — the user closes it
+      // (via the Close button), which is when we actually open the DB.
+      setDemoDone(true);
       track("demo_populated");
     } catch (e) {
       setPopulating(null);
       setError(e instanceof Error ? e.message : String(e));
     }
+  };
+
+  // Dismiss the completed demo-build dialog and open the demo database.
+  const onDemoClose = () => {
+    setPopulating(null);
+    setDemoDone(false);
+    void openDb(DEMO_PATH);
   };
 
   // ---- import & vectorize ----
@@ -254,8 +272,10 @@ export function SqliteWorkspace({ sidebarSize, onSidebarResize, active }: Worksp
   const onImportConfirm = async (targetPath: string, plan: ImportPlan) => {
     const st = importState;
     if (!st) return;
-    setImportState(null);
+    // Keep the dialog mounted through the import — it shows progress, then a
+    // "done" state with a Close button. Don't clear importState here.
     setError(null);
+    setImportStatus("importing");
     setBuildKind("import");
     setPopulating({ done: 0, total: 0 });
     try {
@@ -265,14 +285,25 @@ export function SqliteWorkspace({ sidebarSize, onSidebarResize, active }: Worksp
         plan,
         proxy((done, total) => setPopulating({ done, total })),
       );
-      setPopulating(null);
       setDatabases(await api.listDatabases());
-      await openDb(targetPath);
+      setImportTarget(targetPath);
+      setImportStatus("done");
       track("db_imported");
     } catch (err) {
       setPopulating(null);
+      setImportStatus("idle");
       setError(err instanceof Error ? err.message : String(err));
     }
+  };
+
+  // Dismiss the (completed) import dialog and open the freshly-built database.
+  const onImportClose = () => {
+    const target = importTarget;
+    setImportState(null);
+    setImportStatus("idle");
+    setImportTarget(null);
+    setPopulating(null);
+    if (target) void openDb(target);
   };
 
   const openTable = (table: TableInfo) => {
@@ -746,25 +777,29 @@ export function SqliteWorkspace({ sidebarSize, onSidebarResize, active }: Worksp
         </DialogContent>
       </Dialog>
 
-      {/* demo build progress */}
-      <Dialog open={!!populating}>
-        <DialogContent className="max-w-md">
+      {/* demo build progress (import progress is shown inside the ImportDialog) */}
+      <Dialog
+        open={!!populating && buildKind === "demo"}
+        onOpenChange={(o) => {
+          // Not dismissible while building; closing the "ready" state opens the DB.
+          if (!o && demoDone) onDemoClose();
+        }}
+      >
+        <DialogContent className="max-w-md" hideClose={!demoDone}>
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              {buildKind === "import" ? (
-                <FileUp className="h-5 w-5 text-primary" />
+              {demoDone ? (
+                <CheckCircle2 className="h-5 w-5 text-emerald-500" />
               ) : (
                 <DatabaseZap className="h-5 w-5 text-primary" />
               )}
-              {buildKind === "import"
-                ? "Rebuilding your database…"
-                : "Building demo database…"}
+              {demoDone ? "Demo database ready" : "Building demo database…"}
             </DialogTitle>
           </DialogHeader>
           <p className="text-sm text-muted-foreground">
-            {buildKind === "import"
-              ? "Copying your tables and embedding the columns you picked. This runs entirely in your browser — feel free to wait."
-              : "Generating a CRM + knowledge base and embedding vector rows. This runs entirely in your browser — feel free to wait; it only happens once."}
+            {demoDone
+              ? "Generated a CRM + knowledge base with embedded vector rows — all in your browser. Close to open it."
+              : "Generating a CRM + knowledge base and embedding vector rows. This runs entirely in your browser — please wait; it only happens once."}
           </p>
           <div className="mt-1">
             <div className="h-2 w-full overflow-hidden rounded-full bg-secondary">
@@ -772,17 +807,19 @@ export function SqliteWorkspace({ sidebarSize, onSidebarResize, active }: Worksp
                 className="anki-progress h-full rounded-full transition-[width] duration-200"
                 style={{
                   width: `${
-                    populating && populating.total
-                      ? Math.round((populating.done / populating.total) * 100)
-                      : 4
+                    demoDone
+                      ? 100
+                      : populating && populating.total
+                        ? Math.round((populating.done / populating.total) * 100)
+                        : 4
                   }%`,
                 }}
               />
             </div>
             <div className="mt-1.5 flex justify-between text-xs tabular-nums text-muted-foreground">
               <span>
-                {(elapsedMs / 1000).toFixed(1)}s elapsed
-                {populating && populating.done > 4
+                {(elapsedMs / 1000).toFixed(1)}s {demoDone ? "total" : "elapsed"}
+                {!demoDone && populating && populating.done > 4
                   ? ` · ~${Math.max(
                       0,
                       Math.round(
@@ -798,6 +835,11 @@ export function SqliteWorkspace({ sidebarSize, onSidebarResize, active }: Worksp
               </span>
             </div>
           </div>
+          {demoDone && (
+            <DialogFooter className="mt-3">
+              <Button onClick={onDemoClose}>Close</Button>
+            </DialogFooter>
+          )}
         </DialogContent>
       </Dialog>
 
@@ -808,8 +850,12 @@ export function SqliteWorkspace({ sidebarSize, onSidebarResize, active }: Worksp
           defaultName={importState.defaultName}
           modelId={info.modelId}
           existingDbs={databases}
+          status={importStatus}
+          progress={populating}
+          error={error}
           onCancel={() => setImportState(null)}
           onConfirm={(targetPath, plan) => void onImportConfirm(targetPath, plan)}
+          onClose={onImportClose}
         />
       )}
 
