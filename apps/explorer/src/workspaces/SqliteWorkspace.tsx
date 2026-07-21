@@ -38,6 +38,7 @@ import {
   type QueryResult,
   type TableInfo,
 } from "@/db";
+import { setRuntimeInfo } from "@/lib/runtime";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -173,6 +174,8 @@ export function SqliteWorkspace({ sidebarSize, onSidebarResize, active }: Worksp
       const reg = ANKI_MODEL_REGISTRY[modelChoice];
       const res = await api.init({ model: modelChoice, modelId: modelChoice, dim: reg?.dim });
       setInfo(res);
+      setRuntimeInfo(res); // share the runtime facts with the Architecture panel
+
       setDatabases(await api.listDatabases());
       track("model_loaded", { model: modelChoice });
     } catch (e) {
@@ -531,6 +534,7 @@ export function SqliteWorkspace({ sidebarSize, onSidebarResize, active }: Worksp
             onClick={() => {
               resetDbWorker();
               setInfo(null);
+              setRuntimeInfo(null); // worker is gone — clear the Architecture panel's live facts
               setActiveDb(null);
               setTables([]);
               setTabsByDb({});

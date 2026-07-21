@@ -4,6 +4,22 @@ Notable changes to sqlite-anki, newest first. Pre-1.0 and unversioned, so entrie
 grouped by date rather than release. Curated from git history — see linked docs for the
 full rationale and design. Add new entries at the top.
 
+## 2026-07-21
+
+### Explorer
+- **Architecture panel.** A third activity (`Layers` icon, alongside SQLite and OPFS) documenting how
+  the extension is put together: the five-layer stack (explorer → JS glue → `sqlite3.wasm` → staticlib
+  → `anki-core`) with each boundary labelled by what crosses it, a semantic query's lifecycle through
+  `xBestIndex` / `match_query` / embedder / `xFilter` / `xColumn`, the shadow-table storage layout, the
+  runtime model-loading path, and the SQL surface. The reference content is static and renders with no
+  database open; the runtime facts (version, model id, dim, truncation limit, OPFS) and the
+  per-operation costs bind to the live module via a new `lib/runtime.ts` store once the SQLite
+  workspace has loaded one. Lifecycle costs are per-call averages derived from `anki_metrics()`, and
+  the cold-start callout reports the session's real rebuild count — surfacing that `search_ms`
+  *includes* `index_rebuild_ms`, which otherwise makes a cold first `MATCH` look like a pathologically
+  slow search. Themed entirely through the shadcn tokens (the app themes via `[data-theme]`, so
+  `dark:` variants are inert), with `primary` reserved to mark the model/embedding path.
+
 ## 2026-07-10
 
 ### Performance

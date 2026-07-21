@@ -2,6 +2,7 @@ import {
   Contrast,
   Database,
   HardDrive,
+  Layers,
   Moon,
   ScrollText,
   Snowflake,
@@ -12,11 +13,12 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { setTheme, useTheme, type ThemeKey } from "@/lib/theme";
 import { cn } from "@/lib/utils";
 
-export type Activity = "sqlite" | "opfs";
+export type Activity = "sqlite" | "opfs" | "architecture";
 
 const ACTIVITIES: { id: Activity; label: string; Icon: LucideIcon }[] = [
   { id: "sqlite", label: "SQLite", Icon: Database },
   { id: "opfs", label: "OPFS", Icon: HardDrive },
+  { id: "architecture", label: "Architecture", Icon: Layers },
 ];
 
 const THEMES: { key: ThemeKey; label: string; Icon: LucideIcon }[] = [
