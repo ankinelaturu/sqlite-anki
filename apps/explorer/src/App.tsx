@@ -3,6 +3,7 @@ import { ActivityBar, type Activity } from "@/components/ActivityBar";
 import { SqliteWorkspace } from "@/workspaces/SqliteWorkspace";
 import { OpfsWorkspace } from "@/workspaces/OpfsWorkspace";
 import { ArchitectureWorkspace } from "@/workspaces/ArchitectureWorkspace";
+import { ArchitectureMapWorkspace } from "@/workspaces/ArchitectureMapWorkspace";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
@@ -59,6 +60,13 @@ export function App() {
             sidebarSize={sidebarSize}
             onSidebarResize={onSidebarResize}
             active={activity === "architecture"}
+          />
+        </div>
+        <div className={cn("h-full min-w-0 flex-1", activity !== "map" && "hidden")}>
+          <ArchitectureMapWorkspace
+            sidebarSize={sidebarSize}
+            onSidebarResize={onSidebarResize}
+            active={activity === "map"}
           />
         </div>
       </div>
